@@ -70,10 +70,11 @@ trust-aware-healthcare-project/
 - [x] Verify virtual environment and test ONNX model inference.
 
 ### Phase 2: Sensor Simulators & Bedside Brain
-- [ ] Write `sensor_agents.py` to stream realistic vitals (ECG waveform, oxygen level 96-100%, heart rate 65-92 bpm) every 0.4 seconds.
-- [ ] Add broker failover so sensors reconnect automatically if a network disconnects.
-- [ ] Write `jetson_edge_brain.py` to run the ECG AI model and trigger bedside alarms in under 5ms.
-- [ ] Add sanity checks (e.g. if ECG is normal but Heart Rate says -40, flag a sensor conflict).
+- [x] Write `sensor_agents.py` to stream realistic vitals (ECG waveform, oxygen level 96-100%, heart rate 65-92 bpm) every 0.4 seconds.
+- [x] Add broker failover so sensors reconnect automatically if a network disconnects.
+- [x] Write `jetson_edge_brain.py` to run the ECG AI model and trigger bedside alarms in under 5ms.
+- [x] Add sanity checks (e.g. if ECG is normal but Heart Rate says -40, flag a sensor conflict).
+- [x] Validate end-to-end telemetry streaming and chaos fault-injection under live Mosquitto broker.
 
 ### Phase 3: Nurse Dashboard & Trust Scoring
 - [ ] Write the mathematical Trust Engine (grades sensors from 0.0 to 1.0 based on delay, jitter, dropped packets, and crazy values).
@@ -102,13 +103,13 @@ trust-aware-healthcare-project/
 | **Dependencies** | `requirements.txt` | **Completed** | Standard Python libraries + ONNX tooling |
 | **Chaos Config** | `chaos.json` | **Completed** | Baseline fault-injection settings |
 | **ECG AI Model** | `make_model.py` | **Completed** | Self-contained 1D-CNN ONNX anomaly detector |
-| **Sensor Agents** | `sensor_agents.py` | *Next (Phase 2)* | Sends synthetic patient vitals |
-| **Bedside Brain** | `jetson_edge_brain.py` | *Pending* | Bedside AI inference & emergency alarms |
-| **Nurse Dashboard** | `dashboard.py` | *Pending* | Split-screen live UI & Trust Engine |
+| **Sensor Agents** | `sensor_agents.py` | **Completed** | Multi-agent telemetry streamer with failover |
+| **Bedside Brain** | `jetson_edge_brain.py` | **Completed** | Edge AI inference (<0.5 ms) & local alarms |
+| **Nurse Dashboard** | `dashboard.py` | *Next (Phase 3)* | Split-screen live UI & Trust Engine |
 | **Benchmarks** | `run_benchmarks.py` | *Pending* | Creates test charts and performance CSVs |
 | **Start Script** | `start_local_demo.sh` | *Pending* | One-click demo launcher |
 
-**Current Status:** ~40% completed (Phase 1 finished; ready for Phase 2).
+**Current Status:** ~65% completed (Phase 1 & Phase 2 finished; ready for Phase 3).
 
 ---
 
