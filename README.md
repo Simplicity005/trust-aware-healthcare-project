@@ -64,9 +64,10 @@ trust-aware-healthcare-project/
 ### Phase 1: Basic Setup & AI Model
 - [x] Create project structure and clean repository.
 - [x] Write plain-English documentation and roadmap.
-- [ ] Create `requirements.txt` with standard libraries (`paho-mqtt`, `streamlit`, `torch`, `onnxruntime`, etc.).
-- [ ] Create `chaos.json` to store lag and error injection settings.
-- [ ] Write `make_model.py` to train and export the simple ECG heart check AI model (`ecg_anomaly.onnx`).
+- [x] Create `requirements.txt` with standard libraries (`paho-mqtt`, `streamlit`, `torch`, `onnxruntime`, etc.).
+- [x] Create `chaos.json` to store lag and error injection settings.
+- [x] Write `make_model.py` to train and export the simple ECG heart check AI model (`ecg_anomaly.onnx`).
+- [x] Verify virtual environment and test ONNX model inference.
 
 ### Phase 2: Sensor Simulators & Bedside Brain
 - [ ] Write `sensor_agents.py` to stream realistic vitals (ECG waveform, oxygen level 96-100%, heart rate 65-92 bpm) every 0.4 seconds.
@@ -98,16 +99,16 @@ trust-aware-healthcare-project/
 | Component | File | Status | What it does |
 | :--- | :--- | :---: | :--- |
 | **Project Setup** | `.gitignore`, `README.md` | **Completed** | Clean repo and simplified guide |
-| **Dependencies** | `requirements.txt` | *Next* | Standard Python libraries |
-| **Chaos Config** | `chaos.json` | *Pending* | Settings for simulating network lag |
-| **ECG AI Model** | `make_model.py` | *Pending* | Generates the ECG anomaly detector |
-| **Sensor Agents** | `sensor_agents.py` | *Pending* | Sends synthetic patient vitals |
+| **Dependencies** | `requirements.txt` | **Completed** | Standard Python libraries + ONNX tooling |
+| **Chaos Config** | `chaos.json` | **Completed** | Baseline fault-injection settings |
+| **ECG AI Model** | `make_model.py` | **Completed** | Self-contained 1D-CNN ONNX anomaly detector |
+| **Sensor Agents** | `sensor_agents.py` | *Next (Phase 2)* | Sends synthetic patient vitals |
 | **Bedside Brain** | `jetson_edge_brain.py` | *Pending* | Bedside AI inference & emergency alarms |
 | **Nurse Dashboard** | `dashboard.py` | *Pending* | Split-screen live UI & Trust Engine |
 | **Benchmarks** | `run_benchmarks.py` | *Pending* | Creates test charts and performance CSVs |
 | **Start Script** | `start_local_demo.sh` | *Pending* | One-click demo launcher |
 
-**Current Status:** ~15% completed (Foundation and documentation done; ready to code Phase 1).
+**Current Status:** ~40% completed (Phase 1 finished; ready for Phase 2).
 
 ---
 
