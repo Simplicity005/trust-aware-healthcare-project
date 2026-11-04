@@ -38,3 +38,4 @@ sudo systemctl restart mosquitto
 ./start_nurse_station.sh
 ```
 Open `http://localhost:8501` in your browser. As each Jetson Orin starts (`./start_bedside.sh --patient-id Bed_1 --broker <LAPTOP_IP>`), its patient bed streams live into the dashboard!
+

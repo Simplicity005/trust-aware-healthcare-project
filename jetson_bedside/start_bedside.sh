@@ -80,3 +80,4 @@ else
     sleep 0.5
     python3 jetson_edge_brain.py --patient-id "$PATIENT_ID" --broker "$BROKER"
 fi
+

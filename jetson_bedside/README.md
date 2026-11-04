@@ -44,3 +44,4 @@ Assume the Nurse Station Laptop's IP address on Wi-Fi/LAN is `<LAPTOP_IP>`:
 ```bash
 ./start_bedside.sh --patients Bed_1 Bed_2 Bed_3 --broker <LAPTOP_IP>
 ```
+
