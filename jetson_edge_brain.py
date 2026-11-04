@@ -95,9 +95,10 @@ class BedsideEdgeBrain:
 
     def _on_connect(self, client, userdata, flags, rc, properties=None):
         print(f"[EDGE BRAIN] Connected to MQTT broker at {self.broker}:{self.port} (rc={rc})")
-        # Subscribe to sensor telemetry and central control offload topic
+        # Subscribe to sensor telemetry, central control offload, and remote chaos injection
         self.client.subscribe("hospital/sensors/#")
         self.client.subscribe("hospital/control/offload")
+        self.client.subscribe("hospital/control/chaos")
 
     def _on_message(self, client, userdata, msg):
         try:
@@ -107,6 +108,13 @@ class BedsideEdgeBrain:
             if topic == "hospital/control/offload":
                 with self.lock:
                     self.force_offload = bool(payload.get("offload", False))
+                return
+
+            if topic == "hospital/control/chaos":
+                tmp_path = CHAOS_FILE + ".tmp.brain"
+                with open(tmp_path, "w") as f:
+                    json.dump(payload, f, indent=2)
+                os.replace(tmp_path, CHAOS_FILE)
                 return
 
             if topic.startswith("hospital/sensors/"):
@@ -192,7 +200,12 @@ class BedsideEdgeBrain:
     def _trigger_bedside_alert(self, prob, inf_ms, variance):
         """Dispatches immediate emergency alert over appropriate network route."""
         chaos = read_chaos_config()
-        use_relay_b = chaos.get("Orin_Link", {}).get("use_relay_b", False) or self.force_offload
+        orin_cfg = chaos.get("Orin_Link", {})
+        use_relay_b = (
+            bool(orin_cfg.get("use_relay_b", False))
+            or bool(orin_cfg.get("overload_gpu", False))
+            or self.force_offload
+        )
 
         alert_topic = "hospital/alerts/relay_b" if use_relay_b else "hospital/alerts/primary"
 
@@ -218,7 +231,13 @@ class BedsideEdgeBrain:
         while not self.stop_event.is_set():
             time.sleep(0.40)
             chaos = read_chaos_config()
-            use_relay_b = chaos.get("Orin_Link", {}).get("use_relay_b", False) or self.force_offload
+            orin_cfg = chaos.get("Orin_Link", {})
+            overload_gpu = bool(orin_cfg.get("overload_gpu", False))
+            use_relay_b = (
+                bool(orin_cfg.get("use_relay_b", False))
+                or overload_gpu
+                or self.force_offload
+            )
             routing_path = "relay_b" if use_relay_b else "primary"
 
             with self.lock:
@@ -229,11 +248,13 @@ class BedsideEdgeBrain:
                     "arrhythmia_prob": round(self.arrhythmia_prob, 4),
                     "local_bed_alarm": self.local_bed_alarm,
                     "sensor_conflict": self.sensor_conflict,
+                    "overload_gpu": overload_gpu,
                     "latest_vitals": {
                         "hr": self.latest_hr,
                         "spo2": self.latest_spo2,
                         "ecg_variance": round(self.latest_ecg_var, 4)
                     },
+                    "ecg_wave": self.latest_ecg_wave,
                     "routing_path": routing_path
                 }
 

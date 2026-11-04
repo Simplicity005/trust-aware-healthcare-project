@@ -77,21 +77,21 @@ trust-aware-healthcare-project/
 - [x] Validate end-to-end telemetry streaming and chaos fault-injection under live Mosquitto broker.
 
 ### Phase 3: Nurse Dashboard & Trust Scoring
-- [ ] Write the mathematical Trust Engine (grades sensors from 0.0 to 1.0 based on delay, jitter, dropped packets, and crazy values).
-- [ ] Build the interactive Streamlit dashboard (`dashboard.py`):
+- [x] Write the mathematical Trust Engine (grades sensors from 0.0 to 1.0 based on delay, jitter, dropped packets, and crazy values).
+- [x] Build the interactive Streamlit dashboard (`dashboard.py`):
   - **Left side:** Bedside view (live ECG line chart, AI speed, alarm banner).
   - **Right side:** Nurse station view (sensor trust cards, status badges, routing mode).
   - **Sidebar:** Sliders to add delay, packet loss, or fake data in real time.
 
 ### Phase 4: Automated Testing & Graphs
-- [ ] Write `run_benchmarks.py` to automatically run tests and save clean PNG charts:
+- [x] Write `run_benchmarks.py` to automatically run tests and save clean PNG charts:
   1. AI inference speed comparison (CPU vs GPU).
   2. Alert delay with normal routing vs smart adaptive rerouting.
   3. Time taken to isolate a broken sensor (reaches quarantine in < 1.5 seconds).
 
 ### Phase 5: One-Click Startup & Hardware Mode
-- [ ] Create `start_local_demo.sh` to start Mosquitto, run the model generator, start background sensors, and open the dashboard in one command.
-- [ ] Document how to run on actual hardware (NVIDIA Jetson Orin + Laptop) over local Wi-Fi/LAN if hardware is available.
+- [x] Create `start_local_demo.sh` to start Mosquitto, run the model generator, start background sensors, and open the dashboard in one command.
+- [x] Document how to run on actual hardware (NVIDIA Jetson Orin + Laptop) over local Wi-Fi/LAN if hardware is available.
 
 ---
 
@@ -105,11 +105,11 @@ trust-aware-healthcare-project/
 | **ECG AI Model** | `make_model.py` | **Completed** | Self-contained 1D-CNN ONNX anomaly detector |
 | **Sensor Agents** | `sensor_agents.py` | **Completed** | Multi-agent telemetry streamer with failover |
 | **Bedside Brain** | `jetson_edge_brain.py` | **Completed** | Edge AI inference (<0.5 ms) & local alarms |
-| **Nurse Dashboard** | `dashboard.py` | *Next (Phase 3)* | Split-screen live UI & Trust Engine |
-| **Benchmarks** | `run_benchmarks.py` | *Pending* | Creates test charts and performance CSVs |
-| **Start Script** | `start_local_demo.sh` | *Pending* | One-click demo launcher |
+| **Nurse Dashboard** | `dashboard.py` | **Completed** | Split-screen live UI & Mathematical Trust Engine |
+| **Benchmarks** | `run_benchmarks.py` | **Completed** | Generates test charts (`.png`) and performance CSVs |
+| **Start Script** | `start_local_demo.sh` | **Completed** | One-click demo launcher with automatic cleanup |
 
-**Current Status:** ~65% completed (Phase 1 & Phase 2 finished; ready for Phase 3).
+**Current Status:** 100% completed (All 5 Phases finished and verified).
 
 ---
 
@@ -125,15 +125,15 @@ sudo systemctl start mosquitto
 ```
 
 ### 2. Launch the Demo
-Once the code files are created:
+Run the one-command launcher:
 ```bash
 chmod +x start_local_demo.sh
 ./start_local_demo.sh
 ```
 This automatically:
-- Creates a Python virtual environment and installs requirements.
-- Generates the ECG AI model.
-- Starts the sensors and bedside brain in the background.
+- Creates/activates the Python virtual environment and installs requirements.
+- Generates the ECG AI model (`ecg_anomaly.onnx`).
+- Starts the sensors (`sensor_agents.py`) and bedside brain (`jetson_edge_brain.py`) in the background.
 - Opens the live dashboard in your browser at `http://localhost:8501`.
 
 ### 3. Generate Benchmark Reports
@@ -141,4 +141,29 @@ This automatically:
 source venv/bin/activate
 python3 run_benchmarks.py
 ```
-Test graphs and CSV logs will be saved directly into `benchmarks/`.
+Test graphs (`1_inference_speed.png`, `2_alert_latency_routing.png`, `3_trust_isolation_time.png`) and CSV logs will be saved directly into `benchmarks/`.
+
+---
+
+## Two-Device Hardware Mode (Bedside Jetson Orin + Nurse Station Laptop)
+
+In a real hospital ICU, the **patient sensors and the Edge AI brain sit together at the patient's bed (on the Jetson Orin)**, while the **Nurse Station Dashboard sits on the nurse's table (your Laptop)** connected over hospital Wi-Fi/LAN:
+
+* **On the Bedside Jetson Orin (`<ORIN_IP>`):** Runs `sensor_agents.py` (patient's bedside sensors) + `jetson_edge_brain.py` (bedside GPU AI monitor) + `ecg_anomaly.onnx`.
+* **On the Nurse's Table Laptop (`<LAPTOP_IP>`):** Runs **only** `mosquitto` (the MQTT broker) and `dashboard.py` (the Nurse Station UI & Trust Engine). Any Chaos Slider changes on the Laptop are broadcast over MQTT (`hospital/control/chaos`) to the Jetson automatically.
+
+### 1. On the Bedside Jetson Orin — Copy Bedside Files & Start Sensors + Edge Brain
+```bash
+scp ecg_anomaly.onnx jetson_edge_brain.py sensor_agents.py chaos.json user@<ORIN_IP>:~/
+ssh user@<ORIN_IP>
+
+# Start the bedside patient sensors and bedside GPU brain (pointing to the Laptop's broker)
+python3 sensor_agents.py --primary-broker <LAPTOP_IP> &
+python3 jetson_edge_brain.py --broker <LAPTOP_IP>
+```
+
+### 2. On the Nurse Station Laptop — Start the Nurse Dashboard Only
+```bash
+source venv/bin/activate
+MQTT_BROKER=<LAPTOP_IP> streamlit run dashboard.py
+```

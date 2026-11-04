@@ -74,6 +74,8 @@ class SensorAgentThread(threading.Thread):
                 self.client = mqtt.Client(
                     client_id=f"{self.agent_id}_{os.getpid()}_{random.randint(1000, 9999)}"
                 )
+            self.client.on_connect = self._on_connect
+            self.client.on_message = self._on_message
             self.client.connect(self.current_broker, self.port, keepalive=60)
             self.client.loop_start()
             print(f"[{self.agent_id}] Connected to broker {self.current_broker}:{self.port}")
@@ -81,6 +83,21 @@ class SensorAgentThread(threading.Thread):
         except Exception as e:
             print(f"[{self.agent_id}] Failed to connect to {self.current_broker}: {e}")
             return False
+
+    def _on_connect(self, client, userdata, flags, rc, properties=None):
+        # Subscribe to remote chaos control from Nurse Station Laptop
+        client.subscribe("hospital/control/chaos")
+
+    def _on_message(self, client, userdata, msg):
+        if msg.topic == "hospital/control/chaos":
+            try:
+                new_chaos = json.loads(msg.payload.decode("utf-8"))
+                tmp_path = CHAOS_FILE + f".tmp.{self.agent_id}"
+                with open(tmp_path, "w") as f:
+                    json.dump(new_chaos, f, indent=2)
+                os.replace(tmp_path, CHAOS_FILE)
+            except Exception:
+                pass
 
     def _failover_broker(self):
         """Switches broker between primary and backup on failure."""
@@ -120,6 +137,9 @@ class SensorAgentThread(threading.Thread):
                 time.sleep(0.4)
                 continue
 
+            # Record packet generation timestamp prior to network transit delay & jitter
+            sent_ts = time.time()
+
             # Simulated network latency and jitter (0 to 30% of delay)
             delay_sec = max(0.001, delay_ms / 1000.0)
             jitter_sec = random.uniform(0.0, 0.3 * delay_sec)
@@ -146,7 +166,7 @@ class SensorAgentThread(threading.Thread):
             payload = {
                 "agent_id": self.agent_id,
                 "seq": self.seq,
-                "sent_ts": time.time(),
+                "sent_ts": sent_ts,
                 "value": value,
                 "ecg_wave": ecg_wave
             }
