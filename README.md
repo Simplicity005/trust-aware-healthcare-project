@@ -1,169 +1,140 @@
-# Trust-Aware Smart Healthcare Monitoring System
+# Trust-Aware Multi-Patient Smart Healthcare Monitoring System
 
-A smart, fault-tolerant patient monitoring system for hospital ICUs. 
+A fault-tolerant, multi-patient ICU monitoring system powered by **Bedside Edge AI (NVIDIA Jetson Orin)** and a **Central Nurse Station Trust & Routing Engine**.
 
-It monitors patient vitals (ECG, Heart Rate, Oxygen), spots emergencies with on-device AI, and automatically detects when network lag or glitchy sensors are sending bad data—rerouting alerts or muting broken sensors so nurses don't get flooded with false alarms.
-
----
-
-## What Does This Project Do? (The Big Picture)
-
-In a real hospital, medical sensors stream live data over the network to central nurse stations. But networks can lag, Wi-Fi can drop packets, and sensors can fail or glitch (sending crazy numbers like a heart rate of -40 or oxygen of 15%).
-
-This project solves that with **three core ideas**:
-
-1. **Instant Bedside Alarms (Edge AI):** A small bedside computer (like an NVIDIA Jetson Orin or simply a laptop CPU) runs a lightweight AI model directly at the patient's bed. If the ECG heart wave looks dangerous (arrhythmia), the bedside alarm sounds in under 5 milliseconds—without waiting for slow cloud or Wi-Fi servers.
-2. **Smart Trust Engine (0% to 100% Score):** The system continuously grades each sensor. If a sensor starts lagging, dropping packets, or reporting physically impossible vitals, its **Trust Score** drops.
-3. **Automatic Rerouting & Quarantine:**
-   - **Trusted (Green / ≥ 70%):** Everything is healthy; primary fast path is active.
-   - **Offloaded (Yellow / 45%–70% or High Lag):** Wi-Fi is congested; the system automatically reroutes alerts through a backup network path.
-   - **Isolated (Red / < 45%):** Sensor is glitching or sending garbage data; it gets quarantined so it cannot trigger false clinical alarms.
-4. **Live Nurse Dashboard & Chaos Slider:** A clean split-screen web dashboard showing patient vitals in real time, with interactive sliders that let you inject network lag or fake data on the fly to see how the system reacts.
+It monitors multiple patient beds (`Bed_1`, `Bed_2`, `Bed_3`, ...) simultaneously, detects cardiac arrhythmias in **`< 5 ms`** directly at each patient's bed, grades every sensor's **Trust Score ($0.0 - 1.0$)** in real time, reroutes alerts over backup paths when hospital Wi-Fi lags, and automatically quarantines broken or spoofed sensors so nurses never get flooded with false alarms.
 
 ---
 
-## How It Works (Simple Architecture)
+## Modular Folder Structure (Separated by Hardware Role)
 
-```
-[ Patient Sensors ] ───▶ Sends vitals every 0.4s (ECG Wave, Oxygen, Heart Rate)
-        │
-        ▼
-[ Bedside AI Brain ] ──▶ Runs instant AI check on heart rhythm (<5 ms)
-        │                Checks if readings make sense together
-        ▼
-[ Nurse Dashboard ] ───▶ Calculates live Trust Scores (0 to 100%)
-                         Shows live ECG graph, alerts, and active routes
-                         Includes Chaos Sliders to test network failures
-```
-
----
-
-## Target Project Files
-
-Everything is kept clean and simple in the project folder:
+The repository is cleanly divided into **two self-contained folders** based on where the code physically runs in the hospital:
 
 ```text
 trust-aware-healthcare-project/
-├── README.md               # This guide
-├── .gitignore              # Files to ignore (venv, temp files)
-├── requirements.txt        # Python libraries needed
-├── chaos.json              # Live settings for injecting lag / fake data
-├── make_model.py           # Creates the lightweight ECG AI model (.onnx)
-├── sensor_agents.py        # Simulates the 3 patient sensors
-├── jetson_edge_brain.py    # The bedside AI computer
-├── dashboard.py            # The nurse station live dashboard
-├── run_benchmarks.py       # Generates charts and benchmark reports
-├── start_local_demo.sh     # One-click script to start the whole demo
-└── benchmarks/             # Folder where test graphs get saved
+├── README.md                        # Master project guide
+├── start_local_demo.sh              # One-click local simulator (runs 3 patient beds + nurse dashboard on 1 laptop)
+│
+├── jetson_bedside/                  # 🛏️ CODE THAT RUNS ON EACH BEDSIDE JETSON ORIN (PATIENT'S BED)
+│   ├── README.md                    # Jetson setup & multi-bed launch instructions
+│   ├── requirements.txt             # Lightweight Edge AI & MQTT dependencies
+│   ├── chaos.json                   # Bedside fault config (auto-synced via MQTT from Nurse Station)
+│   ├── make_model.py                # Generates the 1D-CNN ECG model (ecg_anomaly.onnx)
+│   ├── sensor_agents.py             # Patient bedside sensors (Agent_ECG, Agent_SpO2, Agent_HR)
+│   ├── jetson_edge_brain.py         # Bedside GPU AI (<5 ms arrhythmia inference & local alarm)
+│   └── start_bedside.sh             # One-command Jetson launcher (--patient-id Bed_1 --broker <LAPTOP_IP>)
+│
+└── nurse_station/                   # 🖥️ CODE THAT RUNS ON THE NURSE'S TABLE LAPTOP
+    ├── README.md                    # Nurse laptop setup & LAN broker instructions
+    ├── requirements.txt             # Dashboard, Trust Engine & benchmark dependencies
+    ├── chaos.json                   # Per-patient fault injection settings
+    ├── make_model.py                # Generates ecg_anomaly.onnx for Gateway CPU fallback
+    ├── dashboard.py                 # Multi-Patient Nurse Station Dashboard & Trust Engine
+    ├── run_benchmarks.py            # Automated benchmark & plot generator
+    ├── start_nurse_station.sh       # One-command Nurse Station launcher
+    └── benchmarks/                  # Generated 200-DPI PNG charts & CSV reports
 ```
 
 ---
 
-## Development Roadmap (5 Simple Phases)
+## How It Works (Multi-Jetson ICU Architecture)
 
-### Phase 1: Basic Setup & AI Model
-- [x] Create project structure and clean repository.
-- [x] Write plain-English documentation and roadmap.
-- [x] Create `requirements.txt` with standard libraries (`paho-mqtt`, `streamlit`, `torch`, `onnxruntime`, etc.).
-- [x] Create `chaos.json` to store lag and error injection settings.
-- [x] Write `make_model.py` to train and export the simple ECG heart check AI model (`ecg_anomaly.onnx`).
-- [x] Verify virtual environment and test ONNX model inference.
-
-### Phase 2: Sensor Simulators & Bedside Brain
-- [x] Write `sensor_agents.py` to stream realistic vitals (ECG waveform, oxygen level 96-100%, heart rate 65-92 bpm) every 0.4 seconds.
-- [x] Add broker failover so sensors reconnect automatically if a network disconnects.
-- [x] Write `jetson_edge_brain.py` to run the ECG AI model and trigger bedside alarms in under 5ms.
-- [x] Add sanity checks (e.g. if ECG is normal but Heart Rate says -40, flag a sensor conflict).
-- [x] Validate end-to-end telemetry streaming and chaos fault-injection under live Mosquitto broker.
-
-### Phase 3: Nurse Dashboard & Trust Scoring
-- [x] Write the mathematical Trust Engine (grades sensors from 0.0 to 1.0 based on delay, jitter, dropped packets, and crazy values).
-- [x] Build the interactive Streamlit dashboard (`dashboard.py`):
-  - **Left side:** Bedside view (live ECG line chart, AI speed, alarm banner).
-  - **Right side:** Nurse station view (sensor trust cards, status badges, routing mode).
-  - **Sidebar:** Sliders to add delay, packet loss, or fake data in real time.
-
-### Phase 4: Automated Testing & Graphs
-- [x] Write `run_benchmarks.py` to automatically run tests and save clean PNG charts:
-  1. AI inference speed comparison (CPU vs GPU).
-  2. Alert delay with normal routing vs smart adaptive rerouting.
-  3. Time taken to isolate a broken sensor (reaches quarantine in < 1.5 seconds).
-
-### Phase 5: One-Click Startup & Hardware Mode
-- [x] Create `start_local_demo.sh` to start Mosquitto, run the model generator, start background sensors, and open the dashboard in one command.
-- [x] Document how to run on actual hardware (NVIDIA Jetson Orin + Laptop) over local Wi-Fi/LAN if hardware is available.
-
----
-
-## Current Progress
-
-| Component | File | Status | What it does |
-| :--- | :--- | :---: | :--- |
-| **Project Setup** | `.gitignore`, `README.md` | **Completed** | Clean repo and simplified guide |
-| **Dependencies** | `requirements.txt` | **Completed** | Standard Python libraries + ONNX tooling |
-| **Chaos Config** | `chaos.json` | **Completed** | Baseline fault-injection settings |
-| **ECG AI Model** | `make_model.py` | **Completed** | Self-contained 1D-CNN ONNX anomaly detector |
-| **Sensor Agents** | `sensor_agents.py` | **Completed** | Multi-agent telemetry streamer with failover |
-| **Bedside Brain** | `jetson_edge_brain.py` | **Completed** | Edge AI inference (<0.5 ms) & local alarms |
-| **Nurse Dashboard** | `dashboard.py` | **Completed** | Split-screen live UI & Mathematical Trust Engine |
-| **Benchmarks** | `run_benchmarks.py` | **Completed** | Generates test charts (`.png`) and performance CSVs |
-| **Start Script** | `start_local_demo.sh` | **Completed** | One-click demo launcher with automatic cleanup |
-
-**Current Status:** 100% completed (All 5 Phases finished and verified).
-
----
-
-## Quick-Start (How to Run Everything Locally)
-
-You can run 100% of this project on a standard laptop (no GPU or NVIDIA hardware required):
-
-### 1. Install Mosquitto (The message broker)
-Mosquitto is a tiny, standard program that lets the sensors talk to the bedside brain and dashboard:
-```bash
-sudo apt update && sudo apt install -y mosquitto mosquitto-clients
-sudo systemctl start mosquitto
+```text
+┌─────────────────────────────────────────────────────────┐
+│ BEDSIDE JETSON #1 (jetson_bedside/ — Patient Bed_1)     │
+│  [sensor_agents.py] ──▶ [jetson_edge_brain.py (<5ms)]   │
+└───────────────────────────┬─────────────────────────────┘
+                            │
+┌───────────────────────────┼─────────────────────────────┐
+│ BEDSIDE JETSON #2 (jetson_bedside/ — Patient Bed_2)     │
+│  [sensor_agents.py] ──▶ [jetson_edge_brain.py (<5ms)]   │
+└───────────────────────────┼─────────────────────────────┘
+                            │  Hospital Wi-Fi / MQTT (hospital/<Bed_ID>/...)
+                            ▼
+┌─────────────────────────────────────────────────────────┐
+│ CENTRAL NURSE STATION LAPTOP (nurse_station/)           │
+│  • Multi-Patient Ward Overview (Bed_1, Bed_2, Bed_3...) │
+│  • Mathematical Trust Engine T_i(t) in [0.0, 1.0]       │
+│  • Dynamic Offloading (Gateway CPU + Relay Path B)      │
+│  • Byzantine Sensor Quarantine (< 1.5s isolation)       │
+│  • Per-Patient Live Chaos Sliders (synced over MQTT)    │
+└─────────────────────────────────────────────────────────┘
 ```
 
-### 2. Launch the Demo
-Run the one-command launcher:
+---
+
+## How to Download Only the Folder You Need from GitHub
+
+You do **not** need to clone the entire repository onto every device. Anyone can download **only** the `jetson_bedside` folder onto a Jetson Orin, or **only** the `nurse_station` folder onto the Nurse's Laptop:
+
+### Option 1: One-Line Terminal Download (Fastest — No Git Required)
+
+* **On a Bedside Jetson Orin (downloads ONLY `jetson_bedside/`):**
+  ```bash
+  curl -L https://github.com/Simplicity005/trust-aware-healthcare-project/archive/refs/heads/main.tar.gz | tar -xz --strip-components=1 trust-aware-healthcare-project-main/jetson_bedside
+  cd jetson_bedside && chmod +x start_bedside.sh
+  ```
+
+* **On the Nurse's Table Laptop (downloads ONLY `nurse_station/`):**
+  ```bash
+  curl -L https://github.com/Simplicity005/trust-aware-healthcare-project/archive/refs/heads/main.tar.gz | tar -xz --strip-components=1 trust-aware-healthcare-project-main/nurse_station
+  cd nurse_station && chmod +x start_nurse_station.sh
+  ```
+
+### Option 2: Download via Browser on GitHub
+* **Bedside Jetson Code:** Navigate to [`jetson_bedside/`](https://github.com/Simplicity005/trust-aware-healthcare-project/tree/main/jetson_bedside) on GitHub (or paste that URL into [download-directory.github.io](https://download-directory.github.io/)).
+* **Nurse Station Code:** Navigate to [`nurse_station/`](https://github.com/Simplicity005/trust-aware-healthcare-project/tree/main/nurse_station) on GitHub (or paste that URL into [download-directory.github.io](https://download-directory.github.io/)).
+
+---
+
+## Mode A: Run the Full Multi-Patient Demo Locally on 1 Laptop
+
+You can simulate **3 Bedside Jetsons (`Bed_1`, `Bed_2`, `Bed_3`) + the Central Nurse Station** on a single laptop:
+
 ```bash
 chmod +x start_local_demo.sh
 ./start_local_demo.sh
 ```
-This automatically:
-- Creates/activates the Python virtual environment and installs requirements.
-- Generates the ECG AI model (`ecg_anomaly.onnx`).
-- Starts the sensors (`sensor_agents.py`) and bedside brain (`jetson_edge_brain.py`) in the background.
-- Opens the live dashboard in your browser at `http://localhost:8501`.
+Open `http://localhost:8501` in your browser:
+- View all 3 patient beds (`Bed_1`, `Bed_2`, `Bed_3`) side by side in the **ICU Ward Multi-Patient Overview**.
+- Click any patient bed to inspect its live 250 Hz ECG wave and sensor trust cards.
+- Use the **Sidebar Chaos Engine** to pick a target patient bed (e.g. `Bed_2`) and inject lag, packet drops, or spoofed vitals while `Bed_1` and `Bed_3` remain healthy!
 
-### 3. Generate Benchmark Reports
+### Generate Benchmark Charts & CSV Logs
 ```bash
 source venv/bin/activate
-python3 run_benchmarks.py
+python3 nurse_station/run_benchmarks.py
 ```
-Test graphs (`1_inference_speed.png`, `2_alert_latency_routing.png`, `3_trust_isolation_time.png`) and CSV logs will be saved directly into `benchmarks/`.
+Charts and CSVs are saved to `nurse_station/benchmarks/`.
 
 ---
 
-## Two-Device Hardware Mode (Bedside Jetson Orin + Nurse Station Laptop)
+## Mode B: Multi-Device Hardware Deployment (Multiple Jetsons + Nurse Laptop)
 
-In a real hospital ICU, the **patient sensors and the Edge AI brain sit together at the patient's bed (on the Jetson Orin)**, while the **Nurse Station Dashboard sits on the nurse's table (your Laptop)** connected over hospital Wi-Fi/LAN:
+Assume your Nurse Station Laptop's Wi-Fi/LAN IP is `<LAPTOP_IP>`:
 
-* **On the Bedside Jetson Orin (`<ORIN_IP>`):** Runs `sensor_agents.py` (patient's bedside sensors) + `jetson_edge_brain.py` (bedside GPU AI monitor) + `ecg_anomaly.onnx`.
-* **On the Nurse's Table Laptop (`<LAPTOP_IP>`):** Runs **only** `mosquitto` (the MQTT broker) and `dashboard.py` (the Nurse Station UI & Trust Engine). Any Chaos Slider changes on the Laptop are broadcast over MQTT (`hospital/control/chaos`) to the Jetson automatically.
-
-### 1. On the Bedside Jetson Orin — Copy Bedside Files & Start Sensors + Edge Brain
+### 1. On the Nurse's Table Laptop (`nurse_station/`):
+Enable LAN connections on Mosquitto once, then start the Nurse Station:
 ```bash
-scp ecg_anomaly.onnx jetson_edge_brain.py sensor_agents.py chaos.json user@<ORIN_IP>:~/
-ssh user@<ORIN_IP>
+sudo bash -c 'cat > /etc/mosquitto/conf.d/lan.conf << EOF
+listener 1883 0.0.0.0
+allow_anonymous true
+EOF'
+sudo systemctl restart mosquitto
 
-# Start the bedside patient sensors and bedside GPU brain (pointing to the Laptop's broker)
-python3 sensor_agents.py --primary-broker <LAPTOP_IP> &
-python3 jetson_edge_brain.py --broker <LAPTOP_IP>
+cd nurse_station
+./start_nurse_station.sh
 ```
 
-### 2. On the Nurse Station Laptop — Start the Nurse Dashboard Only
+### 2. On Each Bedside NVIDIA Jetson Orin (`jetson_bedside/`):
+Run `start_bedside.sh` with a unique `--patient-id` on each Jetson:
 ```bash
-source venv/bin/activate
-MQTT_BROKER=<LAPTOP_IP> streamlit run dashboard.py
+# On Jetson Orin #1 (Patient Bed 1):
+cd jetson_bedside
+./start_bedside.sh --patient-id Bed_1 --broker <LAPTOP_IP>
+
+# On Jetson Orin #2 (Patient Bed 2):
+cd jetson_bedside
+./start_bedside.sh --patient-id Bed_2 --broker <LAPTOP_IP>
 ```
+Each Jetson automatically streams its patient's sensors and `<5 ms` GPU AI summaries into the Nurse Station Dashboard, and receives per-bed Chaos Slider commands over MQTT!

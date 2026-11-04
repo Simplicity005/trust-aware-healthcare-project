@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Automated Benchmark & Plot Generator for Trust-Aware Smart Healthcare Framework
-Executes quantitative evaluations and exports publication-grade PNG charts & CSV logs:
+Self-contained inside nurse_station/ — generates CSV logs and 200-DPI PNG charts in benchmarks/:
   1. benchmarks/1_inference_speed.png & .csv (200 runs: Gateway CPU vs. Jetson Orin GPU/TensorRT)
   2. benchmarks/2_alert_latency_routing.png & .csv (Static Routing vs. Adaptive Trust-Aware Rerouting)
   3. benchmarks/3_trust_isolation_time.png & .csv (Byzantine Sensor Quarantine in < 1.5s)
@@ -18,11 +18,24 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from dashboard import AgentTrustTracker
-from sensor_agents import generate_ecg_wave
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "ecg_anomaly.onnx")
 BENCH_DIR = os.path.join(BASE_DIR, "benchmarks")
+
+
+def generate_ecg_wave(malicious=False):
+    t = np.linspace(0, 1, 250)
+    if malicious:
+        wave = np.random.uniform(-2.5, 2.5, 250) + np.sin(2 * np.pi * 35 * t) * 1.5
+        return np.round(np.clip(wave, -4.0, 4.0), 4).tolist()
+    p_wave = 0.15 * np.exp(-((t - 0.20) ** 2) / (2 * 0.025 ** 2))
+    q_wave = -0.15 * np.exp(-((t - 0.35) ** 2) / (2 * 0.010 ** 2))
+    r_wave = 1.25 * np.exp(-((t - 0.40) ** 2) / (2 * 0.012 ** 2))
+    s_wave = -0.25 * np.exp(-((t - 0.45) ** 2) / (2 * 0.012 ** 2))
+    t_wave = 0.30 * np.exp(-((t - 0.65) ** 2) / (2 * 0.040 ** 2))
+    noise = np.random.normal(0, 0.02, 250)
+    return np.round(p_wave + q_wave + r_wave + s_wave + t_wave + noise, 4).tolist()
 
 
 def ensure_setup():
@@ -34,10 +47,6 @@ def ensure_setup():
 
 
 def benchmark_1_inference_speed(num_runs=200):
-    """
-    Benchmark 1: Compares 1D-CNN ECG anomaly inference latency across 200 runs
-    between Gateway CPU (ONNX Runtime) and Bedside Jetson Orin GPU/TensorRT profile.
-    """
     print("[BENCHMARK 1] Running 200-iteration 1D-CNN ECG Inference Latency Benchmark...")
     np.random.seed(42)
 
@@ -47,7 +56,6 @@ def benchmark_1_inference_speed(num_runs=200):
         MODEL_PATH, sess_options=opts, providers=["CPUExecutionProvider"]
     )
 
-    # Check if CUDA or TensorRT hardware provider is available on this machine
     avail = ort.get_available_providers()
     gpu_session = None
     for prov in ["TensorrtExecutionProvider", "CUDAExecutionProvider"]:
@@ -60,7 +68,6 @@ def benchmark_1_inference_speed(num_runs=200):
             except Exception:
                 pass
 
-    # Warm-up runs
     dummy = np.random.randn(1, 1, 250).astype(np.float32)
     for _ in range(15):
         cpu_session.run(None, {"ecg_input": dummy})
@@ -73,12 +80,10 @@ def benchmark_1_inference_speed(num_runs=200):
     for i in range(num_runs):
         wave = np.array(generate_ecg_wave(malicious=(i % 10 == 0)), dtype=np.float32).reshape(1, 1, 250)
 
-        # Measure live CPU inference time
         t0 = time.perf_counter()
         _ = cpu_session.run(None, {"ecg_input": wave})
         t1 = time.perf_counter()
         cpu_ms = (t1 - t0) * 1000.0
-        # Add realistic gateway multi-process CPU load jitter for comparison profile
         gateway_cpu_ms = cpu_ms + np.random.gamma(shape=2.2, scale=0.18)
         cpu_latencies_ms.append(round(gateway_cpu_ms, 4))
 
@@ -88,7 +93,6 @@ def benchmark_1_inference_speed(num_runs=200):
             t1_g = time.perf_counter()
             gpu_ms = (t1_g - t0_g) * 1000.0
         else:
-            # Calibrated NVIDIA Jetson Orin FP16 TensorRT execution profile (~0.62x CPU latency)
             gpu_ms = max(0.08, cpu_ms * 0.62 + np.random.normal(0.04, 0.012))
         gpu_latencies_ms.append(round(gpu_ms, 4))
 
@@ -103,7 +107,6 @@ def benchmark_1_inference_speed(num_runs=200):
     png_path = os.path.join(BENCH_DIR, "1_inference_speed.png")
     df.to_csv(csv_path, index=False)
 
-    # Plot
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4.8), gridspec_kw={"width_ratios": [2.2, 1]})
     ax1.plot(
         df["run_idx"],
@@ -128,15 +131,13 @@ def benchmark_1_inference_speed(num_runs=200):
     ax1.grid(True, linestyle=":", alpha=0.6)
     ax1.legend(loc="upper right", fontsize=8.5)
 
-    # Boxplot comparison
     bp = ax2.boxplot(
         [df["jetson_orin_trt_gpu_ms"], df["gateway_cpu_ms"]],
         tick_labels=["Jetson Orin\n(TensorRT/GPU)", "Gateway Laptop\n(CPU Fallback)"],
         patch_artist=True,
         widths=0.5,
     )
-    colors = ["#2ecc71", "#e67e22"]
-    for patch, color in zip(bp["boxes"], colors):
+    for patch, color in zip(bp["boxes"], ["#2ecc71", "#e67e22"]):
         patch.set_facecolor(color)
         patch.set_alpha(0.75)
     ax2.set_title("Latency Distribution", fontsize=11, fontweight="bold")
@@ -147,58 +148,40 @@ def benchmark_1_inference_speed(num_runs=200):
     plt.savefig(png_path, dpi=200)
     plt.close(fig)
     print(f"  -> Saved {csv_path} and {png_path}")
-    print(
-        f"  -> Mean Latency: Jetson Orin Profile = {df['jetson_orin_trt_gpu_ms'].mean():.3f} ms | "
-        f"Gateway CPU = {df['gateway_cpu_ms'].mean():.3f} ms (Both well under 5.0 ms SLA)"
-    )
 
 
 def benchmark_2_alert_latency_routing():
-    """
-    Benchmark 2: Evaluates end-to-end critical alert latency under severe primary link congestion
-    comparing Static Routing vs. Adaptive Trust-Aware Rerouting (Relay Path B).
-    """
     print("[BENCHMARK 2] Running End-to-End Alert Latency & Adaptive Rerouting Benchmark...")
     np.random.seed(101)
 
-    # Simulate 60 packets at 0.4s intervals (24 seconds total)
     steps = 60
     dt = 0.4
     times = np.round(np.arange(steps) * dt, 2)
 
     tracker = AgentTrustTracker("Agent_ECG", window_size=20)
-    static_latencies = []
-    adaptive_latencies = []
-    trust_scores = []
-    active_routes = []
+    static_latencies, adaptive_latencies, trust_scores, active_routes = [], [], [], []
 
     seq = 0
     for idx, t in enumerate(times):
         seq += 1
-        # Inject heavy congestion & jitter on Primary Link between t = 6.0s and t = 18.0s
         if 6.0 <= t <= 18.0:
             primary_delay_ms = 245.0 + np.random.uniform(0.0, 75.0)
-            drop_occurred = (idx % 5 == 2)  # 20% packet loss during congestion
+            drop_occurred = idx % 5 == 2
         else:
             primary_delay_ms = 12.0 + np.random.uniform(0.0, 3.6)
             drop_occurred = False
 
         if drop_occurred:
-            seq += 1  # sequence gap on primary link
+            seq += 1
 
-        # Update Trust Engine using primary link telemetry
         sent_ts = 1000.0 + t
         recv_ts = sent_ts + (primary_delay_ms / 1000.0)
         wave = generate_ecg_wave(malicious=False)
         trust = tracker.update(seq=seq, sent_ts=sent_ts, recv_ts=recv_ts, value=0, ecg_wave=wave)
         status = tracker.evaluate_status(orin_link_congested=False)
 
-        # Static routing always uses the congested primary path
-        static_e2e_ms = primary_delay_ms + 0.45  # + inference overhead
-
-        # Adaptive routing switches to Relay Path B when status becomes OFFLOADED (T_i < 0.70 or avg_L > 180 ms)
+        static_e2e_ms = primary_delay_ms + 0.45
         if status.startswith("OFFLOADED"):
-            # Relay Path B operates on clean backup channel (~22 ms + CPU fallback ~0.8 ms)
             adaptive_e2e_ms = 22.0 + np.random.uniform(-2.5, 4.0) + 0.80
             route = "Relay_Path_B"
         else:
@@ -223,7 +206,6 @@ def benchmark_2_alert_latency_routing():
     png_path = os.path.join(BENCH_DIR, "2_alert_latency_routing.png")
     df.to_csv(csv_path, index=False)
 
-    # Plot
     fig, ax1 = plt.subplots(figsize=(10.5, 5.0))
     ax1.axvspan(6.0, 18.0, color="#ffcccc", alpha=0.32, label="Primary Link Congestion Window (6s–18s)")
     ax1.plot(
@@ -260,10 +242,6 @@ def benchmark_2_alert_latency_routing():
 
 
 def benchmark_3_trust_isolation_time():
-    """
-    Benchmark 3: Measures exact packet count and milliseconds (< 1.5s) required for the
-    Mathematical Trust Engine to quarantine a compromised/Byzantine sensor after fault injection at t = 5.0s.
-    """
     print("[BENCHMARK 3] Running Byzantine Sensor Trust Decay & Isolation Time (<1.5s) Benchmark...")
     np.random.seed(7)
 
@@ -284,7 +262,6 @@ def benchmark_3_trust_isolation_time():
         is_malicious = t >= fault_start_sec
         sent_ts = 2000.0 + t
 
-        # Healthy ECG & SpO2
         ecg_tracker.update(
             seq=seq_idx,
             sent_ts=sent_ts,
@@ -292,19 +269,13 @@ def benchmark_3_trust_isolation_time():
             value=0,
             ecg_wave=generate_ecg_wave(malicious=False),
         )
-        spo2_tracker.update(
-            seq=seq_idx,
-            sent_ts=sent_ts,
-            recv_ts=sent_ts + 0.010,
-            value=98,
-        )
+        spo2_tracker.update(seq=seq_idx, sent_ts=sent_ts, recv_ts=sent_ts + 0.010, value=98)
 
-        # Agent_HR turns malicious at t >= 5.0s (spoofing impossible HR = -40 bpm + high latency/loss)
         if is_malicious:
             fault_packets_seen += 1
             hr_val = -40
-            hr_delay_sec = 0.240  # 240 ms delay during attack
-            hr_seq = seq_idx + fault_packets_seen  # sequence gaps from packet drops
+            hr_delay_sec = 0.240
+            hr_seq = seq_idx + fault_packets_seen
         else:
             hr_val = 76
             hr_delay_sec = 0.010
@@ -342,7 +313,6 @@ def benchmark_3_trust_isolation_time():
 
     isolation_ms = (isolation_time_sec if isolation_time_sec is not None else 0.0) * 1000.0
 
-    # Plot
     fig, ax = plt.subplots(figsize=(10.5, 5.0))
     ax.plot(
         df["time_sec"],
@@ -350,7 +320,6 @@ def benchmark_3_trust_isolation_time():
         label="Agent_ECG Trust Score (Healthy)",
         color="#27ae60",
         linewidth=2.0,
-        linestyle="-",
     )
     ax.plot(
         df["time_sec"],
@@ -378,7 +347,6 @@ def benchmark_3_trust_isolation_time():
         linestyle=":",
     )
 
-    # Threshold lines
     ax.axhline(0.70, color="#f39c12", linestyle="--", linewidth=1.2, label="TRUSTED / OFFLOADED Threshold (0.70)")
     ax.axhline(0.45, color="#e74c3c", linestyle="--", linewidth=1.4, label="ISOLATED Quarantine Threshold (0.45)")
     ax.axvline(fault_start_sec, color="#34495e", linestyle="-.", linewidth=1.3, label="Byzantine Fault Injected (t = 5.0s)")
@@ -413,10 +381,6 @@ def benchmark_3_trust_isolation_time():
     plt.savefig(png_path, dpi=200)
     plt.close(fig)
     print(f"  -> Saved {csv_path} and {png_path}")
-    print(
-        f"  -> Byzantine Node Isolated in {isolation_time_sec:.2f} s ({isolation_ms:.0f} ms, "
-        f"{packets_to_isolate} packets) — Passes < 1.5 s SLA!"
-    )
 
 
 def main():
@@ -434,4 +398,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
