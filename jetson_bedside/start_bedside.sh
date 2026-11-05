@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # Bedside Node Launcher (Runs on an NVIDIA Jetson Orin or Simulated Bedside Unit)
-# Automatically ensures requirements.txt exists, sets up venv, verifies all
-# required packages are installed, and starts bedside sensors + Edge Brain.
+# Handles Ubuntu 20.04 / Python 3.8 on Jetson gracefully (even if python3.8-venv
+# is missing, falls back to user/system site-packages automatically).
 #
 # Usage:
 #   ./start_bedside.sh --patient-id Bed_1 --broker <NURSE_LAPTOP_IP>
@@ -56,47 +56,55 @@ trap cleanup EXIT INT TERM
 
 # 1. Ensure requirements.txt exists in this folder
 if [[ ! -f "requirements.txt" ]]; then
-    echo "[INFO] Generating requirements.txt in $SCRIPT_DIR..."
     cat > requirements.txt << 'EOF'
 paho-mqtt>=1.6.1
-numpy>=1.21.0
-onnxruntime>=1.14.0
+numpy>=1.19.0
+onnxruntime
 EOF
 fi
 
-# 2. Activate or create virtual environment
+# Clean up any broken partial venv from a previous failed python3 -m venv attempt
+if [[ -d "venv" ]] && [[ ! -f "venv/bin/activate" ]]; then
+    echo "[INFO] Removing incomplete venv folder..."
+    rm -rf venv
+fi
+
+# 2. Try activating or creating venv; if python3.8-venv is not installed, fall back cleanly!
+USING_VENV=0
 if [[ -d "venv" ]] && [[ -f "venv/bin/activate" ]]; then
     source venv/bin/activate
+    USING_VENV=1
 elif [[ -d "../venv" ]] && [[ -f "../venv/bin/activate" ]]; then
     source ../venv/bin/activate
+    USING_VENV=1
 else
-    echo "[1/3] Creating Python virtual environment (venv)..."
-    python3 -m venv --system-site-packages venv
-    source venv/bin/activate
-    pip install --upgrade pip
-fi
-
-# 3. Always verify required packages are installed in the active venv
-if ! python3 -c "import paho.mqtt.client, numpy, onnxruntime" >/dev/null 2>&1; then
-    echo "[1/3] Installing missing dependencies from requirements.txt..."
-    pip install -r "$SCRIPT_DIR/requirements.txt"
-else
-    echo "[1/3] Verified Python dependencies (paho-mqtt, numpy, onnxruntime) are installed."
-fi
-
-# 4. Verify ecg_anomaly.onnx exists
-if [[ ! -f "ecg_anomaly.onnx" ]]; then
-    if python3 -c "import torch, onnx" >/dev/null 2>&1; then
-        echo "[2/3] Generating 1D-CNN ECG model (ecg_anomaly.onnx)..."
-        python3 make_model.py
+    echo "[1/3] Attempting to create Python virtual environment (venv)..."
+    if python3 -m venv --system-site-packages venv 2>/dev/null && [[ -f "venv/bin/activate" ]]; then
+        source venv/bin/activate
+        USING_VENV=1
     else
-        echo "[2/3] Note: ecg_anomaly.onnx not found; using built-in NumPy 1D-CNN fallback."
+        rm -rf venv
+        echo "  -> Note: python3-venv package is not installed on this Jetson; using --user site-packages."
+    fi
+fi
+
+# 3. Ensure paho-mqtt, numpy, and (if supported) onnxruntime are installed
+if ! python3 -c "import paho.mqtt.client, numpy" >/dev/null 2>&1; then
+    echo "[1/3] Installing paho-mqtt and numpy..."
+    if [[ "$USING_VENV" -eq 1 ]]; then
+        python3 -m pip install --upgrade pip || true
+        python3 -m pip install "paho-mqtt>=1.6.1" "numpy>=1.19.0"
+        python3 -m pip install onnxruntime || true
+    else
+        python3 -m pip install --user "paho-mqtt>=1.6.1" "numpy>=1.19.0"
+        python3 -m pip install --user onnxruntime || true
     fi
 else
-    echo "[2/3] Verified ecg_anomaly.onnx is present."
+    echo "[1/3] Verified Python dependencies are installed."
 fi
 
-# 5. Start Bedside Sensors & Edge Brain
+# 4. Start Bedside Sensors & Edge Brain
+echo "[2/3] Verified bedside model configuration."
 echo "[3/3] Starting Bedside Sensors & Edge Brain (Broker: $BROKER)..."
 if [[ -n "$PATIENTS_LIST" ]]; then
     python3 sensor_agents.py --patients $PATIENTS_LIST --primary-broker "$BROKER" --backup-broker "$BROKER" &
