@@ -2,10 +2,11 @@
 """
 Multi-Patient Central Nurse Station, Mathematical Trust Engine & Live Dashboard
 (Runs on the Nurse's Table Gateway Laptop)
-Monitors multiple bedside Jetson Orin units (e.g. Bed_1, Bed_2, Bed_3) simultaneously,
-computes real-time composite Trust Scores T_i(t) in [0.0, 1.0] per sensor per bed,
-manages dynamic compute offloading & alert rerouting, quarantines Byzantine sensors,
-and provides a per-patient Live Chaos Controller over MQTT.
+Dynamically discovers and adds patient beds as Bedside Jetson Orin units connect
+over MQTT (no hardcoded bed count!), computes real-time composite Trust Scores
+T_i(t) in [0.0, 1.0] per sensor per bed, manages dynamic compute offloading &
+alert rerouting, quarantines Byzantine sensors, and provides a per-patient Live
+Chaos Controller over MQTT.
 """
 
 import os
@@ -24,7 +25,6 @@ CHAOS_FILE = os.path.join(BASE_DIR, "chaos.json")
 BEDSIDE_CHAOS_FILE = os.path.join(os.path.dirname(BASE_DIR), "jetson_bedside", "chaos.json")
 MODEL_FILE = os.path.join(BASE_DIR, "ecg_anomaly.onnx")
 AGENT_IDS = ["Agent_ECG", "Agent_SpO2", "Agent_HR"]
-DEFAULT_BEDS = ["Bed_1", "Bed_2", "Bed_3"]
 
 
 def default_bed_chaos():
@@ -36,23 +36,26 @@ def default_bed_chaos():
     }
 
 
-def read_all_chaos_config():
-    """Reads multi-patient chaos.json safely with fallback to default 3-bed baseline."""
-    baseline = {bed: default_bed_chaos() for bed in DEFAULT_BEDS}
-    if not os.path.exists(CHAOS_FILE):
-        return baseline
-    try:
-        with open(CHAOS_FILE, "r") as f:
-            data = json.load(f)
-        if "Agent_ECG" in data:
-            baseline["Bed_1"] = data
-            return baseline
-        for bed in DEFAULT_BEDS:
+def read_all_chaos_config(active_bed_ids=None):
+    """Reads multi-patient chaos.json dynamically for whatever beds are active."""
+    data = {}
+    if os.path.exists(CHAOS_FILE):
+        try:
+            with open(CHAOS_FILE, "r") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                if "Agent_ECG" in loaded:
+                    data["Bed_1"] = loaded
+                else:
+                    data = loaded
+        except Exception:
+            data = {}
+
+    if active_bed_ids:
+        for bed in active_bed_ids:
             if bed not in data:
                 data[bed] = default_bed_chaos()
-        return data
-    except Exception:
-        return baseline
+    return data
 
 
 def write_all_chaos_config(config):
@@ -194,6 +197,7 @@ class PatientBedMonitor:
 
     def __init__(self, patient_id):
         self.patient_id = patient_id
+        self.last_seen_ts = time.time()
         self.agents = {aid: AgentTrustTracker(aid) for aid in AGENT_IDS}
         self.edge_summary = {
             "patient_id": patient_id,
@@ -230,14 +234,16 @@ class PatientBedMonitor:
 
 class NurseStationEngine:
     """
-    Multi-Patient MQTT listener, Trust Engine coordinator, and Gateway CPU Fallback engine.
+    Dynamic Multi-Patient MQTT listener, Trust Engine coordinator, and Gateway CPU Fallback engine.
+    Starts with zero hardcoded beds and registers beds dynamically as Jetsons connect!
     """
 
     def __init__(self, broker="127.0.0.1", port=1883):
         self.broker = broker
         self.port = port
         self.lock = threading.Lock()
-        self.beds = {bed_id: PatientBedMonitor(bed_id) for bed_id in DEFAULT_BEDS}
+        # Dynamically populated as Jetson bedside nodes publish over MQTT
+        self.beds = {}
         self.global_alert_log = deque(maxlen=15)
 
         self.cpu_session = None
@@ -258,8 +264,18 @@ class NurseStationEngine:
         if not patient_id:
             patient_id = "Bed_1"
         if patient_id not in self.beds:
+            print(f"[NURSE STATION] Discovered new Bedside Jetson node: {patient_id}")
             self.beds[patient_id] = PatientBedMonitor(patient_id)
+        self.beds[patient_id].last_seen_ts = time.time()
         return self.beds[patient_id]
+
+    def remove_inactive_beds(self, timeout_sec=8.0):
+        """Removes beds that have stopped transmitting for longer than timeout_sec."""
+        now = time.time()
+        with self.lock:
+            stale = [pid for pid, b in self.beds.items() if (now - b.last_seen_ts) > timeout_sec]
+            for pid in stale:
+                del self.beds[pid]
 
     def _init_mqtt(self):
         client_id = f"Nurse_Station_MultiBed_{os.getpid()}_{int(time.time() * 1000) % 10000}"
@@ -277,7 +293,6 @@ class NurseStationEngine:
             print(f"[DASHBOARD] MQTT connect error: {e}")
 
     def _on_connect(self, client, userdata, flags, rc, properties=None):
-        # Subscribe to both multi-patient topics (hospital/<patient_id>/...) and legacy single-patient topics
         client.subscribe("hospital/+/sensors/#")
         client.subscribe("hospital/+/edge/summary")
         client.subscribe("hospital/+/alerts/#")
@@ -293,7 +308,6 @@ class NurseStationEngine:
             payload = json.loads(msg.payload.decode("utf-8"))
             patient_id = payload.get("patient_id")
 
-            # Extract patient_id from topic if structured as hospital/<patient_id>/...
             if not patient_id and len(parts) >= 3 and parts[1] not in ("sensors", "edge", "alerts", "control"):
                 patient_id = parts[1]
             if not patient_id:
@@ -333,7 +347,7 @@ class NurseStationEngine:
         value = payload.get("value", 0)
         ecg_wave = payload.get("ecg_wave", [])
 
-        all_chaos = read_all_chaos_config()
+        all_chaos = read_all_chaos_config([patient_id])
         bed_chaos = all_chaos.get(patient_id, default_bed_chaos())
         orin_cfg = bed_chaos.get("Orin_Link", {})
         orin_congested = bool(orin_cfg.get("overload_gpu", False)) or bool(
@@ -425,10 +439,12 @@ class NurseStationEngine:
                 print(f"[DASHBOARD] Error publishing chaos config: {e}")
 
     def get_all_beds_snapshot(self):
-        """Returns a thread-safe snapshot of all monitored patient beds."""
+        """Returns a thread-safe snapshot of all dynamically discovered patient beds."""
+        now = time.time()
         with self.lock:
             beds_snap = {}
-            for pid, bed in self.beds.items():
+            for pid in sorted(self.beds.keys()):
+                bed = self.beds[pid]
                 agents_snap = {}
                 for aid, ag in bed.agents.items():
                     agents_snap[aid] = {
@@ -448,6 +464,8 @@ class NurseStationEngine:
                     }
                 beds_snap[pid] = {
                     "patient_id": pid,
+                    "online": (now - bed.last_seen_ts) <= 8.0,
+                    "seconds_since_seen": round(now - bed.last_seen_ts, 1),
                     "agents": agents_snap,
                     "edge_summary": dict(bed.edge_summary),
                     "ecg_wave": list(bed.latest_ecg_wave),
@@ -486,25 +504,36 @@ def render_status_badge(status_str):
 
 
 def render_sidebar_chaos_controller(engine, bed_ids):
-    """Renders per-patient Sidebar Chaos Controller and syncs via chaos.json + MQTT."""
+    """Renders per-patient Sidebar Chaos Controller dynamically for active Jetson beds."""
     st.sidebar.title("⚡ Live Fault Injection (Chaos Engine)")
     st.sidebar.caption(
-        "Select any Patient Bed (Jetson Node) to inject network delay, packet loss, or spoofed vitals."
+        "Beds are discovered automatically as Jetsons connect. Select any active bed below to inject faults."
     )
 
-    all_chaos = read_all_chaos_config()
+    if not bed_ids:
+        st.sidebar.info("⏳ Waiting for at least 1 Bedside Jetson node to connect...")
+        auto_refresh = st.sidebar.checkbox("⏱️ Live Auto-Refresh (0.6s)", value=True)
+        return auto_refresh
 
-    if st.sidebar.button("🔄 Reset ALL Patient Beds to Healthy", use_container_width=True):
-        baseline = {bed: default_bed_chaos() for bed in bed_ids}
-        write_all_chaos_config(baseline)
-        for bed in bed_ids:
-            engine.publish_patient_chaos(bed, baseline[bed], baseline)
-        st.rerun()
+    all_chaos = read_all_chaos_config(bed_ids)
+
+    col_a, col_b = st.sidebar.columns(2)
+    with col_a:
+        if st.button("🔄 Reset Faults", use_container_width=True):
+            baseline = {bed: default_bed_chaos() for bed in bed_ids}
+            write_all_chaos_config(baseline)
+            for bed in bed_ids:
+                engine.publish_patient_chaos(bed, baseline[bed], baseline)
+            st.rerun()
+    with col_b:
+        if st.button("🗑️ Prune Offline", use_container_width=True):
+            engine.remove_inactive_beds(timeout_sec=6.0)
+            st.rerun()
 
     st.sidebar.divider()
 
     target_bed = st.sidebar.selectbox(
-        "🛏️ Target Patient Bed (Jetson Node)",
+        f"🛏️ Target Patient Bed ({len(bed_ids)} Connected)",
         options=bed_ids,
         index=0,
         key="chaos_target_bed_select",
@@ -574,10 +603,12 @@ def render_sidebar_chaos_controller(engine, bed_ids):
 
 
 def render_multi_patient_ward_overview(beds_snap):
-    """Renders top-level ICU Ward Overview cards for all connected patient beds (Jetson nodes)."""
-    st.subheader("🏥 ICU Ward Multi-Patient Overview (All Active Bedside Jetson Nodes)")
+    """Renders top-level ICU Ward Overview cards dynamically for all connected Jetson nodes."""
     bed_ids = list(beds_snap.keys())
-    cols = st.columns(len(bed_ids))
+    st.subheader(
+        f"🏥 ICU Ward Live Overview — {len(bed_ids)} Active Bedside Jetson Node(s) Connected"
+    )
+    cols = st.columns(max(1, len(bed_ids)))
 
     for idx, pid in enumerate(bed_ids):
         b = beds_snap[pid]
@@ -591,7 +622,9 @@ def render_multi_patient_ward_overview(beds_snap):
             "status"
         ].startswith("ISOLATED")
 
-        if local_alarm:
+        if not b["online"]:
+            banner_bg, banner_fg, banner_txt = "#475569", "#f1f5f9", f"⚠️ OFFLINE ({b['seconds_since_seen']}s)"
+        elif local_alarm:
             banner_bg, banner_fg, banner_txt = "#dc3545", "#ffffff", "🚨 ARRHYTHMIA ALARM"
         elif any_isolated:
             banner_bg, banner_fg, banner_txt = "#842029", "#f8d7da", "🛡️ SENSOR QUARANTINED"
@@ -677,7 +710,7 @@ def main():
 
     st.title("🏥 Trust-Aware Multi-Patient ICU Edge Intelligence Dashboard")
     st.caption(
-        "Central Nurse Station • Multi-Jetson Bedside Arrhythmia Detection (<5 ms) • Per-Bed Trust Scoring, Offloading & Sensor Quarantine"
+        "Central Nurse Station • Dynamic Bedside Jetson Discovery • Real-Time Trust Scoring, Offloading & Sensor Quarantine"
     )
 
     engine = get_nurse_station_engine()
@@ -687,6 +720,17 @@ def main():
 
     auto_refresh = render_sidebar_chaos_controller(engine, bed_ids)
 
+    if not bed_ids:
+        st.info(
+            "📡 **Listening for Bedside Jetson Orin nodes on MQTT Broker...**\n\n"
+            "No patient beds are hardcoded! As soon as you start `./start_bedside.sh --patient-id <Bed_Name> --broker <LAPTOP_IP>` "
+            "on one or more Jetsons, each patient bed will automatically appear here in real time."
+        )
+        if auto_refresh:
+            time.sleep(0.6)
+            st.rerun()
+        return
+
     # 1. Top Multi-Patient Ward Summary Row
     render_multi_patient_ward_overview(beds_snap)
 
@@ -694,7 +738,7 @@ def main():
 
     # 2. Patient Bed Selector for Detailed Dual-View Telemetry
     selected_bed = st.radio(
-        "🔍 **Select Patient Bed for Detailed Bedside & Trust Inspection:**",
+        "🔍 **Select Connected Patient Bed for Detailed Bedside & Trust Inspection:**",
         options=bed_ids,
         horizontal=True,
         key="detailed_bed_selector",
@@ -856,4 +900,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
