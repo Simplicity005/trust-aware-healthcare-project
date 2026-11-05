@@ -2,7 +2,7 @@
 """
 Bedside Autonomous Multi-Agent Sensor Streamer (Runs on NVIDIA Jetson Orin)
 Simulates Agent_ECG, Agent_SpO2, and Agent_HR for one or more patient beds,
-streaming vitals over MQTT with automatic broker failover and live chaos sync.
+streaming vitals over MQTT with automatic broker failover and local bedside fault configuration.
 """
 
 import os
@@ -46,29 +46,6 @@ def read_patient_chaos(patient_id="Bed_1"):
         return default_bed_chaos()
 
 
-def update_chaos_file(new_data, patient_id=None):
-    """Updates chaos.json safely when an MQTT chaos control packet arrives."""
-    try:
-        with CHAOS_LOCK:
-            current = {}
-            if os.path.exists(CHAOS_FILE):
-                try:
-                    with open(CHAOS_FILE, "r") as f:
-                        current = json.load(f)
-                except Exception:
-                    current = {}
-            if patient_id and "Agent_ECG" in new_data:
-                current[patient_id] = new_data
-            else:
-                current.update(new_data)
-            tmp_path = CHAOS_FILE + f".tmp.{random.randint(1000, 9999)}"
-            with open(tmp_path, "w") as f:
-                json.dump(current, f, indent=2)
-            os.replace(tmp_path, CHAOS_FILE)
-    except Exception:
-        pass
-
-
 def generate_ecg_wave(malicious=False, phase_offset=0.0):
     """Generates a 1-second 250 Hz ECG waveform."""
     t = np.linspace(0, 1, 250)
@@ -76,7 +53,6 @@ def generate_ecg_wave(malicious=False, phase_offset=0.0):
         wave = np.random.uniform(-2.5, 2.5, 250) + np.sin(2 * np.pi * 35 * t) * 1.5
         return np.round(np.clip(wave, -4.0, 4.0), 4).tolist()
 
-    # Normal sinus rhythm (PQRST waveform) with slight patient-specific offset
     c = phase_offset
     p_wave = 0.15 * np.exp(-((t - (0.20 + c)) ** 2) / (2 * 0.025 ** 2))
     q_wave = -0.15 * np.exp(-((t - (0.35 + c)) ** 2) / (2 * 0.010 ** 2))
@@ -100,7 +76,6 @@ class SensorAgentThread(threading.Thread):
         self.seq = 0
         self.current_broker = primary_broker
         self.client = None
-        # Slight natural baseline variation per patient bed
         bed_hash = sum(ord(ch) for ch in patient_id) % 5
         self.hr_offset = bed_hash * 2 - 4
         self.phase_offset = (bed_hash - 2) * 0.01
@@ -112,8 +87,6 @@ class SensorAgentThread(threading.Thread):
                 self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=cid)
             else:
                 self.client = mqtt.Client(client_id=cid)
-            self.client.on_connect = self._on_connect
-            self.client.on_message = self._on_message
             self.client.connect(self.current_broker, self.port, keepalive=60)
             self.client.loop_start()
             print(f"[{self.patient_id}:{self.agent_id}] Connected to broker {self.current_broker}:{self.port}")
@@ -121,20 +94,6 @@ class SensorAgentThread(threading.Thread):
         except Exception as e:
             print(f"[{self.patient_id}:{self.agent_id}] Failed to connect to {self.current_broker}: {e}")
             return False
-
-    def _on_connect(self, client, userdata, flags, rc, properties=None):
-        client.subscribe(f"hospital/{self.patient_id}/control/chaos")
-        client.subscribe("hospital/control/chaos")
-
-    def _on_message(self, client, userdata, msg):
-        try:
-            payload = json.loads(msg.payload.decode("utf-8"))
-            if msg.topic == f"hospital/{self.patient_id}/control/chaos":
-                update_chaos_file(payload, patient_id=self.patient_id)
-            elif msg.topic == "hospital/control/chaos":
-                update_chaos_file(payload)
-        except Exception:
-            pass
 
     def _failover_broker(self):
         next_broker = (
@@ -171,15 +130,12 @@ class SensorAgentThread(threading.Thread):
             delay_ms = float(agent_chaos.get("delay_ms", 10.0))
             malicious = bool(agent_chaos.get("malicious", False))
 
-            # Simulated packet drop: increment seq without publishing
             if random.random() < drop_rate:
                 time.sleep(0.4)
                 continue
 
-            # Record packet generation timestamp prior to network transit delay & jitter
             sent_ts = time.time()
 
-            # Simulated network latency and jitter (0 to 30% of delay)
             delay_sec = max(0.001, delay_ms / 1000.0)
             jitter_sec = random.uniform(0.0, 0.3 * delay_sec)
             time.sleep(delay_sec + jitter_sec)
@@ -287,4 +243,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

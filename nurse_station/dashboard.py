@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """
-Multi-Patient Central Nurse Station, Mathematical Trust Engine & Live Dashboard
+Multi-Patient Central Nurse Station & Trust Engine Dashboard
 (Runs on the Nurse's Table Gateway Laptop)
-Dynamically discovers and adds patient beds as Bedside Jetson Orin units connect
-over MQTT (no hardcoded bed count!), computes real-time composite Trust Scores
-T_i(t) in [0.0, 1.0] per sensor per bed, manages dynamic compute offloading &
-alert rerouting, quarantines Byzantine sensors, and provides a per-patient Live
-Chaos Controller over MQTT.
+Dynamically discovers patient beds as Jetson bedside nodes connect over MQTT,
+computes composite Trust Scores T_i(t) in [0.0, 1.0] per sensor per bed,
+manages compute offloading and alert routing, and renders a clean dark
+Bento Box interface with zero clutter.
 """
 
 import os
@@ -15,887 +14,788 @@ import json
 import threading
 from collections import deque
 import numpy as np
-import pandas as pd
 import onnxruntime as ort
 import paho.mqtt.client as mqtt
 import streamlit as st
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CHAOS_FILE = os.path.join(BASE_DIR, "chaos.json")
-BEDSIDE_CHAOS_FILE = os.path.join(os.path.dirname(BASE_DIR), "jetson_bedside", "chaos.json")
 MODEL_FILE = os.path.join(BASE_DIR, "ecg_anomaly.onnx")
 AGENT_IDS = ["Agent_ECG", "Agent_SpO2", "Agent_HR"]
-
-
-def default_bed_chaos():
-    return {
-        "Agent_ECG": {"delay_ms": 12, "drop_rate": 0.0, "malicious": False},
-        "Agent_SpO2": {"delay_ms": 10, "drop_rate": 0.0, "malicious": False},
-        "Agent_HR": {"delay_ms": 10, "drop_rate": 0.0, "malicious": False},
-        "Orin_Link": {"overload_gpu": False, "use_relay_b": False},
-    }
-
-
-def read_all_chaos_config(active_bed_ids=None):
-    """Reads multi-patient chaos.json dynamically for whatever beds are active."""
-    data = {}
-    if os.path.exists(CHAOS_FILE):
-        try:
-            with open(CHAOS_FILE, "r") as f:
-                loaded = json.load(f)
-            if isinstance(loaded, dict):
-                if "Agent_ECG" in loaded:
-                    data["Bed_1"] = loaded
-                else:
-                    data = loaded
-        except Exception:
-            data = {}
-
-    if active_bed_ids:
-        for bed in active_bed_ids:
-            if bed not in data:
-                data[bed] = default_bed_chaos()
-    return data
-
-
-def write_all_chaos_config(config):
-    """Writes updated chaos configuration atomically to nurse_station/chaos.json (and jetson_bedside/chaos.json if local)."""
-    for target_file in [CHAOS_FILE, BEDSIDE_CHAOS_FILE]:
-        target_dir = os.path.dirname(target_file)
-        if os.path.isdir(target_dir):
-            try:
-                tmp_path = target_file + ".tmp"
-                with open(tmp_path, "w") as f:
-                    json.dump(config, f, indent=2)
-                os.replace(tmp_path, target_file)
-            except Exception:
-                pass
+AGENT_LABELS = {"Agent_ECG": "ECG sensor", "Agent_SpO2": "SpO2 sensor", "Agent_HR": "HR sensor"}
 
 
 class AgentTrustTracker:
     """
-    Mathematical Trust Engine for a single autonomous medical sensor agent.
-    Maintains a sliding window of N = 20 packets and computes:
-      - Latency Score (S_L):      max(0.0, 1.0 - avg_latency_ms / 400.0)
-      - Jitter Score (S_J):       max(0.0, 1.0 - (max_L - min_L) / 200.0)
-      - Packet Loss Score (S_P):  max(0.0, 1.0 - 2.5 * loss_rate)
-      - Plausibility Score (S_D): Asymmetric EWMA decay (-0.35 on violation, +0.08 on valid)
-      - Composite Trust (T_i):    0.25*S_L + 0.15*S_J + 0.25*S_P + 0.35*S_D
+    Computes composite Trust Score T_i(t) in [0.0, 1.0] per sensor agent:
+        T_i(t) = w1 * S_L(t) + w2 * S_J(t) + w3 * S_P(t) + w4 * S_D(t)
+    with weights w1=0.25, w2=0.20, w3=0.25, w4=0.30 and EWMA smoothing (alpha=0.35).
     """
 
-    def __init__(self, agent_id, window_size=20):
+    def __init__(self, agent_id, w1=0.25, w2=0.20, w3=0.25, w4=0.30, alpha=0.35):
         self.agent_id = agent_id
-        self.window_size = window_size
-        self.latencies = deque(maxlen=window_size)
-        self.delivery_window = deque(maxlen=window_size)
+        self.w1, self.w2, self.w3, self.w4 = w1, w2, w3, w4
+        self.alpha = alpha
+
+        self.latencies = deque(maxlen=25)
+        self.delivery_window = deque(maxlen=30)
+        self.validity_window = deque(maxlen=15)
+
         self.last_seq = None
-        self.last_recv_ts = None
+        self.last_rx_time = time.time()
+        self.last_value = None
+        self.ecg_wave = [0.0] * 250
 
         self.s_l = 1.0
         self.s_j = 1.0
         self.s_p = 1.0
         self.s_d = 1.0
         self.trust_score = 1.0
+        self.status = "TRUSTED"
 
-        self.avg_latency_ms = 10.0
-        self.recent_latency_ms = 10.0
-        self.jitter_ms = 0.0
-        self.loss_rate = 0.0
-        self.latest_value = 75 if agent_id == "Agent_HR" else (98 if agent_id == "Agent_SpO2" else 0.0)
-        self.latest_ecg_wave = []
-        self.plausible = True
-        self.status = "TRUSTED (Orin GPU)"
-        self.packets_received = 0
-        self.packets_missed = 0
+    def check_data_plausibility(self, payload):
+        if self.agent_id == "Agent_ECG":
+            wave = payload.get("ecg_wave", [])
+            if not wave or len(wave) != 250:
+                return 0.0
+            arr = np.array(wave, dtype=np.float32)
+            max_abs = float(np.max(np.abs(arr)))
+            std_val = float(np.std(arr))
+            diff_std = float(np.std(np.diff(arr)))
+            if max_abs > 2.2 or std_val > 0.65 or std_val < 0.03 or diff_std > 0.35:
+                return 0.0
+            return 1.0
 
-    def update(self, seq, sent_ts, recv_ts, value, ecg_wave=None, cross_sensor_conflict=False):
-        self.packets_received += 1
-        self.last_recv_ts = recv_ts
-
-        # 1. Latency & Jitter calculation
-        latency_ms = max(1.0, (recv_ts - sent_ts) * 1000.0)
-        self.latencies.append(latency_ms)
-        self.avg_latency_ms = float(np.mean(self.latencies))
-        self.recent_latency_ms = float(np.mean(list(self.latencies)[-3:]))
-        if len(self.latencies) >= 2:
-            self.jitter_ms = float(np.max(self.latencies) - np.min(self.latencies))
-        else:
-            self.jitter_ms = 0.0
-
-        self.s_l = max(0.0, 1.0 - (self.avg_latency_ms / 400.0))
-        self.s_j = max(0.0, 1.0 - (self.jitter_ms / 200.0))
-
-        # 2. Sequence gap & Packet Loss Score calculation
-        missed = 0
-        if self.last_seq is not None and seq > self.last_seq:
-            gap = seq - self.last_seq - 1
-            if gap > 0:
-                missed = gap
-                self.packets_missed += missed
-        self.last_seq = seq
-        self.delivery_window.append((1, missed))
-
-        total_recv = sum(r for r, _ in self.delivery_window)
-        total_miss = sum(m for _, m in self.delivery_window)
-        total_expected = total_recv + total_miss
-        self.loss_rate = (total_miss / total_expected) if total_expected > 0 else 0.0
-        self.s_p = max(0.0, 1.0 - 2.5 * self.loss_rate)
-
-        # 3. Physiological Plausibility Score (S_D) with asymmetric decay
-        is_plausible = True
+        val = payload.get("value", 0)
+        if self.agent_id == "Agent_SpO2":
+            return 1.0 if (70 <= val <= 100) else 0.0
         if self.agent_id == "Agent_HR":
-            self.latest_value = value
-            if value < 40 or value > 220:
-                is_plausible = False
-        elif self.agent_id == "Agent_SpO2":
-            self.latest_value = value
-            if value < 70 or value > 100:
-                is_plausible = False
-        elif self.agent_id == "Agent_ECG":
-            if ecg_wave and len(ecg_wave) == 250:
-                self.latest_ecg_wave = ecg_wave
-                wave_np = np.array(ecg_wave, dtype=np.float32)
-                variance = float(np.var(wave_np))
-                peak = float(np.max(np.abs(wave_np)))
-                self.latest_value = round(variance, 4)
-                if variance > 0.35 or peak > 2.5:
-                    is_plausible = False
+            return 1.0 if (40 <= val <= 190) else 0.0
+        return 1.0
 
-        if cross_sensor_conflict and not is_plausible:
-            is_plausible = False
+    def update(self, payload, rx_time):
+        seq = int(payload.get("seq", 0))
+        sent_ts = float(payload.get("sent_ts", rx_time))
 
-        self.plausible = is_plausible
-        if not is_plausible:
-            self.s_d = max(0.0, self.s_d - 0.35)
+        latency_ms = max(0.5, (rx_time - sent_ts) * 1000.0)
+        self.latencies.append(latency_ms)
+
+        if self.last_seq is not None and seq > self.last_seq:
+            missed = seq - self.last_seq - 1
+            for _ in range(min(missed, 30)):
+                self.delivery_window.append(0)
+        self.delivery_window.append(1)
+        self.last_seq = seq
+        self.last_rx_time = rx_time
+
+        if self.agent_id == "Agent_ECG":
+            self.ecg_wave = payload.get("ecg_wave", [0.0] * 250)
         else:
-            self.s_d = min(1.0, self.s_d + 0.08)
+            self.last_value = payload.get("value", 0)
 
-        # 4. Composite Trust Score T_i(t)
-        self.trust_score = round(
-            0.25 * self.s_l + 0.15 * self.s_j + 0.25 * self.s_p + 0.35 * self.s_d,
-            4,
-        )
-        return self.trust_score
+        d_valid = self.check_data_plausibility(payload)
+        self.validity_window.append(d_valid)
 
-    def evaluate_status(self, orin_link_congested=False):
-        if self.trust_score < 0.45:
-            self.status = "ISOLATED (Quarantined)"
-        elif (
-            self.trust_score < 0.70
-            or self.avg_latency_ms > 180.0
-            or self.recent_latency_ms > 180.0
-            or orin_link_congested
-        ):
-            self.status = "OFFLOADED (Gateway CPU Fallback)"
+        avg_lat = float(np.mean(self.latencies))
+        self.s_l = float(np.clip(np.exp(-max(0.0, avg_lat - 25.0) / 160.0), 0.0, 1.0))
+
+        if len(self.latencies) >= 2:
+            jitter_ms = float(np.std(self.latencies))
         else:
-            self.status = "TRUSTED (Orin GPU)"
-        return self.status
+            jitter_ms = 0.0
+        self.s_j = float(np.clip(np.exp(-jitter_ms / 60.0), 0.0, 1.0))
 
+        self.s_p = float(np.mean(self.delivery_window)) if self.delivery_window else 1.0
+        ewma_valid = float(np.mean(self.validity_window)) if self.validity_window else 1.0
+        self.s_d = 0.25 * ewma_valid if d_valid == 0.0 else ewma_valid
 
-class PatientBedMonitor:
-    """Maintains all sensor trust trackers, bedside AI summary, and routing state for one patient bed."""
-
-    def __init__(self, patient_id):
-        self.patient_id = patient_id
-        self.last_seen_ts = time.time()
-        self.agents = {aid: AgentTrustTracker(aid) for aid in AGENT_IDS}
-        self.edge_summary = {
-            "patient_id": patient_id,
-            "inf_ms": 0.30,
-            "exec_provider": "CPUExecutionProvider",
-            "arrhythmia_prob": 0.02,
-            "local_bed_alarm": False,
-            "sensor_conflict": False,
-            "overload_gpu": False,
-            "latest_vitals": {"hr": 75, "spo2": 98, "ecg_variance": 0.04},
-            "routing_path": "primary",
-            "timestamp": time.time(),
-        }
-        self.latest_ecg_wave = self._default_ecg_wave()
-        self.gateway_cpu_inf_ms = 0.0
-        self.active_routing = "Primary Direct Link"
-        self.offload_active = False
-        self.last_offload_published = None
-        self.trust_history = deque(maxlen=60)
-        self.alert_log = deque(maxlen=12)
-
-    @staticmethod
-    def _default_ecg_wave():
-        t = np.linspace(0, 1, 250)
-        ecg = (
-            0.15 * np.exp(-((t - 0.20) ** 2) / (2 * 0.025 ** 2))
-            - 0.15 * np.exp(-((t - 0.35) ** 2) / (2 * 0.010 ** 2))
-            + 1.25 * np.exp(-((t - 0.40) ** 2) / (2 * 0.012 ** 2))
-            - 0.25 * np.exp(-((t - 0.45) ** 2) / (2 * 0.012 ** 2))
-            + 0.30 * np.exp(-((t - 0.65) ** 2) / (2 * 0.040 ** 2))
+        raw_trust = (
+            self.w1 * self.s_l
+            + self.w2 * self.s_j
+            + self.w3 * self.s_p
+            + self.w4 * self.s_d
         )
-        return np.round(ecg, 4).tolist()
+
+        if d_valid == 0.0:
+            raw_trust = min(raw_trust, 0.32)
+
+        self.trust_score = float(
+            np.clip(self.alpha * raw_trust + (1.0 - self.alpha) * self.trust_score, 0.0, 1.0)
+        )
+        self.evaluate_status(rx_time)
+
+    def evaluate_status(self, now):
+        silence_sec = now - self.last_rx_time
+        if silence_sec > 1.8:
+            penalty = np.exp(-(silence_sec - 1.8) / 2.5)
+            self.s_p = float(np.clip(self.s_p * penalty, 0.0, 1.0))
+            raw_trust = (
+                self.w1 * self.s_l
+                + self.w2 * self.s_j
+                + self.w3 * self.s_p
+                + self.w4 * self.s_d
+            )
+            self.trust_score = float(np.clip(raw_trust, 0.0, 1.0))
+
+        prev_status = self.status
+        if self.trust_score >= 0.70:
+            self.status = "TRUSTED"
+        elif self.trust_score >= 0.45:
+            self.status = "SUSPICIOUS"
+        else:
+            self.status = "ISOLATED"
+
+        return prev_status != self.status, prev_status, self.status
 
 
-class NurseStationEngine:
-    """
-    Dynamic Multi-Patient MQTT listener, Trust Engine coordinator, and Gateway CPU Fallback engine.
-    Starts with zero hardcoded beds and registers beds dynamically as Jetsons connect!
-    """
-
-    def __init__(self, broker="127.0.0.1", port=1883):
-        self.broker = broker
-        self.port = port
+class MultiPatientTrustEngine:
+    def __init__(self, broker_host=None, broker_port=1883):
         self.lock = threading.Lock()
-        # Dynamically populated as Jetson bedside nodes publish over MQTT
+        self.broker_host = broker_host or os.environ.get("MQTT_BROKER", "127.0.0.1")
+        self.broker_port = int(os.environ.get("MQTT_PORT", broker_port))
         self.beds = {}
-        self.global_alert_log = deque(maxlen=15)
+        self.event_logs = deque(maxlen=60)
 
-        self.cpu_session = None
+        self.ort_session = None
+        self.ort_input_name = "ecg_input"
         if os.path.exists(MODEL_FILE):
-            try:
-                opts = ort.SessionOptions()
-                opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-                self.cpu_session = ort.InferenceSession(
-                    MODEL_FILE, sess_options=opts, providers=["CPUExecutionProvider"]
-                )
-            except Exception as e:
-                print(f"[DASHBOARD] Warning: Could not load CPU fallback model: {e}")
+            opts = ort.SessionOptions()
+            opts.intra_op_num_threads = 2
+            opts.inter_op_num_threads = 1
+            opts.log_severity_level = 3
+            self.ort_session = ort.InferenceSession(
+                MODEL_FILE, sess_options=opts, providers=["CPUExecutionProvider"]
+            )
+            self.ort_input_name = self.ort_session.get_inputs()[0].name
 
-        self.client = None
-        self._init_mqtt()
-
-    def _get_or_create_bed(self, patient_id):
-        if not patient_id:
-            patient_id = "Bed_1"
-        if patient_id not in self.beds:
-            print(f"[NURSE STATION] Discovered new Bedside Jetson node: {patient_id}")
-            self.beds[patient_id] = PatientBedMonitor(patient_id)
-        self.beds[patient_id].last_seen_ts = time.time()
-        return self.beds[patient_id]
-
-    def remove_inactive_beds(self, timeout_sec=8.0):
-        """Removes beds that have stopped transmitting for longer than timeout_sec."""
-        now = time.time()
-        with self.lock:
-            stale = [pid for pid, b in self.beds.items() if (now - b.last_seen_ts) > timeout_sec]
-            for pid in stale:
-                del self.beds[pid]
-
-    def _init_mqtt(self):
-        client_id = f"Nurse_Station_MultiBed_{os.getpid()}_{int(time.time() * 1000) % 10000}"
+        cid = f"NurseStation_Engine_{os.getpid()}_{ int(time.time() * 1000) % 10000 }"
         if hasattr(mqtt, "CallbackAPIVersion"):
-            self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=client_id)
+            self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=cid)
         else:
-            self.client = mqtt.Client(client_id=client_id)
+            self.client = mqtt.Client(client_id=cid)
 
         self.client.on_connect = self._on_connect
         self.client.on_message = self._on_message
+        self.mqtt_connected = False
         try:
-            self.client.connect(self.broker, self.port, keepalive=60)
+            self.client.connect(self.broker_host, self.broker_port, keepalive=60)
             self.client.loop_start()
-        except Exception as e:
-            print(f"[DASHBOARD] MQTT connect error: {e}")
+            self.mqtt_connected = True
+        except Exception:
+            self.mqtt_connected = False
+
+    def _ensure_bed_locked(self, pid):
+        if pid not in self.beds:
+            self.beds[pid] = {
+                "trackers": {aid: AgentTrustTracker(aid) for aid in AGENT_IDS},
+                "history": deque(maxlen=80),
+                "last_seen": time.time(),
+                "edge_summary": {
+                    "inference_ms": 0.85,
+                    "anomaly_prob": 0.01,
+                    "is_arrhythmia": False,
+                    "execution_provider": "CPUExecutionProvider",
+                    "gpu_overloaded": False,
+                    "link_congested": False,
+                    "alert_route": "Direct_Edge_Link",
+                },
+                "compute_mode": "Jetson Local",
+                "alert_route": "Direct",
+            }
+        return self.beds[pid]
+
+    def _log(self, pid, level, msg):
+        ts = time.strftime("%H:%M:%S")
+        self.event_logs.appendleft({"ts": ts, "bed": pid, "level": level, "msg": msg})
 
     def _on_connect(self, client, userdata, flags, rc, properties=None):
+        self.mqtt_connected = True
         client.subscribe("hospital/+/sensors/#")
         client.subscribe("hospital/+/edge/summary")
         client.subscribe("hospital/+/alerts/#")
-        client.subscribe("hospital/sensors/#")
-        client.subscribe("hospital/edge/summary")
-        client.subscribe("hospital/alerts/#")
 
     def _on_message(self, client, userdata, msg):
-        recv_ts = time.time()
+        rx_time = time.time()
         try:
-            topic = msg.topic
-            parts = topic.split("/")
             payload = json.loads(msg.payload.decode("utf-8"))
-            patient_id = payload.get("patient_id")
+            parts = msg.topic.split("/")
+            pid = payload.get("patient_id") or (parts[1] if len(parts) > 2 else "Bed_1")
+            if pid == "control":
+                return
 
-            if not patient_id and len(parts) >= 3 and parts[1] not in ("sensors", "edge", "alerts", "control"):
-                patient_id = parts[1]
-            if not patient_id:
-                patient_id = "Bed_1"
+            with self.lock:
+                bed = self._ensure_bed_locked(pid)
+                bed["last_seen"] = rx_time
 
-            if "sensors" in parts:
-                self._handle_sensor_packet(patient_id, payload, recv_ts)
-            elif parts[-1] == "summary":
-                with self.lock:
-                    bed = self._get_or_create_bed(patient_id)
-                    bed.edge_summary = payload
-                    if payload.get("ecg_wave") and len(payload["ecg_wave"]) == 250:
-                        bed.latest_ecg_wave = payload["ecg_wave"]
-            elif "alerts" in parts:
-                with self.lock:
-                    bed = self._get_or_create_bed(patient_id)
-                    route_label = "Relay Path B" if "relay_b" in topic else "Primary Link"
-                    prob = payload.get("arrhythmia_prob", 0.0) * 100.0
-                    inf_ms = payload.get("inf_ms", 0.0)
-                    ts_str = time.strftime("%H:%M:%S", time.localtime(recv_ts))
-                    entry = (
-                        f"[{ts_str}] [{patient_id}] {payload.get('alert', 'ALERT')} "
-                        f"({prob:.1f}%) via {route_label} [{inf_ms:.2f} ms]"
-                    )
-                    bed.alert_log.appendleft(entry)
-                    self.global_alert_log.appendleft(entry)
-        except Exception as e:
-            print(f"[DASHBOARD] Message handling error: {e}")
+                if "/sensors/" in msg.topic:
+                    aid = payload.get("agent_id")
+                    if aid in bed["trackers"]:
+                        tr = bed["trackers"][aid]
+                        prev_status = tr.status
+                        tr.update(payload, rx_time)
+                        if prev_status != tr.status:
+                            lvl = "CRITICAL" if tr.status == "ISOLATED" else ("WARN" if tr.status == "SUSPICIOUS" else "INFO")
+                            self._log(pid, lvl, f"{AGENT_LABELS.get(aid, aid)} {prev_status} -> {tr.status} (T={tr.trust_score:.2f})")
 
-    def _handle_sensor_packet(self, patient_id, payload, recv_ts):
-        agent_id = payload.get("agent_id")
-        if agent_id not in AGENT_IDS:
-            return
+                        if aid == "Agent_ECG" and bed["edge_summary"].get("gpu_overloaded", False):
+                            if self.ort_session is not None and tr.status != "ISOLATED":
+                                t0 = time.perf_counter()
+                                x = np.array(tr.ecg_wave, dtype=np.float32).reshape(1, 1, 250)
+                                logits = self.ort_session.run(None, {self.ort_input_name: x})[0]
+                                exp_s = np.exp(logits - np.max(logits))
+                                prob = float((exp_s / np.sum(exp_s))[0][1])
+                                inf_ms = (time.perf_counter() - t0) * 1000.0
+                                bed["edge_summary"]["inference_ms"] = round(inf_ms, 2)
+                                bed["edge_summary"]["anomaly_prob"] = round(prob, 4)
+                                bed["edge_summary"]["is_arrhythmia"] = prob > 0.50
+                                bed["edge_summary"]["execution_provider"] = "Gateway CPU (Offloaded)"
 
-        seq = int(payload.get("seq", 0))
-        sent_ts = float(payload.get("sent_ts", recv_ts))
-        value = payload.get("value", 0)
-        ecg_wave = payload.get("ecg_wave", [])
+                elif msg.topic.endswith("/edge/summary"):
+                    bed["edge_summary"].update(payload)
+                    if payload.get("gpu_overloaded", False) or payload.get("inference_ms", 0.0) > 25.0:
+                        bed["compute_mode"] = "Offloaded to Gateway"
+                    else:
+                        bed["compute_mode"] = "Jetson Local"
 
-        all_chaos = read_all_chaos_config([patient_id])
-        bed_chaos = all_chaos.get(patient_id, default_bed_chaos())
-        orin_cfg = bed_chaos.get("Orin_Link", {})
-        orin_congested = bool(orin_cfg.get("overload_gpu", False)) or bool(
-            orin_cfg.get("use_relay_b", False)
-        )
+                    if payload.get("link_congested", False) or payload.get("alert_route") == "Relay_Agent_B":
+                        bed["alert_route"] = "Relay B"
+                    else:
+                        bed["alert_route"] = "Direct"
 
-        with self.lock:
-            bed = self._get_or_create_bed(patient_id)
-            conflict = bool(bed.edge_summary.get("sensor_conflict", False))
-            tracker = bed.agents[agent_id]
-            tracker.update(
-                seq=seq,
-                sent_ts=sent_ts,
-                recv_ts=recv_ts,
-                value=value,
-                ecg_wave=ecg_wave,
-                cross_sensor_conflict=conflict,
-            )
+                elif "/alerts/" in msg.topic:
+                    if payload.get("arrhythmia_detected"):
+                        self._log(pid, "CRITICAL", f"Arrhythmia detected (p={payload.get('anomaly_probability', 0):.2f})")
+        except Exception:
+            pass
 
-            if agent_id == "Agent_ECG" and ecg_wave and len(ecg_wave) == 250:
-                bed.latest_ecg_wave = ecg_wave
-                if bed.offload_active and self.cpu_session is not None:
-                    t0 = time.perf_counter()
-                    wave_np = np.array(ecg_wave, dtype=np.float32).reshape(1, 1, 250)
-                    _ = self.cpu_session.run(None, {"ecg_input": wave_np})
-                    bed.gateway_cpu_inf_ms = round((time.perf_counter() - t0) * 1000.0, 2)
-
-            any_offloaded = False
-            for aid, ag in bed.agents.items():
-                st_badge = ag.evaluate_status(orin_link_congested=orin_congested)
-                if st_badge.startswith("OFFLOADED"):
-                    any_offloaded = True
-                elif st_badge.startswith("ISOLATED") and ag.packets_received % 5 == 1:
-                    ts_str = time.strftime("%H:%M:%S", time.localtime(recv_ts))
-                    msg_str = (
-                        f"[{ts_str}] [{patient_id}] QUARANTINED {aid} "
-                        f"(Trust={ag.trust_score:.2f} < 0.45) — Muted clinical alerts"
-                    )
-                    if not bed.alert_log or bed.alert_log[0] != msg_str:
-                        bed.alert_log.appendleft(msg_str)
-                        self.global_alert_log.appendleft(msg_str)
-
-            bed.offload_active = any_offloaded or orin_congested
-            bed.active_routing = (
-                "Relay Path B (Rerouted)" if bed.offload_active else "Primary Direct Link"
-            )
-
-            if agent_id == "Agent_ECG":
-                bed.trust_history.append(
-                    {
-                        "time": time.strftime("%H:%M:%S", time.localtime(recv_ts)),
-                        "Agent_ECG": bed.agents["Agent_ECG"].trust_score,
-                        "Agent_SpO2": bed.agents["Agent_SpO2"].trust_score,
-                        "Agent_HR": bed.agents["Agent_HR"].trust_score,
-                    }
-                )
-
-            offload_changed = bed.last_offload_published != bed.offload_active
-            current_offload = bed.offload_active
-            bed.last_offload_published = current_offload
-
-        if offload_changed and self.client:
-            try:
-                self.client.publish(
-                    f"hospital/{patient_id}/control/offload",
-                    json.dumps({"patient_id": patient_id, "offload": current_offload}),
-                    qos=0,
-                )
-            except Exception:
-                pass
-
-    def publish_patient_chaos(self, patient_id, bed_chaos_cfg, full_chaos_cfg):
-        """Publishes updated chaos settings over MQTT to the specific patient bed's Jetson."""
-        if self.client:
-            try:
-                self.client.publish(
-                    f"hospital/{patient_id}/control/chaos",
-                    json.dumps(bed_chaos_cfg),
-                    qos=1,
-                    retain=True,
-                )
-                self.client.publish(
-                    "hospital/control/chaos",
-                    json.dumps(full_chaos_cfg),
-                    qos=1,
-                    retain=True,
-                )
-            except Exception as e:
-                print(f"[DASHBOARD] Error publishing chaos config: {e}")
-
-    def get_all_beds_snapshot(self):
-        """Returns a thread-safe snapshot of all dynamically discovered patient beds."""
+    def snapshot(self):
         now = time.time()
         with self.lock:
-            beds_snap = {}
-            for pid in sorted(self.beds.keys()):
-                bed = self.beds[pid]
-                agents_snap = {}
-                for aid, ag in bed.agents.items():
-                    agents_snap[aid] = {
-                        "trust_score": ag.trust_score,
-                        "s_l": round(ag.s_l, 2),
-                        "s_j": round(ag.s_j, 2),
-                        "s_p": round(ag.s_p, 2),
-                        "s_d": round(ag.s_d, 2),
-                        "avg_latency_ms": round(ag.avg_latency_ms, 1),
-                        "jitter_ms": round(ag.jitter_ms, 1),
-                        "loss_rate_pct": round(ag.loss_rate * 100.0, 1),
-                        "latest_value": ag.latest_value,
-                        "plausible": ag.plausible,
-                        "status": ag.status,
-                        "packets_received": ag.packets_received,
-                        "packets_missed": ag.packets_missed,
-                    }
-                beds_snap[pid] = {
-                    "patient_id": pid,
-                    "online": (now - bed.last_seen_ts) <= 8.0,
-                    "seconds_since_seen": round(now - bed.last_seen_ts, 1),
-                    "agents": agents_snap,
-                    "edge_summary": dict(bed.edge_summary),
-                    "ecg_wave": list(bed.latest_ecg_wave),
-                    "gateway_cpu_inf_ms": bed.gateway_cpu_inf_ms,
-                    "active_routing": bed.active_routing,
-                    "offload_active": bed.offload_active,
-                    "trust_history": list(bed.trust_history),
-                    "alert_log": list(bed.alert_log),
+            out = {}
+            for pid, bed in sorted(self.beds.items()):
+                online = (now - bed["last_seen"]) < 6.0
+                for aid, tr in bed["trackers"].items():
+                    changed, old_s, new_s = tr.evaluate_status(now)
+                    if changed:
+                        lvl = "CRITICAL" if new_s == "ISOLATED" else ("WARN" if new_s == "SUSPICIOUS" else "INFO")
+                        self._log(pid, lvl, f"{AGENT_LABELS.get(aid, aid)} {old_s} -> {new_s} (T={tr.trust_score:.2f})")
+
+                ecg_t = bed["trackers"]["Agent_ECG"].trust_score
+                spo2_t = bed["trackers"]["Agent_SpO2"].trust_score
+                hr_t = bed["trackers"]["Agent_HR"].trust_score
+
+                if not bed["history"] or (now - bed["history"][-1]["ts"]) >= 0.45:
+                    bed["history"].append({"ts": now, "ecg": ecg_t, "spo2": spo2_t, "hr": hr_t})
+
+                if bed["edge_summary"].get("link_congested", False) or ecg_t < 0.65:
+                    bed["alert_route"] = "Relay B"
+                else:
+                    bed["alert_route"] = "Direct"
+
+                out[pid] = {
+                    "online": online,
+                    "last_seen_ago": round(now - bed["last_seen"], 1),
+                    "compute_mode": bed["compute_mode"],
+                    "alert_route": bed["alert_route"],
+                    "edge": dict(bed["edge_summary"]),
+                    "history": list(bed["history"]),
+                    "agents": {
+                        aid: {
+                            "trust": round(tr.trust_score, 3),
+                            "s_l": round(tr.s_l, 2),
+                            "s_j": round(tr.s_j, 2),
+                            "s_p": round(tr.s_p, 2),
+                            "s_d": round(tr.s_d, 2),
+                            "status": tr.status,
+                            "value": tr.last_value,
+                            "ecg_wave": list(tr.ecg_wave),
+                        }
+                        for aid, tr in bed["trackers"].items()
+                    },
                 }
-            return {
-                "beds": beds_snap,
-                "global_alert_log": list(self.global_alert_log),
-            }
+            return out, list(self.event_logs)
+
+    def remove_offline(self):
+        now = time.time()
+        with self.lock:
+            stale = [pid for pid, b in self.beds.items() if (now - b["last_seen"]) >= 6.0]
+            for pid in stale:
+                del self.beds[pid]
 
 
 @st.cache_resource
-def get_nurse_station_engine(version="v2_dynamic_beds"):
-    broker = os.environ.get("MQTT_BROKER", "127.0.0.1")
-    port = int(os.environ.get("MQTT_PORT", "1883"))
-    return NurseStationEngine(broker=broker, port=port)
+def get_engine(version="v4_clean_bento"):
+    return MultiPatientTrustEngine()
 
 
-def render_status_badge(status_str):
-    if status_str.startswith("TRUSTED"):
-        bg, fg, border = "#0f5132", "#d1e7dd", "#198754"
-    elif status_str.startswith("OFFLOADED"):
-        bg, fg, border = "#664d03", "#fff3cd", "#ffc107"
-    else:
-        bg, fg, border = "#842029", "#f8d7da", "#dc3545"
+def svg_ecg(wave, color="#10b981", width=600, height=140):
+    if not wave:
+        wave = [0.0] * 250
+    pts = []
+    n = len(wave)
+    mid = height * 0.58
+    scale = height * 0.28
+    for i, val in enumerate(wave):
+        x = (i / max(1, n - 1)) * width
+        y = mid - float(val) * scale
+        pts.append(f"{x:.1f},{y:.1f}")
+    poly = " ".join(pts)
+    return (
+        f'<svg viewBox="0 0 {width} {height}" width="100%" height="{height}" '
+        f'style="display:block;background:#0e1014;border-radius:6px;border:1px solid #1c1f26;">'
+        f'<line x1="0" y1="{mid:.1f}" x2="{width}" y2="{mid:.1f}" stroke="#191c22" stroke-width="1"/>'
+        f'<polyline fill="none" stroke="{color}" stroke-width="2" points="{poly}"/>'
+        f"</svg>"
+    )
+
+
+def svg_trust_chart(history, width=600, height=130):
+    if not history:
+        return ""
+    n = len(history)
+
+    def line_pts(key):
+        pts = []
+        for i, h in enumerate(history):
+            x = (i / max(1, n - 1)) * width
+            y = height - float(h[key]) * (height - 16) - 8
+            pts.append(f"{x:.1f},{y:.1f}")
+        return " ".join(pts)
+
+    y70 = height - 0.70 * (height - 16) - 8
+    y45 = height - 0.45 * (height - 16) - 8
 
     return (
-        f'<div style="background-color:{bg};color:{fg};border:1px solid {border};'
-        f'padding:6px 10px;border-radius:6px;font-weight:700;text-align:center;'
-        f'font-size:0.86rem;margin-top:4px;margin-bottom:8px;">{status_str}</div>'
+        f'<svg viewBox="0 0 {width} {height}" width="100%" height="{height}" '
+        f'style="display:block;background:#0e1014;border-radius:6px;border:1px solid #1c1f26;">'
+        f'<line x1="0" y1="{y70:.1f}" x2="{width}" y2="{y70:.1f}" stroke="#262932" stroke-dasharray="4 4" stroke-width="1"/>'
+        f'<line x1="0" y1="{y45:.1f}" x2="{width}" y2="{y45:.1f}" stroke="#3a2024" stroke-dasharray="4 4" stroke-width="1"/>'
+        f'<polyline fill="none" stroke="#10b981" stroke-width="2" points="{line_pts("ecg")}"/>'
+        f'<polyline fill="none" stroke="#3b82f6" stroke-width="2" points="{line_pts("spo2")}"/>'
+        f'<polyline fill="none" stroke="#f59e0b" stroke-width="2" points="{line_pts("hr")}"/>'
+        f"</svg>"
     )
 
 
-def render_sidebar_chaos_controller(engine, bed_ids):
-    """Renders per-patient Sidebar Chaos Controller dynamically for active Jetson beds."""
-    st.sidebar.title("⚡ Live Fault Injection (Chaos Engine)")
-    st.sidebar.caption(
-        "Beds are discovered automatically as Jetsons connect. Select any active bed below to inject faults."
+def status_pill_info(bed):
+    if not bed["online"]:
+        return "OFFLINE", "pill-muted"
+    isolated = [a for a, d in bed["agents"].items() if d["status"] == "ISOLATED"]
+    suspicious = [a for a, d in bed["agents"].items() if d["status"] == "SUSPICIOUS"]
+    if bed["edge"].get("is_arrhythmia") and bed["agents"]["Agent_ECG"]["status"] != "ISOLATED":
+        return "ALARM", "pill-red"
+    if isolated:
+        return "SENSOR ISOLATED", "pill-red"
+    if suspicious or bed["compute_mode"] != "Jetson Local":
+        return "DEGRADED" if suspicious else "OFFLOADED", "pill-amber"
+    return "STABLE", "pill-green"
+
+
+def dot_color(status):
+    if status == "TRUSTED":
+        return "#10b981"
+    if status == "SUSPICIOUS":
+        return "#f59e0b"
+    return "#ef4444"
+
+
+def ward_tile(pid, bed, is_selected):
+    label, pill_cls = status_pill_info(bed)
+    hr_ag = bed["agents"]["Agent_HR"]
+    sp_ag = bed["agents"]["Agent_SpO2"]
+    ecg_ag = bed["agents"]["Agent_ECG"]
+
+    hr_txt = "ISO" if hr_ag["status"] == "ISOLATED" else (str(hr_ag["value"]) if hr_ag["value"] is not None else "--")
+    sp_txt = "ISO" if sp_ag["status"] == "ISOLATED" else (f"{sp_ag['value']}%" if sp_ag["value"] is not None else "--")
+    ecg_col = "#ef4444" if (ecg_ag["status"] == "ISOLATED" or bed["edge"].get("is_arrhythmia")) else "#10b981"
+    border_col = "#3b82f6" if is_selected else "#1f2228"
+
+    return (
+        f'<div class="tile" style="border-color:{border_col};">'
+        f'<div class="row-between">'
+        f'<span class="bed-id">{pid}</span>'
+        f'<span class="pill {pill_cls}">{label}</span>'
+        f"</div>"
+        f'<div class="ward-vitals">'
+        f'<div><div class="lbl">HR</div><div class="val-sm">{hr_txt} <span class="unit">bpm</span></div></div>'
+        f'<div><div class="lbl">SpO2</div><div class="val-sm">{sp_txt}</div></div>'
+        f'<div><div class="lbl">Mode</div><div class="val-xs">{bed["compute_mode"]}</div></div>'
+        f"</div>"
+        f'<div style="margin:10px 0 8px 0;">{svg_ecg(ecg_ag["ecg_wave"], color=ecg_col, width=360, height=54)}</div>'
+        f'<div class="trust-dots">'
+        f'<span><i class="dot" style="background:{dot_color(ecg_ag["status"])}"></i>ECG {ecg_ag["trust"]:.2f}</span>'
+        f'<span><i class="dot" style="background:{dot_color(sp_ag["status"])}"></i>SpO2 {sp_ag["trust"]:.2f}</span>'
+        f'<span><i class="dot" style="background:{dot_color(hr_ag["status"])}"></i>HR {hr_ag["trust"]:.2f}</span>'
+        f"</div>"
+        f"</div>"
     )
 
-    if not bed_ids:
-        st.sidebar.info("⏳ Waiting for at least 1 Bedside Jetson node to connect...")
-        auto_refresh = st.sidebar.checkbox("⏱️ Live Auto-Refresh (0.6s)", value=True)
-        return auto_refresh
 
-    all_chaos = read_all_chaos_config(bed_ids)
+def detail_view(pid, bed, logs):
+    ecg_ag = bed["agents"]["Agent_ECG"]
+    sp_ag = bed["agents"]["Agent_SpO2"]
+    hr_ag = bed["agents"]["Agent_HR"]
+    edge = bed["edge"]
 
-    col_a, col_b = st.sidebar.columns(2)
-    with col_a:
-        if st.button("🔄 Reset Faults", use_container_width=True):
-            baseline = {bed: default_bed_chaos() for bed in bed_ids}
-            write_all_chaos_config(baseline)
-            for bed in bed_ids:
-                engine.publish_patient_chaos(bed, baseline[bed], baseline)
-            st.rerun()
-    with col_b:
-        if st.button("🗑️ Prune Offline", use_container_width=True):
-            engine.remove_inactive_beds(timeout_sec=6.0)
-            st.rerun()
+    ecg_Quarantined = ecg_ag["status"] == "ISOLATED"
+    is_arr = bool(edge.get("is_arrhythmia")) and not ecg_Quarantined
+    ecg_col = "#ef4444" if (is_arr or ecg_Quarantined) else "#10b981"
+    rhythm_txt = "Quarantined (Spoofed)" if ecg_Quarantined else ("Arrhythmia" if is_arr else "Normal Sinus")
+    rhythm_col = "#ef4444" if (is_arr or ecg_Quarantined) else "#ededef"
 
-    st.sidebar.divider()
-
-    target_bed = st.sidebar.selectbox(
-        f"🛏️ Target Patient Bed ({len(bed_ids)} Connected)",
-        options=bed_ids,
-        index=0,
-        key="chaos_target_bed_select",
-    )
-
-    bed_cfg = all_chaos.get(target_bed, default_bed_chaos())
-    new_bed_cfg = {}
-
-    agent_labels = {
-        "Agent_ECG": "🫀 Agent_ECG (Waveform Sensor)",
-        "Agent_SpO2": "🫁 Agent_SpO2 (Pulse Oximeter)",
-        "Agent_HR": "💓 Agent_HR (Heart Rate Monitor)",
-    }
-
-    for agent_id in AGENT_IDS:
-        st.sidebar.subheader(f"{agent_labels[agent_id]} [{target_bed}]")
-        cfg = bed_cfg.get(agent_id, {"delay_ms": 10, "drop_rate": 0.0, "malicious": False})
-
-        delay_ms = st.sidebar.slider(
-            f"{agent_id} Delay (ms)",
-            min_value=5,
-            max_value=400,
-            value=int(cfg.get("delay_ms", 10)),
-            step=5,
-            key=f"delay_{target_bed}_{agent_id}",
-        )
-        drop_rate = st.sidebar.slider(
-            f"{agent_id} Packet Drop Rate",
-            min_value=0.0,
-            max_value=0.6,
-            value=float(cfg.get("drop_rate", 0.0)),
-            step=0.05,
-            key=f"drop_{target_bed}_{agent_id}",
-        )
-        malicious = st.sidebar.checkbox(
-            f"Inject Spoofed/Malicious Vitals ({agent_id})",
-            value=bool(cfg.get("malicious", False)),
-            key=f"mal_{target_bed}_{agent_id}",
-        )
-        new_bed_cfg[agent_id] = {
-            "delay_ms": delay_ms,
-            "drop_rate": drop_rate,
-            "malicious": malicious,
-        }
-        st.sidebar.markdown("---")
-
-    st.sidebar.subheader(f"🖧 {target_bed} Orin Link & Compute")
-    orin_cfg = bed_cfg.get("Orin_Link", {"overload_gpu": False, "use_relay_b": False})
-    sim_congest = st.sidebar.checkbox(
-        f"Simulate {target_bed} Orin Link Congestion / Offload",
-        value=bool(orin_cfg.get("overload_gpu", False) or orin_cfg.get("use_relay_b", False)),
-        key=f"orin_congest_{target_bed}",
-    )
-    new_bed_cfg["Orin_Link"] = {
-        "overload_gpu": sim_congest,
-        "use_relay_b": sim_congest,
-    }
-
-    if new_bed_cfg != bed_cfg:
-        all_chaos[target_bed] = new_bed_cfg
-        write_all_chaos_config(all_chaos)
-        engine.publish_patient_chaos(target_bed, new_bed_cfg, all_chaos)
-
-    st.sidebar.divider()
-    auto_refresh = st.sidebar.checkbox("⏱️ Live Auto-Refresh (0.6s)", value=True)
-    return auto_refresh
-
-
-def render_multi_patient_ward_overview(beds_snap):
-    """Renders top-level ICU Ward Overview cards dynamically for all connected Jetson nodes."""
-    bed_ids = list(beds_snap.keys())
-    st.subheader(
-        f"🏥 ICU Ward Live Overview — {len(bed_ids)} Active Bedside Jetson Node(s) Connected"
-    )
-    cols = st.columns(max(1, len(bed_ids)))
-
-    for idx, pid in enumerate(bed_ids):
-        b = beds_snap[pid]
-        edge = b["edge_summary"]
-        agents = b["agents"]
-        vitals = edge.get("latest_vitals", {})
-
-        any_isolated = any(ag["status"].startswith("ISOLATED") for ag in agents.values())
-        any_offloaded = b["offload_active"]
-        local_alarm = bool(edge.get("local_bed_alarm", False)) and not agents["Agent_ECG"][
-            "status"
-        ].startswith("ISOLATED")
-
-        if not b.get("online", True):
-            banner_bg, banner_fg, banner_txt = "#475569", "#f1f5f9", f"⚠️ OFFLINE ({b.get('seconds_since_seen', 0)}s)"
-        elif local_alarm:
-            banner_bg, banner_fg, banner_txt = "#dc3545", "#ffffff", "🚨 ARRHYTHMIA ALARM"
-        elif any_isolated:
-            banner_bg, banner_fg, banner_txt = "#842029", "#f8d7da", "🛡️ SENSOR QUARANTINED"
-        elif any_offloaded:
-            banner_bg, banner_fg, banner_txt = "#664d03", "#fff3cd", "🔀 OFFLOADED (RELAY B)"
+    def sensor_tile(title, ag, unit):
+        st_name = ag["status"]
+        p_cls = "pill-green" if st_name == "TRUSTED" else ("pill-amber" if st_name == "SUSPICIOUS" else "pill-red")
+        bar_col = dot_color(st_name)
+        pct = int(round(ag["trust"] * 100))
+        if title == "ECG sensor":
+            reading = "250 Hz stream" if st_name != "ISOLATED" else "Stream isolated"
         else:
-            banner_bg, banner_fg, banner_txt = "#0f5132", "#d1e7dd", "🟢 ALL SENSORS TRUSTED"
+            v = ag["value"]
+            reading = f"{v} {unit}".strip() if (v is not None and st_name != "ISOLATED") else ("Isolated" if st_name == "ISOLATED" else "--")
 
-        with cols[idx]:
-            with st.container(border=True):
-                st.markdown(
-                    f'<div style="display:flex;justify-content:space-between;align-items:center;">'
-                    f'<span style="font-size:1.1rem;font-weight:800;">🛏️ {pid}</span>'
-                    f'<span style="background:{banner_bg};color:{banner_fg};padding:3px 9px;'
-                    f'border-radius:5px;font-size:0.78rem;font-weight:700;">{banner_txt}</span>'
-                    f"</div>",
-                    unsafe_allow_html=True,
-                )
-                c1, c2, c3 = st.columns(3)
-                c1.metric("HR", f"{vitals.get('hr', 75)} bpm")
-                c2.metric("SpO2", f"{vitals.get('spo2', 98)}%")
-                c3.metric("AI Speed", f"{edge.get('inf_ms', 0.0):.2f} ms")
-                st.caption(
-                    f"**Trust Scores:** ECG `{agents['Agent_ECG']['trust_score']:.2f}` • "
-                    f"SpO2 `{agents['Agent_SpO2']['trust_score']:.2f}` • "
-                    f"HR `{agents['Agent_HR']['trust_score']:.2f}`  \n"
-                    f"**Route:** `{b['active_routing']}`"
-                )
+        return (
+            f'<div class="tile span-4">'
+            f'<div class="row-between"><span class="lbl">{title}</span><span class="pill {p_cls}">{st_name}</span></div>'
+            f'<div class="row-between" style="align-items:baseline;margin-top:8px;">'
+            f'<div class="val-lg">{ag["trust"]:.2f}</div>'
+            f'<div class="sub">{reading}</div>'
+            f"</div>"
+            f'<div class="bar-bg"><div class="bar-fill" style="width:{pct}%;background:{bar_col};"></div></div>'
+            f'<div class="sub-metrics">'
+            f'<span>L {ag["s_l"]:.2f}</span><span>J {ag["s_j"]:.2f}</span><span>P {ag["s_p"]:.2f}</span><span>D {ag["s_d"]:.2f}</span>'
+            f"</div>"
+            f"</div>"
+        )
+
+    bed_logs = [e for e in logs if e["bed"] == pid][:6]
+    if bed_logs:
+        rows = "".join(
+            f'<div class="log-row"><span class="log-ts">{e["ts"]}</span>'
+            f'<span class="log-lvl log-{e["level"].lower()}">{e["level"]}</span>'
+            f'<span class="log-msg">{e["msg"]}</span></div>'
+            for e in bed_logs
+        )
+    else:
+        rows = '<div class="sub" style="padding:6px 0;">No anomalies or trust transitions recorded for this bed.</div>'
+
+    return (
+        f'<div class="bento">'
+        # Row 1: ECG Waveform (8) + Inference & Rhythm (4)
+        f'<div class="tile span-8">'
+        f'<div class="row-between"><span class="lbl">ECG Lead II &mdash; {pid}</span><span class="sub">250 Hz</span></div>'
+        f'<div style="margin-top:10px;">{svg_ecg(ecg_ag["ecg_wave"], color=ecg_col, width=720, height=150)}</div>'
+        f"</div>"
+        f'<div class="tile span-4">'
+        f'<div class="lbl">Rhythm &amp; Edge Inference</div>'
+        f'<div class="val-md" style="color:{rhythm_col};margin-top:6px;">{rhythm_txt}</div>'
+        f'<div class="kv-list">'
+        f'<div class="kv"><span>Arrhythmia risk</span><span>{edge.get("anomaly_prob", 0.0) * 100:.1f}%</span></div>'
+        f'<div class="kv"><span>Inference latency</span><span>{edge.get("inference_ms", 0.0):.2f} ms</span></div>'
+        f'<div class="kv"><span>Compute state</span><span>{bed["compute_mode"]}</span></div>'
+        f'<div class="kv"><span>Alert path</span><span>{bed["alert_route"]}</span></div>'
+        f"</div>"
+        f"</div>"
+        # Row 2: Three Sensor Trust Tiles (4 + 4 + 4)
+        + sensor_tile("ECG sensor", ecg_ag, "")
+        + sensor_tile("SpO2 sensor", sp_ag, "%")
+        + sensor_tile("HR sensor", hr_ag, "bpm")
+        # Row 3: Trust History (8) + Recent Events (4)
+        + f'<div class="tile span-8">'
+        f'<div class="row-between">'
+        f'<span class="lbl">Trust score timeline</span>'
+        f'<span class="legend">'
+        f'<span><i class="dot" style="background:#10b981"></i>ECG</span>'
+        f'<span><i class="dot" style="background:#3b82f6"></i>SpO2</span>'
+        f'<span><i class="dot" style="background:#f59e0b"></i>HR</span>'
+        f"</span>"
+        f"</div>"
+        f'<div style="margin-top:10px;">{svg_trust_chart(bed["history"], width=720, height=130)}</div>'
+        f"</div>"
+        f'<div class="tile span-4">'
+        f'<div class="lbl">Events</div>'
+        f'<div class="log-list">{rows}</div>'
+        f"</div>"
+        f"</div>"
+    )
+
+
+BENTO_CSS = """
+<style>
+  [data-testid="stSidebar"], [data-testid="collapsedControl"], header, footer, #MainMenu {
+    display: none !important;
+  }
+  .stApp {
+    background-color: #0a0a0c;
+    color: #ededef;
+  }
+  .block-container {
+    padding-top: 1.4rem !important;
+    padding-bottom: 2rem !important;
+    max-width: 1320px !important;
+  }
+  .topbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 14px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid #1f2228;
+  }
+  .title {
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: #ededef;
+  }
+  .meta {
+    font-size: 12px;
+    color: #7c828d;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .sec-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #7c828d;
+    margin: 14px 0 10px 0;
+  }
+  .ward-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .bento {
+    display: grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap: 12px;
+  }
+  .tile {
+    background: #121316;
+    border: 1px solid #1f2228;
+    border-radius: 10px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+  .span-8 { grid-column: span 8; }
+  .span-4 { grid-column: span 4; }
+  .span-12 { grid-column: span 12; }
+  @media (max-width: 960px) {
+    .span-8, .span-4 { grid-column: span 12; }
+  }
+  .row-between {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .bed-id {
+    font-size: 15px;
+    font-weight: 600;
+    color: #ededef;
+  }
+  .lbl {
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #7c828d;
+  }
+  .sub {
+    font-size: 12px;
+    color: #7c828d;
+    font-variant-numeric: tabular-nums;
+  }
+  .val-lg {
+    font-size: 30px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+  .val-md {
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+  .val-sm {
+    font-size: 20px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    margin-top: 2px;
+  }
+  .val-xs {
+    font-size: 13px;
+    font-weight: 500;
+    color: #ededef;
+    margin-top: 6px;
+  }
+  .unit {
+    font-size: 11px;
+    color: #7c828d;
+    font-weight: 400;
+  }
+  .ward-vitals {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1.2fr;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .pill {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 999px;
+  }
+  .pill-green { color: #10b981; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); }
+  .pill-amber { color: #f59e0b; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); }
+  .pill-red { color: #ef4444; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); }
+  .pill-muted { color: #7c828d; background: #181a1f; border: 1px solid #262932; }
+  .trust-dots {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: #7c828d;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .legend {
+    display: flex;
+    gap: 12px;
+    font-size: 11px;
+    color: #7c828d;
+  }
+  .dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    margin-right: 5px;
+  }
+  .bar-bg {
+    width: 100%;
+    height: 5px;
+    background: #1c1f26;
+    border-radius: 999px;
+    overflow: hidden;
+    margin: 10px 0 8px 0;
+  }
+  .bar-fill {
+    height: 100%;
+    border-radius: 999px;
+  }
+  .sub-metrics {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: #7c828d;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .kv-list {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .kv {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: #7c828d;
+    padding-top: 6px;
+    border-top: 1px solid #1b1e24;
+  }
+  .kv span:last-child {
+    color: #ededef;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .log-list {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .log-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    padding-top: 6px;
+    border-top: 1px solid #1b1e24;
+  }
+  .log-ts {
+    color: #7c828d;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .log-lvl {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+  .log-critical { color: #ef4444; background: rgba(239, 68, 68, 0.12); }
+  .log-warn { color: #f59e0b; background: rgba(245, 158, 11, 0.12); }
+  .log-info { color: #10b981; background: rgba(16, 185, 129, 0.12); }
+  .log-msg { color: #ededef; }
+</style>
+"""
 
 
 def main():
-    st.set_page_config(
-        page_title="Multi-Patient Trust-Aware Smart Healthcare ICU Monitor",
-        page_icon="🏥",
-        layout="wide",
-    )
+    st.set_page_config(page_title="Nurse Station", layout="wide", initial_sidebar_state="collapsed")
+    st.markdown(BENTO_CSS, unsafe_allow_html=True)
+
+    engine = get_engine("v4_clean_bento")
+    beds_snap, logs = engine.snapshot()
+    bed_ids = list(beds_snap.keys())
+    online_count = sum(1 for b in beds_snap.values() if b["online"])
 
     st.markdown(
-        """
-        <style>
-        @keyframes pulse-red {
-            0% { background-color: #842029; box-shadow: 0 0 8px #dc3545; }
-            50% { background-color: #dc3545; box-shadow: 0 0 22px #ff4d4d; }
-            100% { background-color: #842029; box-shadow: 0 0 8px #dc3545; }
-        }
-        .bedside-alarm-banner {
-            animation: pulse-red 1.0s infinite;
-            color: #ffffff;
-            padding: 14px 18px;
-            border-radius: 8px;
-            font-weight: 800;
-            font-size: 1.15rem;
-            text-align: center;
-            margin-bottom: 12px;
-            border: 2px solid #ffccd5;
-        }
-        .bedside-normal-banner {
-            background-color: #0f5132;
-            color: #d1e7dd;
-            padding: 12px 16px;
-            border-radius: 8px;
-            font-weight: 700;
-            font-size: 1.02rem;
-            text-align: center;
-            margin-bottom: 12px;
-            border: 1px solid #198754;
-        }
-        .conflict-warning-banner {
-            background-color: #664d03;
-            color: #fff3cd;
-            padding: 10px 14px;
-            border-radius: 8px;
-            font-weight: 700;
-            font-size: 0.95rem;
-            text-align: center;
-            margin-bottom: 12px;
-            border: 1px solid #ffc107;
-        }
-        </style>
-        """,
+        f'<div class="topbar">'
+        f'<div class="title">Central Nurse Station</div>'
+        f'<div class="meta">Broker {engine.broker_host}:{engine.broker_port} &nbsp;|&nbsp; {online_count} active bed(s)</div>'
+        f"</div>",
         unsafe_allow_html=True,
     )
 
-    st.title("🏥 Trust-Aware Multi-Patient ICU Edge Intelligence Dashboard")
-    st.caption(
-        "Central Nurse Station • Dynamic Bedside Jetson Discovery • Real-Time Trust Scoring, Offloading & Sensor Quarantine"
-    )
-
-    engine = get_nurse_station_engine()
-    all_snap = engine.get_all_beds_snapshot()
-    beds_snap = all_snap["beds"]
-    bed_ids = list(beds_snap.keys())
-
-    auto_refresh = render_sidebar_chaos_controller(engine, bed_ids)
-
     if not bed_ids:
-        st.info(
-            "📡 **Listening for Bedside Jetson Orin nodes on MQTT Broker...**\n\n"
-            "No patient beds are hardcoded! As soon as you start `./start_bedside.sh --patient-id <Bed_Name> --broker <LAPTOP_IP>` "
-            "on one or more Jetsons, each patient bed will automatically appear here in real time."
+        st.markdown(
+            '<div class="tile" style="padding:32px;text-align:center;">'
+            '<div class="val-md">Waiting for bedside nodes</div>'
+            '<div class="sub" style="margin-top:8px;">'
+            "Start a Jetson bedside node pointed at this broker: "
+            "<code>./start_bedside.sh --patient-id Bed_1 --broker &lt;LAPTOP_IP&gt;</code>"
+            "</div></div>",
+            unsafe_allow_html=True,
         )
-        if auto_refresh:
-            time.sleep(0.6)
-            st.rerun()
+        time.sleep(0.8)
+        st.rerun()
         return
 
-    # 1. Top Multi-Patient Ward Summary Row
-    render_multi_patient_ward_overview(beds_snap)
+    if "selected_bed" not in st.session_state or st.session_state.selected_bed not in bed_ids:
+        st.session_state.selected_bed = bed_ids[0]
 
-    st.divider()
-
-    # 2. Patient Bed Selector for Detailed Dual-View Telemetry
-    selected_bed = st.radio(
-        "🔍 **Select Connected Patient Bed for Detailed Bedside & Trust Inspection:**",
-        options=bed_ids,
-        horizontal=True,
-        key="detailed_bed_selector",
-    )
-
-    snap = beds_snap[selected_bed]
-    edge = snap["edge_summary"]
-    agents = snap["agents"]
-
-    left_col, right_col = st.columns([1.0, 1.15], gap="large")
-
-    # =========================================================================
-    # LEFT COLUMN: Selected Patient's Bedside Jetson Orin Monitor
-    # =========================================================================
-    with left_col:
-        st.subheader(f"🖥️ {selected_bed} — NVIDIA Jetson Orin Bedside Monitor")
-
-        ecg_isolated = agents["Agent_ECG"]["status"].startswith("ISOLATED")
-        local_alarm = bool(edge.get("local_bed_alarm", False))
-
-        if local_alarm and not ecg_isolated:
-            st.markdown(
-                f'<div class="bedside-alarm-banner">'
-                f'🚨 [{selected_bed}] CRITICAL BEDSIDE ALARM: ARRHYTHMIA DETECTED '
-                f'({edge.get("arrhythmia_prob", 0.0) * 100:.1f}% Confidence | '
-                f'{edge.get("inf_ms", 0.0):.2f} ms Edge Response)'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-        elif local_alarm and ecg_isolated:
-            st.markdown(
-                f'<div class="conflict-warning-banner">'
-                f'🛡️ [{selected_bed}] BEDSIDE ALARM SUPPRESSED AT NURSE STATION: '
-                f'Agent_ECG Quarantined (Trust &lt; 0.45 — Spoofed/Noisy Signal)'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-        else:
-            st.markdown(
-                f'<div class="bedside-normal-banner">'
-                f'✅ [{selected_bed}] NORMAL SINUS RHYTHM — Zero-Latency Bedside AI Monitor Nominal'
-                f'</div>',
-                unsafe_allow_html=True,
+    if len(bed_ids) > 1:
+        cols = st.columns([3, 9])
+        with cols[0]:
+            st.session_state.selected_bed = st.selectbox(
+                "Bed",
+                bed_ids,
+                index=bed_ids.index(st.session_state.selected_bed),
+                label_visibility="collapsed",
             )
 
-        if edge.get("sensor_conflict", False):
-            st.markdown(
-                f'<div class="conflict-warning-banner">'
-                f'⚠️ [{selected_bed}] CROSS-SENSOR PHYSIOLOGICAL CONFLICT DETECTED: '
-                f'Discrepancy between ECG Sinus Rhythm, HR, and SpO2!'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
+    selected_bed = st.session_state.selected_bed
 
-        m1, m2, m3 = st.columns(3)
-        m1.metric(
-            "1D-CNN Inference Latency",
-            f"{edge.get('inf_ms', 0.0):.2f} ms",
-            delta="< 5.0 ms SLA",
-        )
-        m2.metric(
-            "Execution Provider",
-            str(edge.get("exec_provider", "CPU")).replace("ExecutionProvider", ""),
-        )
-        m3.metric(
-            "Arrhythmia Probability",
-            f"{edge.get('arrhythmia_prob', 0.0) * 100:.1f}%",
-        )
+    ward_cards = "".join(ward_tile(pid, b, pid == selected_bed) for pid, b in beds_snap.items())
+    st.markdown(f'<div class="ward-grid">{ward_cards}</div>', unsafe_allow_html=True)
 
-        st.markdown(f"**Live 250 Hz Bedside ECG Waveform ({selected_bed})**")
-        ecg_df = pd.DataFrame({"ECG (mV)": snap["ecg_wave"]})
-        st.line_chart(ecg_df, height=240)
+    st.markdown(detail_view(selected_bed, beds_snap[selected_bed], logs), unsafe_allow_html=True)
 
-        v1, v2, v3 = st.columns(3)
-        vitals = edge.get("latest_vitals", {})
-        v1.metric("Bedside Heart Rate", f"{vitals.get('hr', 75)} bpm")
-        v2.metric("Bedside SpO2", f"{vitals.get('spo2', 98)} %")
-        v3.metric("ECG Wave Variance", f"{vitals.get('ecg_variance', 0.04):.4f}")
-
-        st.markdown("**ICU Ward Emergency & Security Event Log**")
-        if all_snap["global_alert_log"]:
-            for entry in all_snap["global_alert_log"][:6]:
-                st.code(entry, language="text")
-        else:
-            st.info("No emergency alerts or security quarantines triggered yet.")
-
-    # =========================================================================
-    # RIGHT COLUMN: Selected Patient's Multi-Agent Trust & Routing Engine
-    # =========================================================================
-    with right_col:
-        st.subheader(f"🛡️ {selected_bed} — Multi-Agent Trust & Routing Engine")
-
-        r_col1, r_col2 = st.columns(2)
-        with r_col1:
-            route_icon = "🔀" if snap["offload_active"] else "🟢"
-            st.metric("Active Alert Routing Path", f"{route_icon} {snap['active_routing']}")
-        with r_col2:
-            if snap["offload_active"]:
-                cpu_ms = snap["gateway_cpu_inf_ms"]
-                offload_txt = (
-                    f"OFFLOADED (Gateway CPU: {cpu_ms:.2f} ms)"
-                    if cpu_ms > 0
-                    else "OFFLOADED (Gateway CPU Fallback)"
-                )
-            else:
-                offload_txt = "PRIMARY (Jetson Orin Edge GPU)"
-            st.metric("Compute Offloading State", offload_txt)
-
-        card_cols = st.columns(3)
-        units = {
-            "Agent_ECG": ("Var", ""),
-            "Agent_SpO2": ("SpO2", "%"),
-            "Agent_HR": ("HR", " bpm"),
-        }
-
-        for idx, agent_id in enumerate(AGENT_IDS):
-            ag = agents[agent_id]
-            label_prefix, unit_suffix = units[agent_id]
-            with card_cols[idx]:
-                with st.container(border=True):
-                    st.markdown(f"**{agent_id}**")
-                    st.markdown(render_status_badge(ag["status"]), unsafe_allow_html=True)
-                    st.metric(
-                        label="Composite Trust Score T_i(t)",
-                        value=f"{ag['trust_score']:.2f}",
-                        delta=f"{ag['trust_score'] * 100:.0f}% Trust",
-                    )
-                    if ag["status"].startswith("ISOLATED"):
-                        st.markdown(f"**Reading:** ~~`{ag['latest_value']}{unit_suffix}`~~ *(Muted)*")
-                    else:
-                        st.markdown(f"**Reading ({label_prefix}):** `{ag['latest_value']}{unit_suffix}`")
-                    st.caption(
-                        f"Latency: **{ag['avg_latency_ms']:.1f} ms** | "
-                        f"Jitter: **{ag['jitter_ms']:.1f} ms**\n\n"
-                        f"Loss: **{ag['loss_rate_pct']:.1f}%** | "
-                        f"S_L={ag['s_l']:.2f} S_J={ag['s_j']:.2f} S_P={ag['s_p']:.2f} S_D={ag['s_d']:.2f}"
-                    )
-
-        st.markdown(f"**Real-Time Multi-Agent Trust Trajectory ({selected_bed}) $T_i(t) \\in [0.0, 1.0]$**")
-        if snap["trust_history"]:
-            hist_df = pd.DataFrame(snap["trust_history"]).set_index("time")
-            st.line_chart(hist_df[["Agent_ECG", "Agent_SpO2", "Agent_HR"]], height=230)
-        else:
-            empty_df = pd.DataFrame(
-                {"Agent_ECG": [1.0], "Agent_SpO2": [1.0], "Agent_HR": [1.0]}
-            )
-            st.line_chart(empty_df, height=230)
-
-        st.caption(
-            "**Thresholds:** `TRUSTED ≥ 0.70` (Green / Orin GPU) • "
-            "`OFFLOADED 0.45–0.70 or Latency > 180 ms` (Yellow / Gateway CPU & Relay B) • "
-            "`ISOLATED < 0.45` (Red / Byzantine Sensor Quarantined)"
-        )
-
-    if auto_refresh:
-        time.sleep(0.6)
-        st.rerun()
+    time.sleep(0.6)
+    st.rerun()
 
 
 if __name__ == "__main__":
