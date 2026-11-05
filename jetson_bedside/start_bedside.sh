@@ -57,7 +57,7 @@ elif [[ -d "venv" ]]; then
     source venv/bin/activate
 else
     echo "[1/3] Creating Python virtual environment (venv)..."
-    python3 -m venv venv
+    python3 -m venv --system-site-packages venv
     source venv/bin/activate
     pip install --upgrade pip
     pip install -r requirements.txt

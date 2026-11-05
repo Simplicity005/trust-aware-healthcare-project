@@ -52,8 +52,7 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 
-# Large model artifacts (generated at runtime by make_model.py)
-*.onnx
+# Large TensorRT engine artifacts
 *.trt
 *.engine
 
