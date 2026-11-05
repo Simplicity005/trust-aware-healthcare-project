@@ -64,4 +64,4 @@ if ! systemctl is-active --quiet mosquitto 2>/dev/null && ! pgrep -x "mosquitto"
 fi
 
 echo "[3/3] Launching Multi-Patient Nurse Station Dashboard..."
-MQTT_BROKER="$BROKER" streamlit run dashboard.py
+MQTT_BROKER="$BROKER" streamlit run dashboard.py --server.address 0.0.0.0 --server.port 8501

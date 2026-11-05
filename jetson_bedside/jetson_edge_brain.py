@@ -2,8 +2,9 @@
 """
 Bedside GPU Hero Agent & Local ICU Monitor (Runs on NVIDIA Jetson Orin)
 Executes <5ms 1D-CNN ECG anomaly inference, triggers local bedside alarms,
-validates cross-sensor physiological plausibility, and streams bedside summaries
-for one or more patient beds (--patient-id Bed_1 or --patients Bed_1 Bed_2 Bed_3).
+validates cross-sensor physiological plausibility, streams bedside summaries to
+the Nurse Station, AND serves a real-time Local Bedside ICU Monitor Dashboard
+directly on the Jetson at http://localhost:8080 (zero extra dependencies).
 """
 
 import os
@@ -13,6 +14,7 @@ import signal
 import random
 import argparse
 import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import numpy as np
 import paho.mqtt.client as mqtt
 
@@ -25,6 +27,308 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CHAOS_FILE = os.path.join(BASE_DIR, "chaos.json")
 DEFAULT_MODEL = os.path.join(BASE_DIR, "ecg_anomaly.onnx")
 CHAOS_LOCK = threading.Lock()
+
+
+BEDSIDE_HTML_PAGE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Jetson Orin — Local Bedside ICU Monitor</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background-color: #0b0f19;
+    color: #e2e8f0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+    padding: 18px 24px;
+  }
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #1e293b;
+    padding-bottom: 12px;
+    margin-bottom: 16px;
+  }
+  .title-block h1 {
+    font-size: 1.45rem;
+    color: #f8fafc;
+    letter-spacing: 0.5px;
+  }
+  .title-block p {
+    font-size: 0.85rem;
+    color: #94a3b8;
+    margin-top: 3px;
+  }
+  .badge-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+  .pill {
+    background: #1e293b;
+    border: 1px solid #334155;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: #38bdf8;
+  }
+  .banner {
+    padding: 14px 18px;
+    border-radius: 8px;
+    font-weight: 800;
+    font-size: 1.15rem;
+    text-align: center;
+    margin-bottom: 14px;
+    transition: all 0.2s ease;
+  }
+  .banner-normal {
+    background: #064e3b;
+    color: #a7f3d0;
+    border: 1px solid #10b981;
+  }
+  @keyframes flash-red {
+    0% { background: #7f1d1d; box-shadow: 0 0 10px #ef4444; }
+    50% { background: #dc2626; box-shadow: 0 0 28px #f87171; }
+    100% { background: #7f1d1d; box-shadow: 0 0 10px #ef4444; }
+  }
+  .banner-alarm {
+    animation: flash-red 0.8s infinite;
+    color: #ffffff;
+    border: 2px solid #fca5a5;
+  }
+  .banner-conflict {
+    background: #78350f;
+    color: #fde68a;
+    border: 1px solid #f59e0b;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-weight: 700;
+    font-size: 0.95rem;
+    text-align: center;
+    margin-bottom: 14px;
+    display: none;
+  }
+  .main-grid {
+    display: grid;
+    grid-template-columns: 2.3fr 1fr;
+    gap: 18px;
+  }
+  .panel {
+    background: #111827;
+    border: 1px solid #1f2937;
+    border-radius: 10px;
+    padding: 16px;
+  }
+  .panel-title {
+    font-size: 0.9rem;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 10px;
+    display: flex;
+    justify-content: space-between;
+  }
+  canvas {
+    width: 100%;
+    height: 320px;
+    background: #050811;
+    border: 1px solid #1e293b;
+    border-radius: 8px;
+    display: block;
+  }
+  .vitals-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .vital-card {
+    background: #0f172a;
+    border: 1px solid #1e293b;
+    border-radius: 8px;
+    padding: 14px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .vital-label {
+    font-size: 0.82rem;
+    color: #94a3b8;
+    text-transform: uppercase;
+    font-weight: 700;
+  }
+  .vital-sub {
+    font-size: 0.75rem;
+    color: #64748b;
+    margin-top: 3px;
+  }
+  .vital-val {
+    font-size: 2.2rem;
+    font-weight: 900;
+  }
+  .hr-color { color: #22c55e; }
+  .spo2-color { color: #38bdf8; }
+  .ai-color { color: #facc15; }
+  .prob-color { color: #f472b6; }
+  .footer-bar {
+    margin-top: 16px;
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.82rem;
+    color: #64748b;
+    border-top: 1px solid #1e293b;
+    padding-top: 10px;
+  }
+</style>
+</head>
+<body>
+  <div class="header">
+    <div class="title-block">
+      <h1>🖥️ NVIDIA Jetson Orin — Local Bedside ICU Monitor (<span id="bedId">Bed_1</span>)</h1>
+      <p>Zero-Latency On-Device 1D-CNN ECG Arrhythmia Detection (&lt;5 ms SLA) &amp; Physiological Plausibility Guard</p>
+    </div>
+    <div class="badge-row">
+      <div class="pill">Provider: <span id="provider">CPU</span></div>
+      <div class="pill">Route: <span id="route">PRIMARY</span></div>
+    </div>
+  </div>
+
+  <div id="alarmBanner" class="banner banner-normal">
+    ✅ NORMAL SINUS RHYTHM — Zero-Latency Bedside AI Monitor Nominal
+  </div>
+
+  <div id="conflictBanner" class="banner-conflict">
+    ⚠️ CROSS-SENSOR PHYSIOLOGICAL CONFLICT DETECTED: Discrepancy between ECG Sinus Rhythm, HR, and SpO2!
+  </div>
+
+  <div class="main-grid">
+    <div class="panel">
+      <div class="panel-title">
+        <span>🫀 Live 250 Hz Bedside ECG Waveform (Lead II — 1.0s Window)</span>
+        <span>Variance: <strong id="ecgVar">0.0400</strong></span>
+      </div>
+      <canvas id="ecgCanvas" width="900" height="320"></canvas>
+    </div>
+
+    <div class="vitals-stack">
+      <div class="vital-card">
+        <div>
+          <div class="vital-label">💓 Heart Rate</div>
+          <div class="vital-sub">Agent_HR (Normal: 60–100)</div>
+        </div>
+        <div class="vital-val hr-color"><span id="hrVal">75</span> <span style="font-size:1rem;">BPM</span></div>
+      </div>
+
+      <div class="vital-card">
+        <div>
+          <div class="vital-label">🫁 Oxygen Saturation</div>
+          <div class="vital-sub">Agent_SpO2 (Normal: 95–100%)</div>
+        </div>
+        <div class="vital-val spo2-color"><span id="spo2Val">98</span> <span style="font-size:1rem;">%</span></div>
+      </div>
+
+      <div class="vital-card">
+        <div>
+          <div class="vital-label">⚡ 1D-CNN Inference Time</div>
+          <div class="vital-sub">Bedside SLA Target: &lt; 5.0 ms</div>
+        </div>
+        <div class="vital-val ai-color"><span id="infMs">0.12</span> <span style="font-size:1rem;">ms</span></div>
+      </div>
+
+      <div class="vital-card">
+        <div>
+          <div class="vital-label">🧠 Arrhythmia Risk</div>
+          <div class="vital-sub">1D-CNN Softmax Output</div>
+        </div>
+        <div class="vital-val prob-color"><span id="probVal">2.0</span> <span style="font-size:1rem;">%</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer-bar">
+    <span>MQTT Nurse Station Broker: <strong id="brokerInfo">127.0.0.1:1883</strong></span>
+    <span>Local Bedside Refresh: <strong>250 ms (Direct Memory Read)</strong></span>
+  </div>
+
+<script>
+const canvas = document.getElementById('ecgCanvas');
+const ctx = canvas.getContext('2d');
+
+function drawGrid() {
+  ctx.fillStyle = '#050811';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.strokeStyle = '#0f291e';
+  ctx.lineWidth = 1;
+  const step = 30;
+  for (let x = 0; x < canvas.width; x += step) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+  }
+  for (let y = 0; y < canvas.height; y += step) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+  }
+}
+
+function drawECG(wave, isAlarm) {
+  drawGrid();
+  if (!wave || wave.length === 0) return;
+
+  ctx.strokeStyle = isAlarm ? '#ef4444' : '#22c55e';
+  ctx.lineWidth = 2.6;
+  ctx.shadowColor = isAlarm ? '#ef4444' : '#22c55e';
+  ctx.shadowBlur = 8;
+  ctx.beginPath();
+
+  const midY = canvas.height * 0.62;
+  const scaleY = canvas.height * 0.32;
+  for (let i = 0; i < wave.length; i++) {
+    const x = (i / (wave.length - 1)) * canvas.width;
+    const y = midY - wave[i] * scaleY;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+}
+
+async function pollState() {
+  try {
+    const res = await fetch('/api/state');
+    const s = await res.json();
+    document.getElementById('bedId').textContent = s.patient_id;
+    document.getElementById('provider').textContent = s.exec_provider.replace('ExecutionProvider', '');
+    document.getElementById('route').textContent = s.routing_path === 'relay_b' ? 'RELAY PATH B (OFFLOADED)' : 'PRIMARY DIRECT';
+    document.getElementById('hrVal').textContent = s.latest_vitals.hr;
+    document.getElementById('spo2Val').textContent = s.latest_vitals.spo2;
+    document.getElementById('infMs').textContent = s.inf_ms.toFixed(2);
+    document.getElementById('probVal').textContent = (s.arrhythmia_prob * 100).toFixed(1);
+    document.getElementById('ecgVar').textContent = s.latest_vitals.ecg_variance.toFixed(4);
+    document.getElementById('brokerInfo').textContent = s.broker;
+
+    const banner = document.getElementById('alarmBanner');
+    if (s.local_bed_alarm) {
+      banner.className = 'banner banner-alarm';
+      banner.innerHTML = '🚨 CRITICAL BEDSIDE ALARM: ARRHYTHMIA DETECTED (' +
+        (s.arrhythmia_prob * 100).toFixed(1) + '% Confidence | ' + s.inf_ms.toFixed(2) + ' ms Edge Response)';
+    } else {
+      banner.className = 'banner banner-normal';
+      banner.innerHTML = '✅ NORMAL SINUS RHYTHM — Zero-Latency Bedside AI Monitor Nominal';
+    }
+
+    const cBanner = document.getElementById('conflictBanner');
+    cBanner.style.display = s.sensor_conflict ? 'block' : 'none';
+
+    drawECG(s.ecg_wave, s.local_bed_alarm);
+  } catch (e) {}
+}
+
+setInterval(pollState, 250);
+pollState();
+</script>
+</body>
+</html>
+"""
 
 
 def read_patient_chaos(patient_id="Bed_1"):
@@ -71,7 +375,15 @@ def update_chaos_file(new_data, patient_id=None):
 class BedsideEdgeBrain:
     """Manages bedside AI inference and local alarm state for one patient bed."""
 
-    def __init__(self, patient_id, broker="127.0.0.1", port=1883, session=None, active_provider="CPUExecutionProvider", stop_event=None):
+    def __init__(
+        self,
+        patient_id,
+        broker="127.0.0.1",
+        port=1883,
+        session=None,
+        active_provider="CPUExecutionProvider",
+        stop_event=None,
+    ):
         self.patient_id = patient_id
         self.broker = broker
         self.port = port
@@ -80,16 +392,16 @@ class BedsideEdgeBrain:
         self.stop_event = stop_event or threading.Event()
         self.lock = threading.Lock()
 
-        # Telemetry state for this bed
         self.latest_hr = 75
         self.latest_spo2 = 98
         self.latest_ecg_wave = []
         self.latest_ecg_var = 0.04
-        self.inf_ms = 0.0
-        self.arrhythmia_prob = 0.0
+        self.inf_ms = 0.12
+        self.arrhythmia_prob = 0.02
         self.local_bed_alarm = False
         self.sensor_conflict = False
         self.force_offload = False
+        self.routing_path = "primary"
         self.client = None
 
         self._init_mqtt()
@@ -159,7 +471,6 @@ class BedsideEdgeBrain:
             outputs = self.session.run(None, {"ecg_input": wave_np})
             logits = outputs[0]
         else:
-            # Lightweight 1D-CNN NumPy inference fallback for older JetPack Python 3.8
             kernel = np.array([0.1, 0.25, -0.5, 1.0, -0.5, 0.25, 0.1], dtype=np.float32)
             conv_feat = np.convolve(wave_np.flatten(), kernel, mode="same")
             energy = float(np.mean(np.maximum(0.0, conv_feat)))
@@ -235,6 +546,26 @@ class BedsideEdgeBrain:
         except Exception as e:
             print(f"[EDGE BRAIN:{self.patient_id}] Failed to dispatch alert: {e}")
 
+    def get_local_state_dict(self):
+        with self.lock:
+            return {
+                "patient_id": self.patient_id,
+                "broker": f"{self.broker}:{self.port}",
+                "timestamp": time.time(),
+                "inf_ms": round(self.inf_ms, 2),
+                "exec_provider": self.active_provider,
+                "arrhythmia_prob": round(self.arrhythmia_prob, 4),
+                "local_bed_alarm": self.local_bed_alarm,
+                "sensor_conflict": self.sensor_conflict,
+                "latest_vitals": {
+                    "hr": self.latest_hr,
+                    "spo2": self.latest_spo2,
+                    "ecg_variance": round(self.latest_ecg_var, 4),
+                },
+                "ecg_wave": self.latest_ecg_wave,
+                "routing_path": self.routing_path,
+            }
+
     def run_summary_publisher(self):
         summary_topic = f"hospital/{self.patient_id}/edge/summary"
 
@@ -251,6 +582,7 @@ class BedsideEdgeBrain:
             routing_path = "relay_b" if use_relay_b else "primary"
 
             with self.lock:
+                self.routing_path = routing_path
                 summary = {
                     "patient_id": self.patient_id,
                     "timestamp": time.time(),
@@ -283,6 +615,40 @@ class BedsideEdgeBrain:
                 pass
 
 
+def start_local_bedside_web_server(primary_brain, port=8080):
+    """Starts a zero-dependency local HTTP Bedside ICU Monitor dashboard on the Jetson."""
+
+    class BedsideHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path == "/api/state":
+                state = primary_brain.get_local_state_dict()
+                body = json.dumps(state).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(body)
+            else:
+                body = BEDSIDE_HTML_PAGE.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(body)
+
+        def log_message(self, format, *args):
+            pass  # Keep terminal output clean
+
+    try:
+        server = ThreadingHTTPServer(("0.0.0.0", port), BedsideHandler)
+        t = threading.Thread(target=server.serve_forever, daemon=True)
+        t.start()
+        print(f"[BEDSIDE DASHBOARD] Local ICU Monitor live at: http://localhost:{port}")
+        return server
+    except Exception as e:
+        print(f"[BEDSIDE DASHBOARD] Note: Port {port} busy ({e})")
+        return None
+
+
 def create_shared_onnx_session(model_path):
     """Loads ONNX model with priority: TensorRT -> CUDA -> CPU (with NumPy fallback if ort unavailable)."""
     if ort is None or not os.path.exists(model_path):
@@ -300,7 +666,6 @@ def create_shared_onnx_session(model_path):
 
         opts = ort.SessionOptions()
         opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-        # Explicitly set thread counts to prevent pthread_setaffinity_np warnings on Jetson ARM cores
         opts.intra_op_num_threads = 2
         opts.inter_op_num_threads = 1
         opts.log_severity_level = 3
@@ -315,7 +680,7 @@ def create_shared_onnx_session(model_path):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Bedside Edge Brain (GPU Hero Agent)")
+    parser = argparse.ArgumentParser(description="Bedside Edge Brain & Local ICU Monitor")
     parser.add_argument(
         "--patient-id", type=str, default="Bed_1", help="Patient/Bed identifier for this Jetson"
     )
@@ -327,6 +692,7 @@ def main():
     )
     parser.add_argument("--broker", type=str, default="127.0.0.1", help="MQTT broker IP address")
     parser.add_argument("--port", type=int, default=1883, help="MQTT broker port")
+    parser.add_argument("--web-port", type=int, default=8080, help="Local Bedside Dashboard HTTP port")
     parser.add_argument("--model", type=str, default=DEFAULT_MODEL, help="Path to ecg_anomaly.onnx")
     args = parser.parse_args()
 
@@ -351,6 +717,9 @@ def main():
         brains.append(brain)
         threads.append(t)
 
+    # Start Local Bedside ICU Monitor Web Server on the Jetson (default http://localhost:8080)
+    web_server = start_local_bedside_web_server(brains[0], port=args.web_port)
+
     def signal_handler(sig, frame):
         print("\n[INFO] Stopping Bedside Edge Brain(s)...")
         stop_event.set()
@@ -360,14 +729,17 @@ def main():
 
     print("=" * 64)
     print("Bedside Edge Brain Active (ICU Bed Monitor)")
-    print(f"Patient Beds:     {patient_list}")
-    print(f"MQTT Broker:      {args.broker}:{args.port}")
-    print(f"Active Provider:  {active_provider}")
+    print(f"Patient Beds:       {patient_list}")
+    print(f"MQTT Broker:        {args.broker}:{args.port}")
+    print(f"Active Provider:    {active_provider}")
+    print(f"Bedside Dashboard:  http://localhost:{args.web_port}")
     print("=" * 64)
 
     while not stop_event.is_set():
         time.sleep(0.5)
 
+    if web_server:
+        web_server.shutdown()
     for t in threads:
         t.join(timeout=2.0)
     for b in brains:
@@ -377,4 +749,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

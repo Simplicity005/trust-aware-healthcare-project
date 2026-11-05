@@ -103,9 +103,15 @@ else
     echo "[1/3] Verified Python dependencies are installed."
 fi
 
-# 4. Start Bedside Sensors & Edge Brain
+# 4. Start Bedside Sensors & Edge Brain + Open Local Bedside Dashboard
 echo "[2/3] Verified bedside model configuration."
-echo "[3/3] Starting Bedside Sensors & Edge Brain (Broker: $BROKER)..."
+echo "[3/3] Starting Bedside Sensors, Edge Brain & Local Bedside ICU Monitor (http://localhost:8080)..."
+
+# Automatically open the Local Bedside Dashboard on the Jetson screen if a display is attached
+if [[ -n "$DISPLAY" ]] && [[ -z "$PATIENTS_LIST" ]]; then
+    (sleep 1.5 && xdg-open "http://localhost:8080" >/dev/null 2>&1 || firefox "http://localhost:8080" >/dev/null 2>&1 || true) &
+fi
+
 if [[ -n "$PATIENTS_LIST" ]]; then
     python3 sensor_agents.py --patients $PATIENTS_LIST --primary-broker "$BROKER" --backup-broker "$BROKER" &
     SENSOR_PID=$!
