@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+z#!/usr/bin/env bash
 # ==============================================================================
 # One-Click Multi-Patient Local Demo Launcher
 # Simulates 3 Bedside Jetson Units (Bed_1, Bed_2, Bed_3) from jetson_bedside/
@@ -37,7 +37,7 @@ if [[ ! -d "venv" ]]; then
     python3 -m venv venv
     source venv/bin/activate
     pip install --upgrade pip
-    pip install -r nurse_station/requirements.txt
+    pip install -r requirements.txt
 else
     echo "[1/5] Activating Python virtual environment (venv)..."
     source venv/bin/activate

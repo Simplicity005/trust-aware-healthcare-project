@@ -8,18 +8,20 @@ It monitors multiple patient beds (`Bed_1`, `Bed_2`, `Bed_3`, ...) simultaneousl
 
 ## Modular Folder Structure (Separated by Hardware Role)
 
-The repository is cleanly divided into **two self-contained folders** based on where the code physically runs in the hospital:
+The repository includes a root `requirements.txt` for the full project, and is cleanly divided into **two self-contained folders** (`jetson_bedside/` and `nurse_station/`), each with its own `requirements.txt` and launcher:
 
 ```text
 trust-aware-healthcare-project/
 ├── README.md                        # Master project guide
+├── requirements.txt                 # Full project Python dependencies
 ├── start_local_demo.sh              # One-click local simulator (runs 3 patient beds + nurse dashboard on 1 laptop)
 │
 ├── jetson_bedside/                  # 🛏️ CODE THAT RUNS ON EACH BEDSIDE JETSON ORIN (PATIENT'S BED)
 │   ├── README.md                    # Jetson setup & multi-bed launch instructions
-│   ├── requirements.txt             # Lightweight Edge AI & MQTT dependencies
+│   ├── requirements.txt             # Lightweight Edge AI & MQTT dependencies (paho-mqtt, numpy, onnxruntime)
 │   ├── chaos.json                   # Bedside fault config (auto-synced via MQTT from Nurse Station)
-│   ├── make_model.py                # Generates the 1D-CNN ECG model (ecg_anomaly.onnx)
+│   ├── ecg_anomaly.onnx             # Pre-built 1D-CNN ECG anomaly detector model
+│   ├── make_model.py                # Re-generates ecg_anomaly.onnx if needed
 │   ├── sensor_agents.py             # Patient bedside sensors (Agent_ECG, Agent_SpO2, Agent_HR)
 │   ├── jetson_edge_brain.py         # Bedside GPU AI (<5 ms arrhythmia inference & local alarm)
 │   └── start_bedside.sh             # One-command Jetson launcher (--patient-id Bed_1 --broker <LAPTOP_IP>)
@@ -28,7 +30,8 @@ trust-aware-healthcare-project/
     ├── README.md                    # Nurse laptop setup & LAN broker instructions
     ├── requirements.txt             # Dashboard, Trust Engine & benchmark dependencies
     ├── chaos.json                   # Per-patient fault injection settings
-    ├── make_model.py                # Generates ecg_anomaly.onnx for Gateway CPU fallback
+    ├── ecg_anomaly.onnx             # Pre-built 1D-CNN ECG model for Gateway CPU fallback
+    ├── make_model.py                # Re-generates ecg_anomaly.onnx if needed
     ├── dashboard.py                 # Multi-Patient Nurse Station Dashboard & Trust Engine
     ├── run_benchmarks.py            # Automated benchmark & plot generator
     ├── start_nurse_station.sh       # One-command Nurse Station launcher
@@ -63,31 +66,61 @@ trust-aware-healthcare-project/
 
 ---
 
-## How to Download Only the Folder You Need from GitHub
+## How to Download & Install Requirements
 
-You do **not** need to clone the entire repository onto every device. Anyone can download **only** the `jetson_bedside` folder onto a Jetson Orin, or **only** the `nurse_station` folder onto the Nurse's Laptop:
+You can either download the **entire project** (for local testing or development) or download **only the specific folder** needed for a Jetson Orin or Nurse Station Laptop:
 
-### Option 1: One-Line Terminal Download (Fastest — No Git Required)
+### Option A: Download the Entire Project & Install `requirements.txt`
 
-* **On a Bedside Jetson Orin (downloads ONLY `jetson_bedside/`):**
-  ```bash
-  curl -L https://github.com/Simplicity005/trust-aware-healthcare-project/archive/refs/heads/main.tar.gz | tar -xz --strip-components=1 trust-aware-healthcare-project-main/jetson_bedside
-  cd jetson_bedside && chmod +x start_bedside.sh
-  ```
+```bash
+git clone https://github.com/Simplicity005/trust-aware-healthcare-project.git
+cd trust-aware-healthcare-project
 
-* **On the Nurse's Table Laptop (downloads ONLY `nurse_station/`):**
-  ```bash
-  curl -L https://github.com/Simplicity005/trust-aware-healthcare-project/archive/refs/heads/main.tar.gz | tar -xz --strip-components=1 trust-aware-healthcare-project-main/nurse_station
-  cd nurse_station && chmod +x start_nurse_station.sh
-  ```
+# Create virtual environment and install all requirements
+python3 -m venv venv
+source venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+```
 
-### Option 2: Download via Browser on GitHub
-* **Bedside Jetson Code:** Navigate to [`jetson_bedside/`](https://github.com/Simplicity005/trust-aware-healthcare-project/tree/main/jetson_bedside) on GitHub (or paste that URL into [download-directory.github.io](https://download-directory.github.io/)).
-* **Nurse Station Code:** Navigate to [`nurse_station/`](https://github.com/Simplicity005/trust-aware-healthcare-project/tree/main/nurse_station) on GitHub (or paste that URL into [download-directory.github.io](https://download-directory.github.io/)).
+*(Or without `git`:)*
+```bash
+curl -L https://github.com/Simplicity005/trust-aware-healthcare-project/archive/refs/heads/main.tar.gz | tar -xz
+cd trust-aware-healthcare-project-main
+python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt
+```
 
 ---
 
-## Mode A: Run the Full Multi-Patient Demo Locally on 1 Laptop
+### Option B: Download Only the Folder You Need (Device-Specific)
+
+* **On a Bedside Jetson Orin (downloads ONLY `jetson_bedside/` & installs its `requirements.txt`):**
+  ```bash
+  curl -L https://github.com/Simplicity005/trust-aware-healthcare-project/archive/refs/heads/main.tar.gz | tar -xz --strip-components=1 trust-aware-healthcare-project-main/jetson_bedside
+  cd jetson_bedside
+  chmod +x start_bedside.sh
+
+  # Optional manual venv setup (start_bedside.sh also does this automatically):
+  python3 -m venv --system-site-packages venv
+  source venv/bin/activate
+  pip install -r requirements.txt
+  ```
+
+* **On the Nurse's Table Laptop (downloads ONLY `nurse_station/` & installs its `requirements.txt`):**
+  ```bash
+  curl -L https://github.com/Simplicity005/trust-aware-healthcare-project/archive/refs/heads/main.tar.gz | tar -xz --strip-components=1 trust-aware-healthcare-project-main/nurse_station
+  cd nurse_station
+  chmod +x start_nurse_station.sh
+
+  # Optional manual venv setup (start_nurse_station.sh also does this automatically):
+  python3 -m venv venv
+  source venv/bin/activate
+  pip install -r requirements.txt
+  ```
+
+---
+
+## Mode 1: Run the Full Multi-Patient Demo Locally on 1 Laptop
 
 You can simulate **3 Bedside Jetsons (`Bed_1`, `Bed_2`, `Bed_3`) + the Central Nurse Station** on a single laptop:
 
@@ -109,9 +142,9 @@ Charts and CSVs are saved to `nurse_station/benchmarks/`.
 
 ---
 
-## Mode B: Multi-Device Hardware Deployment (Multiple Jetsons + Nurse Laptop)
+## Mode 2: Multi-Device Hardware Deployment (Real Jetsons + Nurse Laptop)
 
-Assume your Nurse Station Laptop's Wi-Fi/LAN IP is `<LAPTOP_IP>`:
+Assume your Nurse Station Laptop's Wi-Fi/LAN IP is `<LAPTOP_IP>` (check with `hostname -I | awk '{print $1}'`):
 
 ### 1. On the Nurse's Table Laptop (`nurse_station/`):
 Enable LAN connections on Mosquitto once, then start the Nurse Station:
@@ -136,5 +169,9 @@ cd jetson_bedside
 # On Jetson Orin #2 (Patient Bed 2):
 cd jetson_bedside
 ./start_bedside.sh --patient-id Bed_2 --broker <LAPTOP_IP>
+
+# On Jetson Orin #3 (Patient Bed 3):
+cd jetson_bedside
+./start_bedside.sh --patient-id Bed_3 --broker <LAPTOP_IP>
 ```
 Each Jetson automatically streams its patient's sensors and `<5 ms` GPU AI summaries into the Nurse Station Dashboard, and receives per-bed Chaos Slider commands over MQTT!
