@@ -1,4 +1,4 @@
-z#!/usr/bin/env bash
+#!/usr/bin/env bash
 # ==============================================================================
 # One-Click Multi-Patient Local Demo Launcher
 # Simulates 3 Bedside Jetson Units (Bed_1, Bed_2, Bed_3) from jetson_bedside/
@@ -31,16 +31,33 @@ echo "======================================================================"
 echo "  Trust-Aware Multi-Patient ICU Healthcare Demo Launcher (3 Beds)"
 echo "======================================================================"
 
+# 0. Ensure root requirements.txt exists
+if [[ ! -f "requirements.txt" ]]; then
+    cat > requirements.txt << 'EOF'
+paho-mqtt>=1.6.1
+streamlit>=1.28.0
+pandas>=1.5.0
+numpy>=1.21.0
+onnxruntime>=1.14.0
+matplotlib>=3.6.0
+EOF
+fi
+
 # 1. Activate or create shared Python virtual environment
-if [[ ! -d "venv" ]]; then
+if [[ -d "venv" ]] && [[ -f "venv/bin/activate" ]]; then
+    echo "[1/5] Activating Python virtual environment (venv)..."
+    source venv/bin/activate
+else
     echo "[1/5] Creating Python virtual environment (venv)..."
     python3 -m venv venv
     source venv/bin/activate
     pip install --upgrade pip
-    pip install -r requirements.txt
-else
-    echo "[1/5] Activating Python virtual environment (venv)..."
-    source venv/bin/activate
+fi
+
+# Verify all dependencies are installed in venv
+if ! python3 -c "import paho.mqtt.client, streamlit, pandas, numpy, onnxruntime, matplotlib" >/dev/null 2>&1; then
+    echo "  -> Installing missing packages from requirements.txt..."
+    pip install -r "$SCRIPT_DIR/requirements.txt"
 fi
 
 # 2. Ensure Mosquitto MQTT broker is running on port 1883
@@ -60,10 +77,10 @@ fi
 
 # 3. Ensure 1D-CNN ONNX model exists in both folders
 echo "[3/5] Verifying 1D-CNN ECG ONNX models..."
-if [[ ! -f "jetson_bedside/ecg_anomaly.onnx" ]]; then
+if [[ ! -f "jetson_bedside/ecg_anomaly.onnx" ]] && python3 -c "import torch, onnx" >/dev/null 2>&1; then
     python3 jetson_bedside/make_model.py
 fi
-if [[ ! -f "nurse_station/ecg_anomaly.onnx" ]]; then
+if [[ -f "jetson_bedside/ecg_anomaly.onnx" ]] && [[ ! -f "nurse_station/ecg_anomaly.onnx" ]]; then
     cp jetson_bedside/ecg_anomaly.onnx nurse_station/ecg_anomaly.onnx
 fi
 

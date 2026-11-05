@@ -1,22 +1,28 @@
 # Bedside Node (`jetson_bedside/`) — NVIDIA Jetson Orin
 
-This folder contains **everything that runs at the patient's bed** on an **NVIDIA Jetson Orin** (or simulated bedside node):
+This folder contains **everything that runs at the patient's bed** on an **NVIDIA Jetson Orin** (including its own `requirements.txt` and pre-built `ecg_anomaly.onnx`):
 
-1. `sensor_agents.py` — Streams live patient vitals (`Agent_ECG`, `Agent_SpO2`, `Agent_HR`) every `0.4s` for `--patient-id <Bed_ID>`.
-2. `jetson_edge_brain.py` — Runs the `<5 ms` 1D-CNN ECG Arrhythmia AI model (`TensorRT / CUDA / CPU`), triggers instant bedside alarms, checks cross-sensor physiological plausibility, and streams verified summaries to the Nurse Station Laptop.
-3. `make_model.py` — Generates the self-contained `ecg_anomaly.onnx` model.
-4. `start_bedside.sh` — One-command launcher for a Jetson Orin.
+1. `requirements.txt` — Lightweight Jetson dependencies (`paho-mqtt`, `numpy`, `onnxruntime`).
+2. `ecg_anomaly.onnx` — Pre-built 1D-CNN ECG Arrhythmia detector model (ready to use without needing PyTorch).
+3. `sensor_agents.py` — Streams live patient vitals (`Agent_ECG`, `Agent_SpO2`, `Agent_HR`) every `0.4s` for `--patient-id <Bed_ID>`.
+4. `jetson_edge_brain.py` — Runs the `<5 ms` 1D-CNN ECG Arrhythmia AI model (`TensorRT / CUDA / CPU`), triggers instant bedside alarms, checks cross-sensor physiological plausibility, and streams verified summaries to the Nurse Station Laptop.
+5. `start_bedside.sh` — One-command launcher that automatically sets up `venv`, installs `requirements.txt`, and launches the bedside node.
 
 ---
 
-## Download Only This Folder onto a Jetson Orin
+## Download Only This Folder & Install Requirements on a Jetson Orin
 
-Run this single command on the Jetson Orin terminal to download **only** `jetson_bedside/`:
+Run this in the Jetson Orin terminal to download `jetson_bedside/` (which includes `requirements.txt` and `ecg_anomaly.onnx`):
 
 ```bash
 curl -L https://github.com/Simplicity005/trust-aware-healthcare-project/archive/refs/heads/main.tar.gz | tar -xz --strip-components=1 trust-aware-healthcare-project-main/jetson_bedside
 cd jetson_bedside
 chmod +x start_bedside.sh
+
+# Optional manual install (start_bedside.sh also runs this automatically):
+python3 -m venv --system-site-packages venv
+source venv/bin/activate
+pip install -r requirements.txt
 ```
 
 ---
@@ -39,9 +45,3 @@ Assume the Nurse Station Laptop's IP address on Wi-Fi/LAN is `<LAPTOP_IP>`:
 ```bash
 ./start_bedside.sh --patient-id Bed_3 --broker <LAPTOP_IP>
 ```
-
-### Simulate Multiple Beds from One Machine:
-```bash
-./start_bedside.sh --patients Bed_1 Bed_2 Bed_3 --broker <LAPTOP_IP>
-```
-
