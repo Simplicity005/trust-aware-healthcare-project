@@ -482,7 +482,7 @@ class NurseStationEngine:
 
 
 @st.cache_resource
-def get_nurse_station_engine():
+def get_nurse_station_engine(version="v2_dynamic_beds"):
     broker = os.environ.get("MQTT_BROKER", "127.0.0.1")
     port = int(os.environ.get("MQTT_PORT", "1883"))
     return NurseStationEngine(broker=broker, port=port)
@@ -622,8 +622,8 @@ def render_multi_patient_ward_overview(beds_snap):
             "status"
         ].startswith("ISOLATED")
 
-        if not b["online"]:
-            banner_bg, banner_fg, banner_txt = "#475569", "#f1f5f9", f"⚠️ OFFLINE ({b['seconds_since_seen']}s)"
+        if not b.get("online", True):
+            banner_bg, banner_fg, banner_txt = "#475569", "#f1f5f9", f"⚠️ OFFLINE ({b.get('seconds_since_seen', 0)}s)"
         elif local_alarm:
             banner_bg, banner_fg, banner_txt = "#dc3545", "#ffffff", "🚨 ARRHYTHMIA ALARM"
         elif any_isolated:
