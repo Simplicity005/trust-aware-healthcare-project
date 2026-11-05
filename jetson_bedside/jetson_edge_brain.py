@@ -289,20 +289,29 @@ def create_shared_onnx_session(model_path):
         print("[EDGE BRAIN] Using built-in Jetson NumPy 1D-CNN engine.")
         return None, "Jetson_NumPy_1DCNN"
 
-    available_providers = ort.get_available_providers()
-    print(f"[EDGE BRAIN] Available execution providers: {available_providers}")
+    try:
+        available_providers = ort.get_available_providers()
+        print(f"[EDGE BRAIN] Available execution providers: {available_providers}")
 
-    provider_priority = ["TensorrtExecutionProvider", "CUDAExecutionProvider", "CPUExecutionProvider"]
-    selected_providers = [p for p in provider_priority if p in available_providers]
-    if not selected_providers:
-        selected_providers = ["CPUExecutionProvider"]
+        provider_priority = ["TensorrtExecutionProvider", "CUDAExecutionProvider", "CPUExecutionProvider"]
+        selected_providers = [p for p in provider_priority if p in available_providers]
+        if not selected_providers:
+            selected_providers = ["CPUExecutionProvider"]
 
-    opts = ort.SessionOptions()
-    opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-    session = ort.InferenceSession(model_path, sess_options=opts, providers=selected_providers)
-    active_provider = session.get_providers()[0]
-    print(f"[EDGE BRAIN] Active Execution Provider: {active_provider}")
-    return session, active_provider
+        opts = ort.SessionOptions()
+        opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        # Explicitly set thread counts to prevent pthread_setaffinity_np warnings on Jetson ARM cores
+        opts.intra_op_num_threads = 2
+        opts.inter_op_num_threads = 1
+        opts.log_severity_level = 3
+
+        session = ort.InferenceSession(model_path, sess_options=opts, providers=selected_providers)
+        active_provider = session.get_providers()[0]
+        print(f"[EDGE BRAIN] Active Execution Provider: {active_provider}")
+        return session, active_provider
+    except Exception as e:
+        print(f"[EDGE BRAIN] ONNX Runtime fallback triggered ({e}); using built-in 1D-CNN engine.")
+        return None, "Jetson_1DCNN_Engine"
 
 
 def main():

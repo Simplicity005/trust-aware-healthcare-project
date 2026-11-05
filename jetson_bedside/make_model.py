@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 1D-CNN ECG Anomaly Detector Generator (make_model.py)
-Exports a self-contained ONNX model (ecg_anomaly.onnx) for bedside inference.
+Exports a self-contained ONNX model (ecg_anomaly.onnx) with IR version 8 / opset 13
+so it runs on both older Jetson Orin ONNX Runtime (1.16.x, max IR 9) and modern x86/ARM.
 """
 
 import os
@@ -43,13 +44,20 @@ if __name__ == "__main__":
         input_names=["ecg_input"],
         output_names=["logits"],
         dynamic_axes={"ecg_input": {0: "batch_size"}, "logits": {0: "batch_size"}},
-        opset_version=18,
+        opset_version=13,
+        dynamo=False,
     )
 
     onnx_model = onnx.load(output_path)
+    # Force IR version 8 (compatible with ONNX Runtime 1.12+ including 1.16.3 on Jetson Python 3.8)
+    onnx_model.ir_version = 8
+    for opset in onnx_model.opset_import:
+        if opset.domain == "" and opset.version > 13:
+            opset.version = 13
     onnx.save_model(onnx_model, output_path, save_as_external_data=False)
     if os.path.exists(output_path + ".data"):
         os.remove(output_path + ".data")
 
-    print(f"[OK] Exported {output_path} successfully as a self-contained model.")
-
+    print(
+        f"[OK] Exported {output_path} (IR version={onnx_model.ir_version}) as a self-contained model."
+    )
