@@ -16,7 +16,7 @@ trust-aware-healthcare-project/
 ├── requirements.txt                 # Full project Python dependencies
 ├── start_local_demo.sh              # One-click local simulator (runs 3 patient beds + nurse dashboard on 1 laptop)
 │
-├── jetson_bedside/                  # 🛏️ CODE THAT RUNS ON EACH BEDSIDE JETSON ORIN (PATIENT'S BED)
+├── jetson_bedside/                  # [BEDSIDE] CODE THAT RUNS ON EACH BEDSIDE JETSON ORIN (PATIENT'S BED)
 │   ├── README.md                    # Jetson setup & multi-bed launch instructions
 │   ├── requirements.txt             # Lightweight Edge AI & MQTT dependencies (paho-mqtt, numpy, onnxruntime)
 │   ├── chaos.json                   # Bedside fault config (auto-synced via MQTT from Nurse Station)
@@ -26,7 +26,7 @@ trust-aware-healthcare-project/
 │   ├── jetson_edge_brain.py         # Bedside GPU AI (<5 ms arrhythmia inference & local alarm)
 │   └── start_bedside.sh             # One-command Jetson launcher (--patient-id Bed_1 --broker <LAPTOP_IP>)
 │
-└── nurse_station/                   # 🖥️ CODE THAT RUNS ON THE NURSE'S TABLE LAPTOP
+└── nurse_station/                   # [GATEWAY] CODE THAT RUNS ON THE NURSE'S TABLE LAPTOP
     ├── README.md                    # Nurse laptop setup & LAN broker instructions
     ├── requirements.txt             # Dashboard, Trust Engine & benchmark dependencies
     ├── chaos.json                   # Per-patient fault injection settings
@@ -132,7 +132,7 @@ Open `http://localhost:8501` in your browser:
 - **Room-Based Device Navigation**: The left sidebar organizes all available and admitted devices by ICU Room (e.g., `Room 101 (Cardiac ICU)`, `Room 102`, `Room 103`) with live status and one-click inspection.
 - **Bedside Vitals Manipulation (on Jetson)**: Open `http://localhost:8080` to access the Jetson Bedside Console. Doctors/testers can manipulate Heart Rate, SpO2, and trigger acute Arrhythmia or Byzantine spoofing directly at the patient's bedside!
 - **Dual Nurse Station Redundancy (High Availability)**: Run `./nurse_station/start_dual_nurse_stations.sh` to launch Nurse Station 1 (`:8501`) and Nurse Station 2 (`:8502`) concurrently with automatic leader failover.
-- **"➕ Add New Bed" Action**: Scans the network for newly connected Jetson Orin nodes and allows assigning them to patient rooms.
+- **"+ Add New Bed" Action**: Scans the network for newly connected Jetson Orin nodes and allows assigning them to patient rooms.
 - Inspect any patient bed's live 250 Hz ECG wave, vitals, and mathematical trust cards ($T_i(t) \in [0.0, 1.0]$).
 
 ### Generate Benchmark Charts & CSV Logs
