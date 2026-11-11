@@ -11,6 +11,28 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 BROKER="${MQTT_BROKER:-127.0.0.1}"
+PORT="${STREAMLIT_SERVER_PORT:-8501}"
+STATION_ID="${NURSE_STATION_ID:-Nurse_Station_1}"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --port)
+            PORT="$2"
+            shift 2
+            ;;
+        --station-id)
+            STATION_ID="$2"
+            shift 2
+            ;;
+        --broker)
+            BROKER="$2"
+            shift 2
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
 
 # 1. Ensure requirements.txt exists in this folder
 if [[ ! -f "requirements.txt" ]]; then
@@ -63,5 +85,5 @@ if ! systemctl is-active --quiet mosquitto 2>/dev/null && ! pgrep -x "mosquitto"
     fi
 fi
 
-echo "[3/3] Launching Multi-Patient Nurse Station Dashboard..."
-MQTT_BROKER="$BROKER" streamlit run dashboard.py --server.address 0.0.0.0 --server.port 8501
+echo "[3/3] Launching Nurse Station Dashboard ($STATION_ID on port $PORT)..."
+NURSE_STATION_ID="$STATION_ID" STREAMLIT_SERVER_PORT="$PORT" MQTT_BROKER="$BROKER" streamlit run dashboard.py --server.address 0.0.0.0 --server.port "$PORT"

@@ -129,9 +129,11 @@ chmod +x start_local_demo.sh
 ./start_local_demo.sh
 ```
 Open `http://localhost:8501` in your browser:
-- View all 3 patient beds (`Bed_1`, `Bed_2`, `Bed_3`) side by side in the **ICU Ward Multi-Patient Overview**.
-- Click any patient bed to inspect its live 250 Hz ECG wave and sensor trust cards.
-- Use the **Sidebar Chaos Engine** to pick a target patient bed (e.g. `Bed_2`) and inject lag, packet drops, or spoofed vitals while `Bed_1` and `Bed_3` remain healthy!
+- **Room-Based Device Navigation**: The left sidebar organizes all available and admitted devices by ICU Room (e.g., `Room 101 (Cardiac ICU)`, `Room 102`, `Room 103`) with live status and one-click inspection.
+- **Bedside Vitals Manipulation (on Jetson)**: Open `http://localhost:8080` to access the Jetson Bedside Console. Doctors/testers can manipulate Heart Rate, SpO2, and trigger acute Arrhythmia or Byzantine spoofing directly at the patient's bedside!
+- **Dual Nurse Station Redundancy (High Availability)**: Run `./nurse_station/start_dual_nurse_stations.sh` to launch Nurse Station 1 (`:8501`) and Nurse Station 2 (`:8502`) concurrently with automatic leader failover.
+- **"➕ Add New Bed" Action**: Scans the network for newly connected Jetson Orin nodes and allows assigning them to patient rooms.
+- Inspect any patient bed's live 250 Hz ECG wave, vitals, and mathematical trust cards ($T_i(t) \in [0.0, 1.0]$).
 
 ### Generate Benchmark Charts & CSV Logs
 ```bash
