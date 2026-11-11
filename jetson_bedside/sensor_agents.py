@@ -46,13 +46,48 @@ def read_patient_chaos(patient_id="Bed_1"):
         return default_bed_chaos()
 
 
-def generate_ecg_wave(malicious=False, phase_offset=0.0):
-    """Generates a 1-second 250 Hz ECG waveform."""
+def update_chaos_file(new_data, patient_id=None):
+    """Updates chaos.json safely when an MQTT chaos control packet arrives."""
+    try:
+        with CHAOS_LOCK:
+            current = {}
+            if os.path.exists(CHAOS_FILE):
+                try:
+                    with open(CHAOS_FILE, "r") as f:
+                        current = json.load(f)
+                except Exception:
+                    current = {}
+            if patient_id and "Agent_ECG" in new_data:
+                current[patient_id] = new_data
+            else:
+                current.update(new_data)
+            tmp_path = CHAOS_FILE + f".tmp.{random.randint(1000, 9999)}"
+            with open(tmp_path, "w") as f:
+                json.dump(current, f, indent=2)
+            os.replace(tmp_path, CHAOS_FILE)
+    except Exception:
+        pass
+
+
+def generate_ecg_wave(condition="normal", phase_offset=0.0):
+    """Generates a 1-second 250 Hz ECG waveform based on bedside clinical condition."""
     t = np.linspace(0, 1, 250)
-    if malicious:
+    if condition == "malicious":
         wave = np.random.uniform(-2.5, 2.5, 250) + np.sin(2 * np.pi * 35 * t) * 1.5
         return np.round(np.clip(wave, -4.0, 4.0), 4).tolist()
 
+    if condition == "arrhythmia":
+        # Ventricular Tachycardia / Acute Arrhythmia pattern (broad erratic QRS complexes)
+        c = phase_offset
+        pvc1 = 1.75 * np.exp(-((t - (0.22 + c)) ** 2) / (2 * 0.035 ** 2))
+        pvc2 = -1.50 * np.exp(-((t - (0.42 + c)) ** 2) / (2 * 0.040 ** 2))
+        pvc3 = 1.85 * np.exp(-((t - (0.62 + c)) ** 2) / (2 * 0.035 ** 2))
+        pvc4 = -1.35 * np.exp(-((t - (0.82 + c)) ** 2) / (2 * 0.040 ** 2))
+        noise = np.random.normal(0, 0.03, 250)
+        ecg = pvc1 + pvc2 + pvc3 + pvc4 + noise
+        return np.round(ecg, 4).tolist()
+
+    # Normal sinus rhythm (PQRST waveform) with slight patient-specific offset
     c = phase_offset
     p_wave = 0.15 * np.exp(-((t - (0.20 + c)) ** 2) / (2 * 0.025 ** 2))
     q_wave = -0.15 * np.exp(-((t - (0.35 + c)) ** 2) / (2 * 0.010 ** 2))
@@ -140,20 +175,31 @@ class SensorAgentThread(threading.Thread):
             jitter_sec = random.uniform(0.0, 0.3 * delay_sec)
             time.sleep(delay_sec + jitter_sec)
 
+            # Check for direct bedside vitals overrides set on the Jetson
+            vitals_cfg = bed_chaos.get("vitals", {})
+            target_hr = vitals_cfg.get("target_hr") or bed_chaos.get("Agent_HR", {}).get("target_hr")
+            target_spo2 = vitals_cfg.get("target_spo2") or bed_chaos.get("Agent_SpO2", {}).get("target_spo2")
+            ecg_condition = vitals_cfg.get("ecg_condition") or bed_chaos.get("Agent_ECG", {}).get("condition", "normal")
+
             value = 0
             ecg_wave = []
 
             if self.agent_id == "Agent_ECG":
-                ecg_wave = generate_ecg_wave(malicious=malicious, phase_offset=self.phase_offset)
+                cond = "malicious" if malicious else ecg_condition
+                ecg_wave = generate_ecg_wave(condition=cond, phase_offset=self.phase_offset)
                 value = 0
             elif self.agent_id == "Agent_SpO2":
                 if malicious:
                     value = random.choice([0, 15, 145])
+                elif target_spo2 is not None:
+                    value = int(np.clip(int(target_spo2) + random.randint(0, 1), 40, 100))
                 else:
                     value = random.randint(96, 100)
             elif self.agent_id == "Agent_HR":
                 if malicious:
                     value = random.choice([0, -40, 340])
+                elif target_hr is not None:
+                    value = int(np.clip(int(target_hr) + random.randint(-1, 1), 30, 240))
                 else:
                     value = random.randint(68, 88) + self.hr_offset
 

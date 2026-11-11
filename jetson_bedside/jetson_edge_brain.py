@@ -271,15 +271,39 @@ BEDSIDE_HTML_PAGE = """<!DOCTYPE html>
     justify-content: space-between;
     align-items: center;
   }
-  .sensor-metrics {
-    font-size: 11px;
-    color: var(--muted);
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  .vital-label {
+    font-size: 0.82rem;
+    color: #94a3b8;
+    text-transform: uppercase;
+    font-weight: 700;
   }
-  .field {
-    margin-top: 8px;
+  .vital-sub {
+    font-size: 0.75rem;
+    color: #64748b;
+    margin-top: 3px;
   }
-  .field-top {
+  .vital-val {
+    font-size: 2.2rem;
+    font-weight: 900;
+  }
+  .hr-color { color: #22c55e; }
+  .spo2-color { color: #38bdf8; }
+  .ai-color { color: #facc15; }
+  .prob-color { color: #f472b6; }
+  .preset-btn {
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 0.80rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: transform 0.1s ease, filter 0.1s ease;
+  }
+  .preset-btn:hover {
+    filter: brightness(1.2);
+    transform: translateY(-1px);
+  }
+  .footer-bar {
+    margin-top: 16px;
     display: flex;
     justify-content: space-between;
     font-size: 11px;
@@ -311,15 +335,30 @@ BEDSIDE_HTML_PAGE = """<!DOCTYPE html>
 </style>
 </head>
 <body>
-  <div class="container">
-    <div class="topbar">
-      <div class="topbar-left">
-        <div class="bed-title" id="bedTitle">Bed_1</div>
-        <div class="bed-meta" id="bedMeta">Jetson Bedside Node</div>
-      </div>
-      <div class="topbar-right">
-        <select id="bedSelect" class="bed-select" onchange="switchBed(this.value)"></select>
-        <div id="alarmPill" class="pill normal">NORMAL</div>
+  <div class="header">
+    <div class="title-block">
+      <h1>🖥️ NVIDIA Jetson Orin — Local Bedside ICU Monitor (<span id="bedId">Bed_1</span>)</h1>
+      <p>Zero-Latency On-Device 1D-CNN ECG Arrhythmia Detection (&lt;5 ms SLA) &amp; Bedside Vitals Controller</p>
+    </div>
+    <div class="badge-row">
+      <div class="pill">Provider: <span id="provider">CPU</span></div>
+      <div class="pill">Route: <span id="route">PRIMARY</span></div>
+    </div>
+  </div>
+
+  <div id="alarmBanner" class="banner banner-normal">
+    ✅ NORMAL SINUS RHYTHM — Zero-Latency Bedside AI Monitor Nominal
+  </div>
+
+  <div id="conflictBanner" class="banner-conflict">
+    ⚠️ CROSS-SENSOR PHYSIOLOGICAL CONFLICT DETECTED: Discrepancy between ECG Sinus Rhythm, HR, and SpO2!
+  </div>
+
+  <div class="main-grid">
+    <div class="panel">
+      <div class="panel-title">
+        <span>🫀 Live 250 Hz Bedside ECG Waveform (Lead II — 1.0s Window)</span>
+        <span>Variance: <strong id="ecgVar">0.0400</strong></span>
       </div>
     </div>
 
@@ -470,6 +509,92 @@ BEDSIDE_HTML_PAGE = """<!DOCTYPE html>
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- Bedside Patient Vitals & Sensor Manipulation Console -->
+  <div class="panel" style="margin-top: 16px; border: 1px solid #0284c7;">
+    <div class="panel-title">
+      <span style="color:#38bdf8; font-weight:800; font-size:0.95rem;">🎛️ Bedside Patient Vitals &amp; Sensor Manipulation Console</span>
+      <span id="manipStatus" style="font-size:0.80rem; color:#10b981;">● Hosted Directly on Jetson Hardware</span>
+    </div>
+
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 10px;">
+      <!-- Column 1: Patient Target Vitals -->
+      <div>
+        <h4 style="font-size:0.85rem; color:#94a3b8; text-transform:uppercase; margin-bottom:10px;">Patient Target Vitals (Bedside Override)</h4>
+        
+        <div style="margin-bottom:14px;">
+          <div style="display:flex; justify-content:space-between; font-size:0.85rem; margin-bottom:4px;">
+            <span>💓 Target Heart Rate:</span>
+            <span><strong id="targetHrLabel" style="color:#22c55e;">75</strong> BPM</span>
+          </div>
+          <input type="range" id="targetHr" min="30" max="220" value="75" step="1" oninput="sendManipulation()" style="width:100%; cursor:pointer;">
+        </div>
+
+        <div style="margin-bottom:14px;">
+          <div style="display:flex; justify-content:space-between; font-size:0.85rem; margin-bottom:4px;">
+            <span>🫁 Target SpO2 Saturation:</span>
+            <span><strong id="targetSpo2Label" style="color:#38bdf8;">98</strong>%</span>
+          </div>
+          <input type="range" id="targetSpo2" min="50" max="100" value="98" step="1" oninput="sendManipulation()" style="width:100%; cursor:pointer;">
+        </div>
+
+        <div style="margin-bottom:14px;">
+          <span style="font-size:0.85rem; display:block; margin-bottom:6px;">🫀 ECG Cardiac Waveform Rhythm:</span>
+          <select id="ecgCondition" onchange="sendManipulation()" style="width:100%; background:#0f172a; color:#f8fafc; border:1px solid #334155; padding:8px 10px; border-radius:6px; font-size:0.85rem;">
+            <option value="normal">🟢 Normal Sinus Rhythm (Nominal PQRST Wave)</option>
+            <option value="arrhythmia">🚨 Ventricular Arrhythmia (Triggers &lt;5ms 1D-CNN Alarm)</option>
+            <option value="malicious">🛡️ Byzantine Spoofed / Erratic Signal (Triggers Isolation)</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Column 2: Sensor Latency, Drop Rate & Compute -->
+      <div>
+        <h4 style="font-size:0.85rem; color:#94a3b8; text-transform:uppercase; margin-bottom:10px;">Network Transit Delay &amp; Fault Injection</h4>
+
+        <div style="margin-bottom:14px;">
+          <div style="display:flex; justify-content:space-between; font-size:0.85rem; margin-bottom:4px;">
+            <span>⏱️ Sensor Delay (ms):</span>
+            <span><strong id="delayLabel" style="color:#facc15;">10</strong> ms</span>
+          </div>
+          <input type="range" id="delayMs" min="5" max="400" value="10" step="5" oninput="sendManipulation()" style="width:100%; cursor:pointer;">
+        </div>
+
+        <div style="margin-bottom:14px;">
+          <div style="display:flex; justify-content:space-between; font-size:0.85rem; margin-bottom:4px;">
+            <span>📉 Packet Drop Rate:</span>
+            <span><strong id="dropLabel" style="color:#f87171;">0.00</strong></span>
+          </div>
+          <input type="range" id="dropRate" min="0.0" max="0.6" value="0.0" step="0.05" oninput="sendManipulation()" style="width:100%; cursor:pointer;">
+        </div>
+
+        <div style="display:flex; gap:16px; margin-top:12px;">
+          <label style="font-size:0.84rem; display:flex; align-items:center; gap:6px; cursor:pointer;">
+            <input type="checkbox" id="maliciousSpoof" onchange="sendManipulation()"> Inject Byzantine Spoofing
+          </label>
+          <label style="font-size:0.84rem; display:flex; align-items:center; gap:6px; cursor:pointer;">
+            <input type="checkbox" id="overloadGpu" onchange="sendManipulation()"> Simulate GPU Congestion (Relay B)
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Clinical Presets Toolbar -->
+    <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid #1e293b; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+      <span style="font-size:0.82rem; color:#94a3b8; font-weight:700;">Clinical Presets:</span>
+      <button onclick="applyPreset('healthy')" class="preset-btn" style="background:#064e3b; color:#a7f3d0; border:1px solid #10b981;">🟢 Normal Sinus</button>
+      <button onclick="applyPreset('arrhythmia')" class="preset-btn" style="background:#7f1d1d; color:#fecaca; border:1px solid #ef4444;">🚨 Ventricular Arrhythmia</button>
+      <button onclick="applyPreset('spoofed')" class="preset-btn" style="background:#701a75; color:#f5d0fe; border:1px solid #c026d3;">🛡️ Byzantine Spoofed</button>
+      <button onclick="applyPreset('lag')" class="preset-btn" style="background:#78350f; color:#fde68a; border:1px solid #f59e0b;">⏱️ Wi-Fi Network Lag</button>
+      <button onclick="applyPreset('congested')" class="preset-btn" style="background:#1e293b; color:#38bdf8; border:1px solid #38bdf8;">🔀 Orin Offload (Relay B)</button>
+      <button onclick="applyPreset('reset')" class="preset-btn" style="background:#334155; color:#f1f5f9; border:1px solid #64748b;">🔄 Reset to Baseline</button>
+    </div>
+  </div>
+
+  <div class="footer-bar">
+    <span>MQTT Nurse Station Broker: <strong id="brokerInfo">127.0.0.1:1883</strong></span>
+    <span>Local Bedside Refresh: <strong>250 ms (Direct Memory Read)</strong></span>
   </div>
 
 <script>
@@ -696,7 +821,100 @@ async function pollState() {
   } catch (e) {}
 }
 
-setInterval(pollState, 350);
+async function sendManipulation() {
+  const targetHr = parseInt(document.getElementById('targetHr').value);
+  const targetSpo2 = parseInt(document.getElementById('targetSpo2').value);
+  const ecgCondition = document.getElementById('ecgCondition').value;
+  const delayMs = parseInt(document.getElementById('delayMs').value);
+  const dropRate = parseFloat(document.getElementById('dropRate').value);
+  const malicious = document.getElementById('maliciousSpoof').checked;
+  const overloadGpu = document.getElementById('overloadGpu').checked;
+
+  document.getElementById('targetHrLabel').textContent = targetHr;
+  document.getElementById('targetSpo2Label').textContent = targetSpo2;
+  document.getElementById('delayLabel').textContent = delayMs;
+  document.getElementById('dropLabel').textContent = dropRate.toFixed(2);
+
+  const payload = {
+    target_hr: targetHr,
+    target_spo2: targetSpo2,
+    ecg_condition: ecgCondition,
+    delay_ms: delayMs,
+    drop_rate: dropRate,
+    malicious: malicious,
+    overload_gpu: overloadGpu,
+    use_relay_b: overloadGpu
+  };
+
+  try {
+    const res = await fetch('/api/manipulate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (res.ok) {
+      const st = document.getElementById('manipStatus');
+      st.textContent = '✅ Bedside vitals applied directly on Jetson';
+      st.style.color = '#22c55e';
+      setTimeout(() => { st.textContent = '● Hosted Directly on Jetson Hardware'; st.style.color = '#10b981'; }, 2000);
+    }
+  } catch (e) {}
+}
+
+function applyPreset(name) {
+  if (name === 'healthy') {
+    document.getElementById('targetHr').value = 75;
+    document.getElementById('targetSpo2').value = 98;
+    document.getElementById('ecgCondition').value = 'normal';
+    document.getElementById('delayMs').value = 10;
+    document.getElementById('dropRate').value = 0.0;
+    document.getElementById('maliciousSpoof').checked = false;
+    document.getElementById('overloadGpu').checked = false;
+  } else if (name === 'arrhythmia') {
+    document.getElementById('targetHr').value = 145;
+    document.getElementById('targetSpo2').value = 94;
+    document.getElementById('ecgCondition').value = 'arrhythmia';
+    document.getElementById('delayMs').value = 12;
+    document.getElementById('dropRate').value = 0.0;
+    document.getElementById('maliciousSpoof').checked = false;
+    document.getElementById('overloadGpu').checked = false;
+  } else if (name === 'spoofed') {
+    document.getElementById('targetHr').value = 190;
+    document.getElementById('targetSpo2').value = 65;
+    document.getElementById('ecgCondition').value = 'malicious';
+    document.getElementById('delayMs').value = 25;
+    document.getElementById('dropRate').value = 0.15;
+    document.getElementById('maliciousSpoof').checked = true;
+    document.getElementById('overloadGpu').checked = false;
+  } else if (name === 'lag') {
+    document.getElementById('targetHr').value = 78;
+    document.getElementById('targetSpo2').value = 97;
+    document.getElementById('ecgCondition').value = 'normal';
+    document.getElementById('delayMs').value = 240;
+    document.getElementById('dropRate').value = 0.35;
+    document.getElementById('maliciousSpoof').checked = false;
+    document.getElementById('overloadGpu').checked = false;
+  } else if (name === 'congested') {
+    document.getElementById('targetHr').value = 75;
+    document.getElementById('targetSpo2').value = 98;
+    document.getElementById('ecgCondition').value = 'normal';
+    document.getElementById('delayMs').value = 15;
+    document.getElementById('dropRate').value = 0.0;
+    document.getElementById('maliciousSpoof').checked = false;
+    document.getElementById('overloadGpu').checked = true;
+  } else if (name === 'reset') {
+    document.getElementById('targetHr').value = 75;
+    document.getElementById('targetSpo2').value = 98;
+    document.getElementById('ecgCondition').value = 'normal';
+    document.getElementById('delayMs').value = 10;
+    document.getElementById('dropRate').value = 0.0;
+    document.getElementById('maliciousSpoof').checked = false;
+    document.getElementById('overloadGpu').checked = false;
+  }
+  sendManipulation();
+}
+
+setInterval(pollState, 250);
 pollState();
 </script>
 </body>
@@ -845,44 +1063,36 @@ class JetsonEdgeBrain:
                 pass
 
     def _on_connect(self, client, userdata, flags, rc, properties=None):
-        client.subscribe(f"hospital/{self.patient_id}/sensors/#")
+        print(f"[EDGE BRAIN:{self.patient_id}] Connected to MQTT broker {self.broker}:{self.port} (rc={rc})")
+        self.client.subscribe(f"hospital/{self.patient_id}/sensors/#")
+        self.client.subscribe(f"hospital/{self.patient_id}/control/offload")
+        self.client.subscribe(f"hospital/{self.patient_id}/control/chaos")
+        self.client.subscribe("hospital/control/chaos")
+        self.client.subscribe("hospital/discovery/probe")
+        self.client.subscribe(f"hospital/{self.patient_id}/control/admit")
+        self.send_discovery_announcement()
 
-    def _track_link(self, agent_id, payload, now):
-        if agent_id not in self.sensor_links:
+    def send_discovery_announcement(self):
+        """Announces this Jetson Orin node to the Nurse Station for auto-detection."""
+        if not self.client:
             return
-        info = self.sensor_links[agent_id]
-        sent_ts = float(payload.get("sent_ts", now))
-        lat_ms = max(0.5, (now - sent_ts) * 1000.0)
-        info["latency_ms"] = round(0.7 * info["latency_ms"] + 0.3 * lat_ms, 1)
-
-        seq = int(payload.get("seq", 0))
-        if info["last_seq"] is not None and seq > info["last_seq"]:
-            gap = seq - info["last_seq"] - 1
-            if gap > 0:
-                info["lost"] += gap
-        info["last_seq"] = seq
-        info["rx"] += 1
-        total = max(1, info["rx"] + info["lost"])
-        info["loss_pct"] = round((info["lost"] / total) * 100.0, 1)
-
-    def _run_inference(self, ecg_wave, overload_gpu=False):
-        t0 = time.perf_counter()
-        x = np.array(ecg_wave, dtype=np.float32).reshape(1, 1, 250)
-
-        if self.session is not None:
-            logits = self.session.run(None, {self.input_name: x})[0]
-            exp_scores = np.exp(logits - np.max(logits))
-            probs = exp_scores / np.sum(exp_scores)
-            anomaly_prob = float(probs[0][1])
-        else:
-            peak_to_peak = float(np.ptp(x))
-            anomaly_prob = 0.95 if peak_to_peak > 2.2 else 0.02
-
-        if overload_gpu:
-            time.sleep(0.065)
-
-        inference_ms = (time.perf_counter() - t0) * 1000.0
-        return anomaly_prob, inference_ms
+        try:
+            with self.lock:
+                hr = self.latest_hr
+                spo2 = self.latest_spo2
+                ecg_var = self.latest_ecg_var
+            announcement = {
+                "patient_id": self.patient_id,
+                "device_model": "NVIDIA Jetson Orin",
+                "exec_provider": self.active_provider,
+                "broker": f"{self.broker}:{self.port}",
+                "timestamp": time.time(),
+                "status": "ready",
+                "latest_vitals": {"hr": hr, "spo2": spo2, "ecg_variance": ecg_var},
+            }
+            self.client.publish("hospital/discovery/announce", json.dumps(announcement), qos=1)
+        except Exception:
+            pass
 
     def _on_message(self, client, userdata, msg):
         try:
@@ -890,11 +1100,15 @@ class JetsonEdgeBrain:
             payload = json.loads(msg.payload.decode("utf-8"))
             agent_id = payload.get("agent_id", "")
 
-            with self.lock:
-                self._track_link(agent_id, payload, now)
+            if topic == "hospital/discovery/probe":
+                self.send_discovery_announcement()
+                return
 
-            if agent_id == "Agent_HR":
-                hr_val = int(payload.get("value", 75))
+            if topic == f"hospital/{self.patient_id}/control/admit":
+                print(f"[EDGE BRAIN:{self.patient_id}] Officially admitted by Nurse Station to ICU Ward!")
+                return
+
+            if topic == f"hospital/{self.patient_id}/control/offload":
                 with self.lock:
                     self.latest_hr = hr_val
                     self.hr_plausible = 35 <= hr_val <= 210
@@ -920,43 +1134,131 @@ class JetsonEdgeBrain:
                 anomaly_prob, inference_ms = self._run_inference(ecg_wave, overload_gpu=overload_gpu)
                 is_arrhythmia = anomaly_prob > 0.50
 
-                with self.lock:
-                    self.packets_processed += 1
-                    self.latest_ecg_wave = ecg_wave
-                    self.last_prob = anomaly_prob
-                    self.last_arrhythmia = is_arrhythmia
-                    self.last_inf_ms = inference_ms
-                    self.last_offloaded = overload_gpu
-                    self.last_relay_b = use_relay_b
-                    hr_snap = self.latest_hr
-                    spo2_snap = self.latest_spo2
-                    hr_ok = self.hr_plausible
-                    spo2_ok = self.spo2_plausible
+        t0 = time.perf_counter()
+        if self.session is not None:
+            outputs = self.session.run(None, {"ecg_input": wave_np})
+            logits = outputs[0]
+        else:
+            kernel = np.array([0.1, 0.25, -0.5, 1.0, -0.5, 0.25, 0.1], dtype=np.float32)
+            conv_feat = np.convolve(wave_np.flatten(), kernel, mode="same")
+            energy = float(np.mean(np.maximum(0.0, conv_feat)))
+            logits = np.array([[1.2 - energy * 2.5, energy * 2.5 - 0.8]], dtype=np.float32)
+        t1 = time.perf_counter()
+        inf_ms = (t1 - t0) * 1000.0
 
-                if is_arrhythmia or not hr_ok or not spo2_ok:
-                    alert_msg = {
-                        "patient_id": self.patient_id,
-                        "timestamp": time.time(),
-                        "seq": payload.get("seq", 0),
-                        "arrhythmia_detected": is_arrhythmia,
-                        "anomaly_probability": round(anomaly_prob, 4),
-                        "inference_ms": round(inference_ms, 3),
-                        "execution_provider": self.active_provider,
-                        "hr": hr_snap,
-                        "spo2": spo2_snap,
-                        "hr_plausible": hr_ok,
-                        "spo2_plausible": spo2_ok,
-                        "routed_via": "Relay_Agent_B" if use_relay_b else "Direct_Edge_Link",
-                    }
-                    alert_topic = (
-                        f"hospital/{self.patient_id}/alerts/relay_b"
-                        if use_relay_b
-                        else f"hospital/{self.patient_id}/alerts/critical"
-                    )
-                    self.client.publish(alert_topic, json.dumps(alert_msg), qos=0)
+        exp_logits = np.exp(logits - np.max(logits))
+        probs = exp_logits / np.sum(exp_logits)
+        arrhythmia_prob = float(probs[0, 1])
 
-                summary_msg = {
+        if variance > 0.35 or np.max(np.abs(wave_np)) > 2.5:
+            arrhythmia_prob = max(arrhythmia_prob, 0.96)
+
+        is_alarm = arrhythmia_prob > 0.70
+
+        with self.lock:
+            self.latest_ecg_wave = ecg_wave
+            self.latest_ecg_var = variance
+            self.inf_ms = inf_ms
+            self.arrhythmia_prob = arrhythmia_prob
+            self.local_bed_alarm = is_alarm
+
+        if is_alarm:
+            self._trigger_bedside_alert(arrhythmia_prob, inf_ms, variance)
+
+        self._check_plausibility()
+
+    def _check_plausibility(self):
+        with self.lock:
+            hr = self.latest_hr
+            spo2 = self.latest_spo2
+            arrhythmia = self.arrhythmia_prob > 0.70
+
+        conflict = False
+        if not arrhythmia and spo2 >= 95 and (hr <= 0 or hr >= 240):
+            conflict = True
+        if spo2 < 50 or spo2 > 105 or hr < 30 or hr > 280:
+            conflict = True
+        if spo2 <= 30 and hr > 60 and not arrhythmia:
+            conflict = True
+
+        with self.lock:
+            self.sensor_conflict = conflict
+
+    def _trigger_bedside_alert(self, prob, inf_ms, variance):
+        chaos = read_patient_chaos(self.patient_id)
+        orin_cfg = chaos.get("Orin_Link", {})
+        use_relay_b = (
+            bool(orin_cfg.get("use_relay_b", False))
+            or bool(orin_cfg.get("overload_gpu", False))
+            or self.force_offload
+        )
+
+        sub_route = "relay_b" if use_relay_b else "primary"
+        alert_topic = f"hospital/{self.patient_id}/alerts/{sub_route}"
+
+        alert_payload = {
+            "patient_id": self.patient_id,
+            "alert": "CRITICAL_ARRHYTHMIA_DETECTED",
+            "arrhythmia_prob": round(prob, 4),
+            "inf_ms": round(inf_ms, 2),
+            "ecg_variance": round(variance, 4),
+            "timestamp": time.time(),
+            "route": sub_route,
+        }
+
+        try:
+            self.client.publish(alert_topic, json.dumps(alert_payload), qos=1)
+            print(
+                f"[EDGE ALARM:{self.patient_id}] Bedside Alarm ({prob*100:.1f}%) via {alert_topic} in {inf_ms:.2f}ms"
+            )
+        except Exception as e:
+            print(f"[EDGE BRAIN:{self.patient_id}] Failed to dispatch alert: {e}")
+
+    def get_local_state_dict(self):
+        with self.lock:
+            return {
+                "patient_id": self.patient_id,
+                "broker": f"{self.broker}:{self.port}",
+                "timestamp": time.time(),
+                "inf_ms": round(self.inf_ms, 2),
+                "exec_provider": self.active_provider,
+                "arrhythmia_prob": round(self.arrhythmia_prob, 4),
+                "local_bed_alarm": self.local_bed_alarm,
+                "sensor_conflict": self.sensor_conflict,
+                "latest_vitals": {
+                    "hr": self.latest_hr,
+                    "spo2": self.latest_spo2,
+                    "ecg_variance": round(self.latest_ecg_var, 4),
+                },
+                "ecg_wave": self.latest_ecg_wave,
+                "routing_path": self.routing_path,
+            }
+
+    def run_summary_publisher(self):
+        summary_topic = f"hospital/{self.patient_id}/edge/summary"
+        loop_cnt = 0
+
+        while not self.stop_event.is_set():
+            time.sleep(0.40)
+            loop_cnt += 1
+            if loop_cnt % 10 == 0:
+                self.send_discovery_announcement()
+
+            chaos = read_patient_chaos(self.patient_id)
+            orin_cfg = chaos.get("Orin_Link", {})
+            overload_gpu = bool(orin_cfg.get("overload_gpu", False))
+            use_relay_b = (
+                bool(orin_cfg.get("use_relay_b", False))
+                or overload_gpu
+                or self.force_offload
+            )
+            routing_path = "relay_b" if use_relay_b else "primary"
+
+            with self.lock:
+                self.routing_path = routing_path
+                summary = {
                     "patient_id": self.patient_id,
+                    "device_model": "NVIDIA Jetson Orin",
                     "timestamp": time.time(),
                     "seq": payload.get("seq", 0),
                     "inference_ms": round(inference_ms, 3),
@@ -971,8 +1273,136 @@ class JetsonEdgeBrain:
                     f"hospital/{self.patient_id}/edge/summary", json.dumps(summary_msg), qos=0
                 )
 
-        except Exception:
-            pass
+            try:
+                self.client.publish(summary_topic, json.dumps(summary), qos=0)
+            except Exception as e:
+                print(f"[EDGE BRAIN:{self.patient_id}] Error publishing summary: {e}")
+
+    def shutdown(self):
+        if self.client:
+            try:
+                self.client.loop_stop()
+                self.client.disconnect()
+            except Exception:
+                pass
+
+
+def start_local_bedside_web_server(primary_brain, port=8080):
+    """Starts a zero-dependency local HTTP Bedside ICU Monitor dashboard on the Jetson."""
+
+    class BedsideHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path == "/api/state":
+                state = primary_brain.get_local_state_dict()
+                body = json.dumps(state).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(body)
+            elif self.path in ("/api/chaos", "/api/vitals"):
+                chaos = read_patient_chaos(primary_brain.patient_id)
+                body = json.dumps(chaos).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(body)
+            else:
+                body = BEDSIDE_HTML_PAGE.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(body)
+
+        def do_POST(self):
+            if self.path in ("/api/manipulate", "/api/chaos", "/api/vitals"):
+                content_len = int(self.headers.get("Content-Length", 0))
+                post_body = self.rfile.read(content_len)
+                try:
+                    data = json.loads(post_body.decode("utf-8"))
+                    patient_id = primary_brain.patient_id
+
+                    new_cfg = {
+                        "Agent_ECG": {
+                            "delay_ms": int(data.get("delay_ms", 12)),
+                            "drop_rate": float(data.get("drop_rate", 0.0)),
+                            "malicious": bool(data.get("malicious", False)) or (data.get("ecg_condition") == "malicious"),
+                            "condition": data.get("ecg_condition", "normal"),
+                        },
+                        "Agent_SpO2": {
+                            "delay_ms": int(data.get("delay_ms", 10)),
+                            "drop_rate": float(data.get("drop_rate", 0.0)),
+                            "malicious": bool(data.get("malicious", False)),
+                            "target_spo2": int(data.get("target_spo2", 98)),
+                        },
+                        "Agent_HR": {
+                            "delay_ms": int(data.get("delay_ms", 10)),
+                            "drop_rate": float(data.get("drop_rate", 0.0)),
+                            "malicious": bool(data.get("malicious", False)),
+                            "target_hr": int(data.get("target_hr", 75)),
+                        },
+                        "Orin_Link": {
+                            "overload_gpu": bool(data.get("overload_gpu", False)),
+                            "use_relay_b": bool(data.get("use_relay_b", False)),
+                        },
+                        "vitals": {
+                            "target_hr": int(data.get("target_hr", 75)),
+                            "target_spo2": int(data.get("target_spo2", 98)),
+                            "ecg_condition": data.get("ecg_condition", "normal"),
+                        },
+                    }
+                    update_chaos_file(new_cfg, patient_id=patient_id)
+
+                    with primary_brain.lock:
+                        primary_brain.latest_hr = int(data.get("target_hr", primary_brain.latest_hr))
+                        primary_brain.latest_spo2 = int(data.get("target_spo2", primary_brain.latest_spo2))
+                        if data.get("ecg_condition") == "arrhythmia":
+                            primary_brain.arrhythmia_prob = 0.94
+                            primary_brain.local_bed_alarm = True
+                        elif data.get("ecg_condition") == "normal":
+                            primary_brain.arrhythmia_prob = 0.02
+                            primary_brain.local_bed_alarm = False
+                        primary_brain.force_offload = bool(data.get("use_relay_b", False)) or bool(data.get("overload_gpu", False))
+
+                    if primary_brain.client:
+                        try:
+                            primary_brain.client.publish(
+                                f"hospital/{patient_id}/control/chaos",
+                                json.dumps(new_cfg),
+                                qos=1,
+                                retain=True,
+                            )
+                        except Exception:
+                            pass
+
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"status": "ok", "patient_id": patient_id, "config": new_cfg}).encode("utf-8"))
+                    return
+                except Exception as e:
+                    self.send_response(400)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"error": str(e)}).encode("utf-8"))
+                    return
+
+            self.send_response(404)
+            self.end_headers()
+
+        def log_message(self, format, *args):
+            pass  # Keep terminal output clean
+
+    try:
+        server = ThreadingHTTPServer(("0.0.0.0", port), BedsideHandler)
+        t = threading.Thread(target=server.serve_forever, daemon=True)
+        t.start()
+        print(f"[BEDSIDE DASHBOARD] Local ICU Monitor live at: http://localhost:{port}")
+        return server
+    except Exception as e:
+        print(f"[BEDSIDE DASHBOARD] Note: Port {port} busy ({e})")
+        return None
 
 
 def create_shared_onnx_session(model_path):
