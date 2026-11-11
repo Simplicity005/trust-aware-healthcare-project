@@ -1,12 +1,12 @@
-# Central Nurse Station (`nurse_station/`) — Nurse's Table Laptop
+# Central Nurse Station (`nurse_station/`) - Nurse's Table Laptop
 
 This folder contains **everything that runs on the Nurse's Table Laptop** (including its own `requirements.txt` and pre-built `ecg_anomaly.onnx`):
 
-1. `requirements.txt` — Nurse Station dependencies (`paho-mqtt`, `streamlit`, `pandas`, `numpy`, `onnxruntime`, `matplotlib`).
-2. `ecg_anomaly.onnx` — Pre-built 1D-CNN ECG model for Gateway CPU fallback inference.
-3. `dashboard.py` — **Multi-Patient Central Nurse Station Dashboard & Mathematical Trust Engine**. Monitors multiple bedside Jetson Orin units (`Bed_1`, `Bed_2`, `Bed_3`, ...) simultaneously, grades sensor trust $T_i(t) \in [0.0, 1.0]$, handles Gateway CPU fallback offloading, quarantines broken/malicious sensors, and provides a per-patient Chaos Controller over MQTT.
-4. `run_benchmarks.py` & `benchmarks/` — Automated benchmark suite and generated PNG charts + CSV logs.
-5. `start_nurse_station.sh` — One-command launcher that automatically sets up `venv`, installs `requirements.txt`, starts Mosquitto, and opens the dashboard.
+1. `requirements.txt` - Nurse Station dependencies (`paho-mqtt`, `streamlit`, `pandas`, `numpy`, `onnxruntime`, `matplotlib`).
+2. `ecg_anomaly.onnx` - Pre-built 1D-CNN ECG model for Gateway CPU fallback inference.
+3. `dashboard.py` - **Multi-Patient Central Nurse Station Dashboard & Mathematical Trust Engine**. Monitors multiple bedside Jetson Orin units (`Bed_1`, `Bed_2`, `Bed_3`, ...) simultaneously, grades sensor trust $T_i(t) \in [0.0, 1.0]$, handles Gateway CPU fallback offloading, quarantines broken/malicious sensors, and provides a per-patient Chaos Controller over MQTT.
+4. `run_benchmarks.py` & `benchmarks/` - Automated benchmark suite and generated PNG charts + CSV logs.
+5. `start_nurse_station.sh` - One-command launcher that automatically sets up `venv`, installs `requirements.txt`, starts Mosquitto, and opens the dashboard.
 
 ---
 
@@ -55,12 +55,12 @@ chmod +x start_dual_nurse_stations.sh start_secondary_nurse_station.sh
 ```
 - **Nurse Station 1 (Primary Leader):** `http://localhost:8501`
 - **Nurse Station 2 (Hot-Standby Peer):** `http://localhost:8502`
-- Both stations coordinate over MQTT via `hospital/nurse_stations/heartbeat` and `hospital/nurse_stations/failover`. Use the **`⚡ Test Failover`** button in the UI to demonstrate instant leader failover!
+- Both stations coordinate over MQTT via `hospital/nurse_stations/heartbeat` and `hospital/nurse_stations/failover`. Use the **`Test Failover`** button in the UI to demonstrate instant leader failover!
 
 ### 3. Room-Based Device Directory (Left Sidebar)
 The Nurse Station left sidebar organizes all available and admitted devices by ICU Room:
 - **Room Groups**: e.g., `Room 101 (Cardiac ICU)`, `Room 102 (Cardiac ICU)`, `Room 103 (Neuro ICU)`, etc.
-- **Device Status Badges**: Shows each device's real-time state (`🟢 Trusted`, `🚨 Arrhythmia Alarm`, `🛡️ Quarantined`, `🔀 Offloaded`, `⚠️ Offline`).
+- **Device Status Badges**: Shows each device's real-time state (`[TRUSTED]`, `[ARRHYTHMIA ALARM]`, `[QUARANTINED]`, `[OFFLOADED]`, `[OFFLINE]`).
 - **Room Filter**: Filter the ward view to monitor a specific room or all rooms.
 - **Available / Unassigned Jetsons**: Lists newly detected devices waiting to be commissioned, with a room assignment dropdown.
 - **Direct Inspect Button**: Clicking any bed in the sidebar instantly loads its live 250 Hz ECG waveform and sensor trust metrics into the detailed inspection view.
@@ -73,8 +73,8 @@ In compliance with edge healthcare architectures, **patient vitals manipulation 
 
 ### 5. Dynamic Bed Admission & Jetson Auto-Detection ("Add New Bed")
 The Nurse Station features a dynamic bed admission and auto-discovery workflow:
-1. **"➕ Add New Bed" Action Button**: Located at the top of the ICU Ward overview. If unassigned Jetson Orin nodes are transmitting on the LAN or MQTT broker, the button displays a live badge: `➕ Add New Bed (N Detected)`.
+1. **"+ Add New Bed" Action Button**: Located at the top of the ICU Ward overview. If unassigned Jetson Orin nodes are transmitting on the LAN or MQTT broker, the button displays a live badge: `+ Add New Bed (N Detected)`.
 2. **Auto-Detection**: Clicking the button scans the network and lists all newly discovered Jetson devices ready to pair with live signal strength, vitals preview, and hardware execution provider (e.g. TensorRT/CUDA).
-3. **Room Assignment & Admission**: Choose the room (e.g. `Room 101`, `Room 102`, `Room 103`) and click `➕ Add Jetson (Bed_X)` to officially admit the device to the ward.
-4. **Bed Release / Discharge**: The nurse can release any bed back to the unassigned pool using the `🚪 Release Bed` button.
-5. **Built-In Simulator**: If physical Jetson boards are not currently running, the panel includes a `⚡ Simulate New Jetson Node` button to test the complete discovery and admission flow locally.
+3. **Room Assignment & Admission**: Choose the room (e.g. `Room 101`, `Room 102`, `Room 103`) and click `+ Admit Jetson (Bed_X)` to officially admit the device to the ward.
+4. **Bed Release / Discharge**: The nurse can release any bed back to the unassigned pool using the `Release Bed` button.
+5. **Built-In Simulator**: If physical Jetson boards are not currently running, the panel includes a `+ Simulate New Jetson Node` button to test the complete discovery and admission flow locally.

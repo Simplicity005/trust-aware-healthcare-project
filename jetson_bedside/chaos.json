@@ -43,23 +43,31 @@
   },
   "Bed_1": {
     "Agent_ECG": {
-      "delay_ms": 12,
-      "drop_rate": 0.0,
-      "malicious": false
+      "delay_ms": 15.0,
+      "drop_rate": 0.05,
+      "malicious": false,
+      "condition": "arrhythmia"
     },
     "Agent_SpO2": {
-      "delay_ms": 10,
-      "drop_rate": 0.0,
-      "malicious": false
+      "delay_ms": 15.0,
+      "drop_rate": 0.05,
+      "malicious": false,
+      "target_spo2": 93
     },
     "Agent_HR": {
-      "delay_ms": 10,
-      "drop_rate": 0.0,
-      "malicious": false
+      "delay_ms": 15.0,
+      "drop_rate": 0.05,
+      "malicious": false,
+      "target_hr": 142
     },
     "Orin_Link": {
       "overload_gpu": false,
       "use_relay_b": false
+    },
+    "vitals": {
+      "target_hr": 142,
+      "target_spo2": 93,
+      "ecg_condition": "arrhythmia"
     }
   }
 }

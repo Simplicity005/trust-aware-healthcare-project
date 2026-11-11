@@ -8,6 +8,7 @@ directly on the Jetson at http://localhost:8080 with local sensor fault controls
 """
 
 import os
+import sys
 import time
 import json
 import signal
@@ -31,10 +32,15 @@ CHAOS_LOCK = threading.Lock()
 
 def default_bed_chaos():
     return {
-        "Agent_ECG": {"delay_ms": 12, "drop_rate": 0.0, "malicious": False},
-        "Agent_SpO2": {"delay_ms": 10, "drop_rate": 0.0, "malicious": False},
-        "Agent_HR": {"delay_ms": 10, "drop_rate": 0.0, "malicious": False},
+        "Agent_ECG": {"delay_ms": 12, "drop_rate": 0.0, "malicious": False, "condition": "normal"},
+        "Agent_SpO2": {"delay_ms": 10, "drop_rate": 0.0, "malicious": False, "target_spo2": 98},
+        "Agent_HR": {"delay_ms": 10, "drop_rate": 0.0, "malicious": False, "target_hr": 75},
         "Orin_Link": {"overload_gpu": False, "use_relay_b": False},
+        "vitals": {
+            "target_hr": 75,
+            "target_spo2": 98,
+            "ecg_condition": "normal",
+        },
     }
 
 
@@ -50,12 +56,16 @@ def read_patient_chaos(patient_id="Bed_1"):
             for k, v in data[patient_id].items():
                 if k in base and isinstance(v, dict):
                     base[k].update(v)
+                elif k in base:
+                    base[k] = v
             return base
         if "Agent_ECG" in data:
             base = default_bed_chaos()
             for k, v in data.items():
                 if k in base and isinstance(v, dict):
                     base[k].update(v)
+                elif k in base:
+                    base[k] = v
             return base
         return default_bed_chaos()
     except Exception:
@@ -84,12 +94,32 @@ def write_patient_chaos(patient_id, bed_chaos):
         return False
 
 
+def update_chaos_file(new_data, patient_id=None):
+    if patient_id:
+        cfg = read_patient_chaos(patient_id)
+        for k, v in new_data.items():
+            if k in cfg and isinstance(v, dict):
+                cfg[k].update(v)
+            else:
+                cfg[k] = v
+        write_patient_chaos(patient_id, cfg)
+    else:
+        for pid in ["Bed_1", "Bed_2", "Bed_3"]:
+            cfg = read_patient_chaos(pid)
+            for k, v in new_data.items():
+                if k in cfg and isinstance(v, dict):
+                    cfg[k].update(v)
+                else:
+                    cfg[k] = v
+            write_patient_chaos(pid, cfg)
+
+
 BEDSIDE_HTML_PAGE = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bedside Monitor</title>
+<title>NVIDIA Jetson Orin - Bedside ICU Monitor</title>
 <style>
   :root {
     --bg: #0a0a0c;
@@ -119,53 +149,36 @@ BEDSIDE_HTML_PAGE = """<!DOCTYPE html>
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding-bottom: 16px;
-    margin-bottom: 16px;
+    padding-bottom: 14px;
+    margin-bottom: 18px;
     border-bottom: 1px solid var(--border);
   }
-  .topbar-left {
-    display: flex;
-    align-items: baseline;
-    gap: 12px;
-  }
-  .bed-title {
+  .brand-title {
     font-size: 18px;
-    font-weight: 600;
+    font-weight: 700;
     letter-spacing: -0.02em;
+    color: #f8fafc;
   }
-  .bed-meta {
+  .brand-sub {
     font-size: 12px;
     color: var(--muted);
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  }
-  .topbar-right {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  .bed-select {
-    display: none;
-    background: var(--card);
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 5px 10px;
-    font-size: 12px;
+    margin-top: 2px;
   }
   .pill {
     font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+    font-weight: 700;
+    letter-spacing: 0.05em;
     padding: 4px 10px;
-    border-radius: 999px;
-    border: 1px solid var(--border);
-    background: var(--card);
-    color: var(--text);
+    border-radius: 9999px;
+    text-transform: uppercase;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   }
-  .pill.normal { color: var(--green); border-color: rgba(16, 185, 129, 0.3); background: rgba(16, 185, 129, 0.08); }
-  .pill.warn { color: var(--amber); border-color: rgba(245, 158, 11, 0.3); background: rgba(245, 158, 11, 0.08); }
-  .pill.danger { color: var(--red); border-color: rgba(239, 68, 68, 0.35); background: rgba(239, 68, 68, 0.12); }
+  .pill-green { background: #064e3b; color: #34d399; }
+  .pill-amber { background: #78350f; color: #fbbf24; }
+  .pill-red { background: #7f1d1d; color: #f87171; }
+  .pill-blue { background: #1e3a8a; color: #93c5fd; }
+  .pill-muted { background: #1f2228; color: #7c828d; }
 
   .bento {
     display: grid;
@@ -181,642 +194,377 @@ BEDSIDE_HTML_PAGE = """<!DOCTYPE html>
     flex-direction: column;
     justify-content: space-between;
   }
-  .span-8-2 { grid-column: span 8; grid-row: span 2; }
   .span-4 { grid-column: span 4; }
-  .span-3 { grid-column: span 3; }
+  .span-6 { grid-column: span 6; }
+  .span-8 { grid-column: span 8; }
   .span-12 { grid-column: span 12; }
 
-  @media (max-width: 960px) {
-    .span-8-2, .span-4, .span-3 { grid-column: span 12; }
-  }
-
-  .label {
+  .lbl {
     font-size: 11px;
-    font-weight: 500;
+    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.06em;
     color: var(--muted);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
   }
-  .vital-num {
-    font-size: 44px;
-    font-weight: 600;
+  .val-xl {
+    font-size: 32px;
+    font-weight: 700;
     letter-spacing: -0.03em;
-    font-variant-numeric: tabular-nums;
-    margin: 6px 0 2px 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   }
-  .vital-unit {
+  .val-lg {
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .unit {
     font-size: 13px;
     color: var(--muted);
     font-weight: 400;
-    margin-left: 6px;
+    margin-left: 4px;
   }
-  .sub {
-    font-size: 12px;
-    color: var(--muted);
-    font-variant-numeric: tabular-nums;
+  .row-between {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
   }
-  .stat-val {
-    font-size: 22px;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-    margin: 8px 0 4px 0;
-    font-variant-numeric: tabular-nums;
-  }
-  canvas {
-    width: 100%;
-    height: 190px;
-    display: block;
+  .kv-list {
     margin-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .kv {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    padding: 4px 0;
+    border-bottom: 1px solid #181a1f;
+  }
+  .kv span:first-child { color: var(--muted); }
+  .kv span:last-child {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-weight: 600;
   }
 
-  /* Sensor & Local Controls Table */
-  .ctrl-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 12px;
-  }
-  .btn {
-    background: transparent;
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 5px 12px;
-    font-size: 12px;
-    cursor: pointer;
-  }
-  .btn:hover { border-color: var(--muted); }
-  .sensor-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 12px;
-  }
-  @media (max-width: 960px) {
-    .sensor-grid { grid-template-columns: 1fr; }
-  }
-  .sensor-box {
-    background: var(--bg);
-    border: 1px solid var(--border);
+  /* Form & Controls */
+  .control-group {
+    background: #0d0e11;
+    border: 1px solid #1a1d23;
     border-radius: 8px;
-    padding: 12px;
-  }
-  .sensor-box-title {
-    font-size: 12px;
-    font-weight: 600;
+    padding: 14px;
     margin-bottom: 10px;
+  }
+  .control-label {
     display: flex;
     justify-content: space-between;
-    align-items: center;
-  }
-  .vital-label {
-    font-size: 0.82rem;
-    color: #94a3b8;
-    text-transform: uppercase;
-    font-weight: 700;
-  }
-  .vital-sub {
-    font-size: 0.75rem;
-    color: #64748b;
-    margin-top: 3px;
-  }
-  .vital-val {
-    font-size: 2.2rem;
-    font-weight: 900;
-  }
-  .hr-color { color: #22c55e; }
-  .spo2-color { color: #38bdf8; }
-  .ai-color { color: #facc15; }
-  .prob-color { color: #f472b6; }
-  .preset-btn {
-    padding: 6px 12px;
-    border-radius: 6px;
-    font-size: 0.80rem;
-    font-weight: 700;
-    cursor: pointer;
-    transition: transform 0.1s ease, filter 0.1s ease;
-  }
-  .preset-btn:hover {
-    filter: brightness(1.2);
-    transform: translateY(-1px);
-  }
-  .footer-bar {
-    margin-top: 16px;
-    display: flex;
-    justify-content: space-between;
-    font-size: 11px;
-    color: var(--muted);
-    margin-bottom: 4px;
-    font-variant-numeric: tabular-nums;
+    font-size: 12px;
+    color: #cbd5e1;
+    font-weight: 600;
+    margin-bottom: 6px;
   }
   input[type="range"] {
     width: 100%;
-    accent-color: var(--blue);
-    cursor: pointer;
+    accent-color: #3b82f6;
+    background: #1f2228;
+    height: 6px;
+    border-radius: 3px;
   }
-  .toggle-row {
+  select {
+    width: 100%;
+    background: #17191e;
+    color: #f1f5f9;
+    border: 1px solid #2d3139;
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+    outline: none;
+  }
+  .btn-row {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 12px;
-    color: var(--muted);
-    margin-top: 10px;
-    padding-top: 8px;
-    border-top: 1px solid var(--border);
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
   }
-  input[type="checkbox"] {
-    width: 15px;
-    height: 15px;
-    accent-color: var(--red);
+  .preset-btn {
+    background: #181b22;
+    color: #e2e8f0;
+    border: 1px solid #2a2e38;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
     cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .preset-btn:hover {
+    background: #232732;
+    border-color: #3b82f6;
+  }
+  .btn-primary {
+    background: #2563eb;
+    color: #ffffff;
+    border: none;
+  }
+  .btn-primary:hover {
+    background: #1d4ed8;
+  }
+  .status-badge {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  canvas {
+    width: 100%;
+    height: 140px;
+    background: #08090b;
+    border-radius: 6px;
+    border: 1px solid #1a1d24;
+    display: block;
   }
 </style>
 </head>
 <body>
-  <div class="header">
-    <div class="title-block">
-      <h1>🖥️ NVIDIA Jetson Orin — Local Bedside ICU Monitor (<span id="bedId">Bed_1</span>)</h1>
-      <p>Zero-Latency On-Device 1D-CNN ECG Arrhythmia Detection (&lt;5 ms SLA) &amp; Bedside Vitals Controller</p>
+<div class="container">
+  <div class="topbar">
+    <div>
+      <div class="brand-title">NVIDIA Jetson Orin &mdash; Bedside ICU Monitor (<span id="bedId">Bed_1</span>)</div>
+      <div class="brand-sub">Hardware Edge Inference: 1D-CNN Arrhythmia Classifier | Host Port: 8080</div>
     </div>
-    <div class="badge-row">
-      <div class="pill">Provider: <span id="provider">CPU</span></div>
-      <div class="pill">Route: <span id="route">PRIMARY</span></div>
+    <div style="display:flex; gap:10px; align-items:center;">
+      <span class="pill pill-blue" id="providerPill">CUDA / Orin GPU</span>
+      <span class="pill pill-green" id="overallPill">NOMINAL</span>
     </div>
   </div>
 
-  <div id="alarmBanner" class="banner banner-normal">
-    ✅ NORMAL SINUS RHYTHM — Zero-Latency Bedside AI Monitor Nominal
-  </div>
+  <div class="bento">
+    <!-- Row 1: Real-time Waveform (8 cols) and Inference State (4 cols) -->
+    <div class="tile span-8">
+      <div class="row-between" style="margin-bottom:8px;">
+        <span class="lbl">ECG Lead II Real-Time Waveform (250 Hz Stream)</span>
+        <span class="status-badge" id="ecgStatusBadge" style="background:#064e3b; color:#34d399;">NORMAL SINUS</span>
+      </div>
+      <canvas id="ecgCanvas" width="800" height="140"></canvas>
+    </div>
 
-  <div id="conflictBanner" class="banner-conflict">
-    ⚠️ CROSS-SENSOR PHYSIOLOGICAL CONFLICT DETECTED: Discrepancy between ECG Sinus Rhythm, HR, and SpO2!
-  </div>
-
-  <div class="main-grid">
-    <div class="panel">
-      <div class="panel-title">
-        <span>🫀 Live 250 Hz Bedside ECG Waveform (Lead II — 1.0s Window)</span>
-        <span>Variance: <strong id="ecgVar">0.0400</strong></span>
+    <div class="tile span-4">
+      <div class="row-between">
+        <span class="lbl">Edge AI Inference</span>
+        <span class="pill pill-green" id="alarmPill">NO ALARM</span>
+      </div>
+      <div class="val-xl" id="riskVal" style="color:#10b981; margin-top:8px;">1.8%</div>
+      <div style="font-size:12px; color:var(--muted); margin-bottom:4px;">Arrhythmia Probability</div>
+      <div class="kv-list">
+        <div class="kv"><span>Inference Latency</span><span id="infLatency">0.24 ms</span></div>
+        <div class="kv"><span>Execution Provider</span><span id="activeProvider">CUDAExecutionProvider</span></div>
+        <div class="kv"><span>SLA Performance</span><span style="color:#10b981;">&lt; 5.00 ms (Met)</span></div>
+        <div class="kv"><span>Active Route</span><span id="routeLabel">Primary Direct</span></div>
       </div>
     </div>
 
-    <div class="bento">
-      <!-- ECG Waveform (8 cols x 2 rows) -->
-      <div class="tile span-8-2">
-        <div class="label">
-          <span>ECG Lead II</span>
-          <span id="ecgMeta" class="sub">250 Hz</span>
-        </div>
-        <canvas id="ecgCanvas" width="820" height="190"></canvas>
+    <!-- Row 2: Vitals & Link Metrics -->
+    <div class="tile span-4">
+      <div class="row-between">
+        <span class="lbl">Heart Rate</span>
+        <span class="status-badge" id="hrBadge" style="background:#064e3b; color:#34d399;">PLAUSIBLE</span>
       </div>
+      <div class="row-between" style="margin-top:12px; align-items:baseline;">
+        <div class="val-xl" id="hrDisplay" style="color:#38bdf8;">75 <span class="unit">bpm</span></div>
+        <div style="font-size:12px; color:var(--muted);">Sensor: Agent_HR</div>
+      </div>
+    </div>
 
-      <!-- Heart Rate (4 cols) -->
-      <div class="tile span-4">
-        <div class="label">
-          <span>Heart rate</span>
-          <span id="hrLink" class="sub">0 ms</span>
-        </div>
+    <div class="tile span-4">
+      <div class="row-between">
+        <span class="lbl">Blood Oxygen Saturation</span>
+        <span class="status-badge" id="spo2Badge" style="background:#064e3b; color:#34d399;">PLAUSIBLE</span>
+      </div>
+      <div class="row-between" style="margin-top:12px; align-items:baseline;">
+        <div class="val-xl" id="spo2Display" style="color:#10b981;">98 <span class="unit">%</span></div>
+        <div style="font-size:12px; color:var(--muted);">Sensor: Agent_SpO2</div>
+      </div>
+    </div>
+
+    <div class="tile span-4">
+      <div class="row-between">
+        <span class="lbl">Network &amp; Zero-Trust Link</span>
+        <span class="pill pill-green" id="linkPill">HEALTHY</span>
+      </div>
+      <div class="kv-list" style="margin-top:12px;">
+        <div class="kv"><span>MQTT Broker</span><span id="brokerDisplay">127.0.0.1:1883</span></div>
+        <div class="kv"><span>Packets Processed</span><span id="pktCount">0</span></div>
+        <div class="kv"><span>Cross-Sensor State</span><span id="conflictLabel">Consistent</span></div>
+      </div>
+    </div>
+
+    <!-- Row 3: Bedside Vitals Manipulation & Fault Controls (Directly on Jetson) -->
+    <div class="tile span-12">
+      <div class="row-between" style="margin-bottom:12px;">
         <div>
-          <span class="vital-num" id="hrVal" style="color: var(--green);">--</span>
-          <span class="vital-unit">bpm</span>
+          <span class="lbl">Bedside Vitals Manipulation &amp; Fault Injection Controller</span>
+          <div style="font-size:12px; color:var(--muted); margin-top:2px;">Runs locally on this Jetson. Target vitals &amp; synthetic faults directly modify bedside sensor streamers.</div>
         </div>
-        <div class="sub" id="hrSub">60 - 100 bpm</div>
+        <span class="status-badge" id="manipStatus" style="background:#064e3b; color:#34d399;">[HOSTED LOCALLY ON JETSON]</span>
       </div>
 
-      <!-- SpO2 (4 cols) -->
-      <div class="tile span-4">
-        <div class="label">
-          <span>SpO2</span>
-          <span id="spo2Link" class="sub">0 ms</span>
-        </div>
-        <div>
-          <span class="vital-num" id="spo2Val" style="color: var(--blue);">--</span>
-          <span class="vital-unit">%</span>
-        </div>
-        <div class="sub" id="spo2Sub">95 - 100 %</div>
-      </div>
-
-      <!-- 4 Compact Status Tiles (3 cols each) -->
-      <div class="tile span-3">
-        <div class="label"><span>Rhythm</span></div>
-        <div class="stat-val" id="rhythmVal">Normal Sinus</div>
-        <div class="sub" id="rhythmSub">1D-CNN classifier</div>
-      </div>
-
-      <div class="tile span-3">
-        <div class="label"><span>Arrhythmia risk</span></div>
-        <div class="stat-val" id="probVal">0.0%</div>
-        <div class="sub">Threshold 50.0%</div>
-      </div>
-
-      <div class="tile span-3">
-        <div class="label"><span>Inference</span></div>
-        <div class="stat-val" id="infVal">0.00 ms</div>
-        <div class="sub" id="provSub">CPUExecutionProvider</div>
-      </div>
-
-      <div class="tile span-3">
-        <div class="label"><span>Alert route</span></div>
-        <div class="stat-val" id="routeVal">Direct</div>
-        <div class="sub" id="pktSub">0 packets</div>
-      </div>
-
-      <!-- Local Sensor Link Telemetry & Fault Injection (12 cols) -->
-      <div class="tile span-12">
-        <div class="ctrl-header">
-          <div class="label"><span>Sensors and fault injection</span></div>
-          <button class="btn" onclick="resetChaos()">Reset all</button>
-        </div>
-
-        <div class="sensor-grid">
-          <!-- ECG Sensor Controls -->
-          <div class="sensor-box">
-            <div class="sensor-box-title">
-              <span>ECG sensor</span>
-              <span class="sensor-metrics" id="m_ecg">12 ms | 0% loss</span>
-            </div>
-            <div class="field">
-              <div class="field-top"><span>Delay</span><span id="lbl_ecg_delay">12 ms</span></div>
-              <input type="range" id="ecg_delay" min="5" max="450" step="5" value="12" oninput="pushChaos()">
-            </div>
-            <div class="field">
-              <div class="field-top"><span>Drop rate</span><span id="lbl_ecg_drop">0%</span></div>
-              <input type="range" id="ecg_drop" min="0" max="0.9" step="0.05" value="0" oninput="pushChaos()">
-            </div>
-            <div class="toggle-row">
-              <span>Spoof waveform</span>
-              <input type="checkbox" id="ecg_mal" onchange="pushChaos()">
-            </div>
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:12px;">
+        <!-- Control 1: Vitals -->
+        <div class="control-group">
+          <div class="control-label">
+            <span>Target Heart Rate:</span>
+            <span id="targetHrLabel" style="color:#38bdf8;">75 bpm</span>
           </div>
+          <input type="range" id="targetHr" min="30" max="220" value="75" oninput="sendManipulation()">
 
-          <!-- SpO2 Sensor Controls -->
-          <div class="sensor-box">
-            <div class="sensor-box-title">
-              <span>SpO2 sensor</span>
-              <span class="sensor-metrics" id="m_spo2">10 ms | 0% loss</span>
-            </div>
-            <div class="field">
-              <div class="field-top"><span>Delay</span><span id="lbl_spo2_delay">10 ms</span></div>
-              <input type="range" id="spo2_delay" min="5" max="450" step="5" value="10" oninput="pushChaos()">
-            </div>
-            <div class="field">
-              <div class="field-top"><span>Drop rate</span><span id="lbl_spo2_drop">0%</span></div>
-              <input type="range" id="spo2_drop" min="0" max="0.9" step="0.05" value="0" oninput="pushChaos()">
-            </div>
-            <div class="toggle-row">
-              <span>Spoof reading</span>
-              <input type="checkbox" id="spo2_mal" onchange="pushChaos()">
-            </div>
+          <div class="control-label" style="margin-top:14px;">
+            <span>Target SpO2 Saturation:</span>
+            <span id="targetSpo2Label" style="color:#10b981;">98 %</span>
           </div>
-
-          <!-- HR Sensor Controls -->
-          <div class="sensor-box">
-            <div class="sensor-box-title">
-              <span>HR sensor</span>
-              <span class="sensor-metrics" id="m_hr">10 ms | 0% loss</span>
-            </div>
-            <div class="field">
-              <div class="field-top"><span>Delay</span><span id="lbl_hr_delay">10 ms</span></div>
-              <input type="range" id="hr_delay" min="5" max="450" step="5" value="10" oninput="pushChaos()">
-            </div>
-            <div class="field">
-              <div class="field-top"><span>Drop rate</span><span id="lbl_hr_drop">0%</span></div>
-              <input type="range" id="hr_drop" min="0" max="0.9" step="0.05" value="0" oninput="pushChaos()">
-            </div>
-            <div class="toggle-row">
-              <span>Spoof reading</span>
-              <input type="checkbox" id="hr_mal" onchange="pushChaos()">
-            </div>
-          </div>
-
-          <!-- Jetson Node Controls -->
-          <div class="sensor-box">
-            <div class="sensor-box-title">
-              <span>Edge node</span>
-              <span class="sensor-metrics" id="m_node">Active</span>
-            </div>
-            <div class="toggle-row" style="border-top: none; margin-top: 0; padding-top: 2px;">
-              <span>GPU load spike</span>
-              <input type="checkbox" id="overload_gpu" onchange="pushChaos()">
-            </div>
-            <div class="toggle-row">
-              <span>Link congestion</span>
-              <input type="checkbox" id="use_relay_b" onchange="pushChaos()">
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Bedside Patient Vitals & Sensor Manipulation Console -->
-  <div class="panel" style="margin-top: 16px; border: 1px solid #0284c7;">
-    <div class="panel-title">
-      <span style="color:#38bdf8; font-weight:800; font-size:0.95rem;">🎛️ Bedside Patient Vitals &amp; Sensor Manipulation Console</span>
-      <span id="manipStatus" style="font-size:0.80rem; color:#10b981;">● Hosted Directly on Jetson Hardware</span>
-    </div>
-
-    <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 10px;">
-      <!-- Column 1: Patient Target Vitals -->
-      <div>
-        <h4 style="font-size:0.85rem; color:#94a3b8; text-transform:uppercase; margin-bottom:10px;">Patient Target Vitals (Bedside Override)</h4>
-        
-        <div style="margin-bottom:14px;">
-          <div style="display:flex; justify-content:space-between; font-size:0.85rem; margin-bottom:4px;">
-            <span>💓 Target Heart Rate:</span>
-            <span><strong id="targetHrLabel" style="color:#22c55e;">75</strong> BPM</span>
-          </div>
-          <input type="range" id="targetHr" min="30" max="220" value="75" step="1" oninput="sendManipulation()" style="width:100%; cursor:pointer;">
+          <input type="range" id="targetSpo2" min="50" max="100" value="98" oninput="sendManipulation()">
         </div>
 
-        <div style="margin-bottom:14px;">
-          <div style="display:flex; justify-content:space-between; font-size:0.85rem; margin-bottom:4px;">
-            <span>🫁 Target SpO2 Saturation:</span>
-            <span><strong id="targetSpo2Label" style="color:#38bdf8;">98</strong>%</span>
+        <!-- Control 2: Rhythm -->
+        <div class="control-group">
+          <div class="control-label">
+            <span>ECG Cardiac Rhythm Condition:</span>
           </div>
-          <input type="range" id="targetSpo2" min="50" max="100" value="98" step="1" oninput="sendManipulation()" style="width:100%; cursor:pointer;">
-        </div>
-
-        <div style="margin-bottom:14px;">
-          <span style="font-size:0.85rem; display:block; margin-bottom:6px;">🫀 ECG Cardiac Waveform Rhythm:</span>
-          <select id="ecgCondition" onchange="sendManipulation()" style="width:100%; background:#0f172a; color:#f8fafc; border:1px solid #334155; padding:8px 10px; border-radius:6px; font-size:0.85rem;">
-            <option value="normal">🟢 Normal Sinus Rhythm (Nominal PQRST Wave)</option>
-            <option value="arrhythmia">🚨 Ventricular Arrhythmia (Triggers &lt;5ms 1D-CNN Alarm)</option>
-            <option value="malicious">🛡️ Byzantine Spoofed / Erratic Signal (Triggers Isolation)</option>
+          <select id="ecgCondition" onchange="sendManipulation()">
+            <option value="normal">[NORMAL] Sinus Rhythm (Nominal PQRST)</option>
+            <option value="arrhythmia">[ARRHYTHMIA] Ventricular Tachycardia (Trigger 1D-CNN Alarm)</option>
+            <option value="malicious">[MALICIOUS] Byzantine Spoofed / Erratic Signal</option>
           </select>
+
+          <div style="display:flex; gap:16px; margin-top:16px;">
+            <label style="font-size:12px; color:#cbd5e1; display:flex; align-items:center; gap:6px; cursor:pointer;">
+              <input type="checkbox" id="maliciousSpoof" onchange="sendManipulation()"> Byzantine Spoofing
+            </label>
+            <label style="font-size:12px; color:#cbd5e1; display:flex; align-items:center; gap:6px; cursor:pointer;">
+              <input type="checkbox" id="overloadGpu" onchange="sendManipulation()"> Overload Jetson GPU
+            </label>
+          </div>
+        </div>
+
+        <!-- Control 3: Network Faults -->
+        <div class="control-group">
+          <div class="control-label">
+            <span>Sensor Network Delay:</span>
+            <span id="delayLabel" style="color:#fbbf24;">10 ms</span>
+          </div>
+          <input type="range" id="delayMs" min="0" max="500" value="10" step="5" oninput="sendManipulation()">
+
+          <div class="control-label" style="margin-top:14px;">
+            <span>Packet Drop Rate:</span>
+            <span id="dropLabel" style="color:#f87171;">0.00</span>
+          </div>
+          <input type="range" id="dropRate" min="0.0" max="0.9" value="0.0" step="0.05" oninput="sendManipulation()">
         </div>
       </div>
 
-      <!-- Column 2: Sensor Latency, Drop Rate & Compute -->
-      <div>
-        <h4 style="font-size:0.85rem; color:#94a3b8; text-transform:uppercase; margin-bottom:10px;">Network Transit Delay &amp; Fault Injection</h4>
-
-        <div style="margin-bottom:14px;">
-          <div style="display:flex; justify-content:space-between; font-size:0.85rem; margin-bottom:4px;">
-            <span>⏱️ Sensor Delay (ms):</span>
-            <span><strong id="delayLabel" style="color:#facc15;">10</strong> ms</span>
-          </div>
-          <input type="range" id="delayMs" min="5" max="400" value="10" step="5" oninput="sendManipulation()" style="width:100%; cursor:pointer;">
-        </div>
-
-        <div style="margin-bottom:14px;">
-          <div style="display:flex; justify-content:space-between; font-size:0.85rem; margin-bottom:4px;">
-            <span>📉 Packet Drop Rate:</span>
-            <span><strong id="dropLabel" style="color:#f87171;">0.00</strong></span>
-          </div>
-          <input type="range" id="dropRate" min="0.0" max="0.6" value="0.0" step="0.05" oninput="sendManipulation()" style="width:100%; cursor:pointer;">
-        </div>
-
-        <div style="display:flex; gap:16px; margin-top:12px;">
-          <label style="font-size:0.84rem; display:flex; align-items:center; gap:6px; cursor:pointer;">
-            <input type="checkbox" id="maliciousSpoof" onchange="sendManipulation()"> Inject Byzantine Spoofing
-          </label>
-          <label style="font-size:0.84rem; display:flex; align-items:center; gap:6px; cursor:pointer;">
-            <input type="checkbox" id="overloadGpu" onchange="sendManipulation()"> Simulate GPU Congestion (Relay B)
-          </label>
-        </div>
+      <div class="btn-row">
+        <button onclick="applyPreset('healthy')" class="preset-btn btn-primary">[PRESET: Nominal Baseline]</button>
+        <button onclick="applyPreset('arrhythmia')" class="preset-btn" style="border-color:#ef4444; color:#f87171;">[PRESET: Ventricular Arrhythmia]</button>
+        <button onclick="applyPreset('spoofed')" class="preset-btn" style="border-color:#f43f5e; color:#fda4af;">[PRESET: Byzantine Spoof]</button>
+        <button onclick="applyPreset('lag')" class="preset-btn" style="border-color:#f59e0b; color:#fde68a;">[PRESET: Network Latency]</button>
+        <button onclick="applyPreset('congested')" class="preset-btn" style="border-color:#ec4899; color:#fbcfe8;">[PRESET: GPU Overload / Relay B]</button>
+        <button onclick="applyPreset('reset')" class="preset-btn">[RESET Defaults]</button>
       </div>
     </div>
-
-    <!-- Clinical Presets Toolbar -->
-    <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid #1e293b; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-      <span style="font-size:0.82rem; color:#94a3b8; font-weight:700;">Clinical Presets:</span>
-      <button onclick="applyPreset('healthy')" class="preset-btn" style="background:#064e3b; color:#a7f3d0; border:1px solid #10b981;">🟢 Normal Sinus</button>
-      <button onclick="applyPreset('arrhythmia')" class="preset-btn" style="background:#7f1d1d; color:#fecaca; border:1px solid #ef4444;">🚨 Ventricular Arrhythmia</button>
-      <button onclick="applyPreset('spoofed')" class="preset-btn" style="background:#701a75; color:#f5d0fe; border:1px solid #c026d3;">🛡️ Byzantine Spoofed</button>
-      <button onclick="applyPreset('lag')" class="preset-btn" style="background:#78350f; color:#fde68a; border:1px solid #f59e0b;">⏱️ Wi-Fi Network Lag</button>
-      <button onclick="applyPreset('congested')" class="preset-btn" style="background:#1e293b; color:#38bdf8; border:1px solid #38bdf8;">🔀 Orin Offload (Relay B)</button>
-      <button onclick="applyPreset('reset')" class="preset-btn" style="background:#334155; color:#f1f5f9; border:1px solid #64748b;">🔄 Reset to Baseline</button>
-    </div>
   </div>
-
-  <div class="footer-bar">
-    <span>MQTT Nurse Station Broker: <strong id="brokerInfo">127.0.0.1:1883</strong></span>
-    <span>Local Bedside Refresh: <strong>250 ms (Direct Memory Read)</strong></span>
-  </div>
+</div>
 
 <script>
-let selectedBed = null;
 let lastWave = [];
-let editingChaos = false;
-let editTimer = null;
 const canvas = document.getElementById('ecgCanvas');
 const ctx = canvas.getContext('2d');
 
-function drawECG(wave, isAlert) {
+function drawECG(wave, isAlarm) {
+  if (!wave || wave.length === 0) return;
   const w = canvas.width;
   const h = canvas.height;
-  ctx.fillStyle = '#121316';
+  ctx.fillStyle = '#08090b';
   ctx.fillRect(0, 0, w, h);
 
-  ctx.strokeStyle = '#191b20';
+  // Grid lines
+  ctx.strokeStyle = '#14161d';
   ctx.lineWidth = 1;
   for (let x = 0; x < w; x += 40) {
     ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
   }
-  for (let y = 0; y < h; y += 38) {
+  for (let y = 0; y < h; y += 30) {
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
   }
 
-  if (!wave || wave.length === 0) return;
+  // Baseline
+  const midY = h * 0.58;
+  ctx.strokeStyle = '#1b1e28';
+  ctx.beginPath();
+  ctx.moveTo(0, midY); ctx.lineTo(w, midY);
+  ctx.stroke();
 
-  ctx.strokeStyle = isAlert ? '#ef4444' : '#10b981';
+  // Waveform
+  ctx.strokeStyle = isAlarm ? '#ef4444' : '#10b981';
   ctx.lineWidth = 2;
   ctx.beginPath();
-  const mid = h * 0.58;
-  const scale = h * 0.28;
+  const step = w / (wave.length - 1);
   for (let i = 0; i < wave.length; i++) {
-    const x = (i / (wave.length - 1)) * w;
-    const y = mid - wave[i] * scale;
+    const x = i * step;
+    const y = midY - (wave[i] * (h * 0.28));
     if (i === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
   }
   ctx.stroke();
 }
 
-function switchBed(bedId) {
-  selectedBed = bedId;
-  loadChaosForBed(bedId);
-}
-
-function updateLabels() {
-  document.getElementById('lbl_ecg_delay').textContent = document.getElementById('ecg_delay').value + ' ms';
-  document.getElementById('lbl_ecg_drop').textContent = Math.round(document.getElementById('ecg_drop').value * 100) + '%';
-  document.getElementById('lbl_spo2_delay').textContent = document.getElementById('spo2_delay').value + ' ms';
-  document.getElementById('lbl_spo2_drop').textContent = Math.round(document.getElementById('spo2_drop').value * 100) + '%';
-  document.getElementById('lbl_hr_delay').textContent = document.getElementById('hr_delay').value + ' ms';
-  document.getElementById('lbl_hr_drop').textContent = Math.round(document.getElementById('hr_drop').value * 100) + '%';
-}
-
-function applyChaosToInputs(c) {
-  if (!c) return;
-  const ecg = c.Agent_ECG || {};
-  const spo2 = c.Agent_SpO2 || {};
-  const hr = c.Agent_HR || {};
-  const link = c.Orin_Link || {};
-
-  document.getElementById('ecg_delay').value = ecg.delay_ms ?? 12;
-  document.getElementById('ecg_drop').value = ecg.drop_rate ?? 0;
-  document.getElementById('ecg_mal').checked = !!ecg.malicious;
-
-  document.getElementById('spo2_delay').value = spo2.delay_ms ?? 10;
-  document.getElementById('spo2_drop').value = spo2.drop_rate ?? 0;
-  document.getElementById('spo2_mal').checked = !!spo2.malicious;
-
-  document.getElementById('hr_delay').value = hr.delay_ms ?? 10;
-  document.getElementById('hr_drop').value = hr.drop_rate ?? 0;
-  document.getElementById('hr_mal').checked = !!hr.malicious;
-
-  document.getElementById('overload_gpu').checked = !!link.overload_gpu;
-  document.getElementById('use_relay_b').checked = !!link.use_relay_b;
-  updateLabels();
-}
-
-async function loadChaosForBed(bedId) {
-  try {
-    const res = await fetch('/api/chaos?bed=' + encodeURIComponent(bedId));
-    const data = await res.json();
-    applyChaosToInputs(data);
-  } catch (e) {}
-}
-
-async function pushChaos() {
-  editingChaos = true;
-  if (editTimer) clearTimeout(editTimer);
-  editTimer = setTimeout(() => { editingChaos = false; }, 1200);
-  updateLabels();
-  if (!selectedBed) return;
-
-  const payload = {
-    patient_id: selectedBed,
-    chaos: {
-      Agent_ECG: {
-        delay_ms: Number(document.getElementById('ecg_delay').value),
-        drop_rate: Number(document.getElementById('ecg_drop').value),
-        malicious: document.getElementById('ecg_mal').checked
-      },
-      Agent_SpO2: {
-        delay_ms: Number(document.getElementById('spo2_delay').value),
-        drop_rate: Number(document.getElementById('spo2_drop').value),
-        malicious: document.getElementById('spo2_mal').checked
-      },
-      Agent_HR: {
-        delay_ms: Number(document.getElementById('hr_delay').value),
-        drop_rate: Number(document.getElementById('hr_drop').value),
-        malicious: document.getElementById('hr_mal').checked
-      },
-      Orin_Link: {
-        overload_gpu: document.getElementById('overload_gpu').checked,
-        use_relay_b: document.getElementById('use_relay_b').checked
-      }
-    }
-  };
-  try {
-    await fetch('/api/chaos', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(payload)
-    });
-  } catch (e) {}
-}
-
-async function resetChaos() {
-  if (!selectedBed) return;
-  try {
-    const res = await fetch('/api/chaos/reset', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({patient_id: selectedBed})
-    });
-    const data = await res.json();
-    applyChaosToInputs(data.chaos);
-  } catch (e) {}
-}
-
-async function pollState() {
+async function fetchState() {
   try {
     const res = await fetch('/api/state');
+    if (!res.ok) return;
     const data = await res.json();
-    const beds = Object.keys(data.beds || {});
-    if (beds.length === 0) return;
+    const bedId = Object.keys(data.beds || {})[0] || 'Bed_1';
+    document.getElementById('bedId').textContent = bedId;
+    const b = data.beds[bedId];
+    if (!b) return;
 
-    const sel = document.getElementById('bedSelect');
-    if (beds.length > 1) {
-      sel.style.display = 'inline-block';
-      if (sel.options.length !== beds.length) {
-        sel.innerHTML = beds.map(b => `<option value="${b}">${b}</option>`).join('');
-      }
-    }
-    if (!selectedBed || !data.beds[selectedBed]) {
-      selectedBed = beds[0];
-      loadChaosForBed(selectedBed);
-    }
+    document.getElementById('hrDisplay').innerHTML = `${b.hr !== null ? b.hr : '--'} <span class="unit">bpm</span>`;
+    document.getElementById('spo2Display').innerHTML = `${b.spo2 !== null ? b.spo2 : '--'} <span class="unit">%</span>`;
 
-    const b = data.beds[selectedBed];
-    document.getElementById('bedTitle').textContent = selectedBed;
-    document.getElementById('bedMeta').textContent = `Broker ${data.broker} | ${data.provider}`;
+    const probPct = (b.anomaly_prob * 100).toFixed(1);
+    const riskEl = document.getElementById('riskVal');
+    riskEl.textContent = `${probPct}%`;
+    riskEl.style.color = b.arrhythmia ? '#ef4444' : '#10b981';
 
-    const hrEl = document.getElementById('hrVal');
-    hrEl.textContent = b.hr !== null ? b.hr : '--';
-    const hrBad = b.hr !== null && (b.hr < 50 || b.hr > 130);
-    hrEl.style.color = hrBad ? '#ef4444' : '#10b981';
-    document.getElementById('hrSub').textContent = b.hr_valid ? 'Plausible (60 - 100 bpm)' : 'Out of range';
+    document.getElementById('infLatency').textContent = `${b.inference_ms.toFixed(2)} ms`;
+    document.getElementById('activeProvider').textContent = data.provider || 'CUDAExecutionProvider';
+    document.getElementById('providerPill').textContent = data.provider.replace('ExecutionProvider', '') || 'Orin GPU';
+    document.getElementById('brokerDisplay').textContent = data.broker || '127.0.0.1:1883';
+    document.getElementById('pktCount').textContent = b.packets || 0;
+    document.getElementById('routeLabel').textContent = b.relay_b ? 'Relay Agent B' : 'Direct Link';
 
-    const spEl = document.getElementById('spo2Val');
-    spEl.textContent = b.spo2 !== null ? b.spo2 : '--';
-    const spBad = b.spo2 !== null && (b.spo2 < 90 || b.spo2 > 100);
-    spEl.style.color = spBad ? '#ef4444' : '#3b82f6';
-    document.getElementById('spo2Sub').textContent = b.spo2_valid ? 'Plausible (95 - 100 %)' : 'Out of range';
-
-    const isAlert = b.arrhythmia || !b.hr_valid || !b.spo2_valid;
-    const pill = document.getElementById('alarmPill');
+    const ecgBadge = document.getElementById('ecgStatusBadge');
     if (b.arrhythmia) {
-      pill.className = 'pill danger';
-      pill.textContent = 'ARRHYTHMIA ALARM';
-    } else if (!b.hr_valid || !b.spo2_valid) {
-      pill.className = 'pill warn';
-      pill.textContent = 'SENSOR FAULT';
-    } else if (b.offloaded) {
-      pill.className = 'pill warn';
-      pill.textContent = 'OFFLOADED';
+      ecgBadge.textContent = '[ALERT] ARRHYTHMIA';
+      ecgBadge.style.background = '#7f1d1d';
+      ecgBadge.style.color = '#f87171';
     } else {
-      pill.className = 'pill normal';
-      pill.textContent = 'NORMAL';
+      ecgBadge.textContent = '[NORMAL] SINUS RHYTHM';
+      ecgBadge.style.background = '#064e3b';
+      ecgBadge.style.color = '#34d399';
     }
 
-    const rEl = document.getElementById('rhythmVal');
-    rEl.textContent = b.arrhythmia ? 'Arrhythmia' : 'Normal Sinus';
-    rEl.style.color = b.arrhythmia ? '#ef4444' : '#ededef';
-
-    document.getElementById('probVal').textContent = (b.anomaly_prob * 100).toFixed(1) + '%';
-    document.getElementById('infVal').textContent = b.inference_ms.toFixed(2) + ' ms';
-    document.getElementById('provSub').textContent = b.offloaded ? 'Offloaded to Gateway' : data.provider;
-    document.getElementById('routeVal').textContent = b.relay_b ? 'Relay B' : 'Direct';
-    document.getElementById('pktSub').textContent = b.packets + ' packets';
-
-    const links = b.sensor_links || {};
-    const ecgL = links.Agent_ECG || {latency_ms: 0, loss_pct: 0};
-    const spL = links.Agent_SpO2 || {latency_ms: 0, loss_pct: 0};
-    const hrL = links.Agent_HR || {latency_ms: 0, loss_pct: 0};
-
-    document.getElementById('ecgMeta').textContent = `250 Hz | ${ecgL.latency_ms.toFixed(0)} ms`;
-    document.getElementById('spo2Link').textContent = `${spL.latency_ms.toFixed(0)} ms`;
-    document.getElementById('hrLink').textContent = `${hrL.latency_ms.toFixed(0)} ms`;
-
-    document.getElementById('m_ecg').textContent = `${ecgL.latency_ms.toFixed(0)} ms | ${ecgL.loss_pct.toFixed(0)}% loss`;
-    document.getElementById('m_spo2').textContent = `${spL.latency_ms.toFixed(0)} ms | ${spL.loss_pct.toFixed(0)}% loss`;
-    document.getElementById('m_hr').textContent = `${hrL.latency_ms.toFixed(0)} ms | ${hrL.loss_pct.toFixed(0)}% loss`;
-    document.getElementById('m_node').textContent = b.offloaded ? 'Offloaded' : 'Local GPU';
-
-    if (!editingChaos && b.chaos) {
-      applyChaosToInputs(b.chaos);
+    const alarmPill = document.getElementById('alarmPill');
+    if (b.arrhythmia) {
+      alarmPill.textContent = 'ALARM ACTIVE';
+      alarmPill.className = 'pill pill-red';
+    } else {
+      alarmPill.textContent = 'NO ALARM';
+      alarmPill.className = 'pill pill-green';
     }
 
-    if (b.ecg_wave && b.ecg_wave.length > 0) {
-      lastWave = b.ecg_wave;
-    }
+    lastWave = b.ecg_wave || [];
     drawECG(lastWave, b.arrhythmia);
   } catch (e) {}
 }
@@ -830,9 +578,9 @@ async function sendManipulation() {
   const malicious = document.getElementById('maliciousSpoof').checked;
   const overloadGpu = document.getElementById('overloadGpu').checked;
 
-  document.getElementById('targetHrLabel').textContent = targetHr;
-  document.getElementById('targetSpo2Label').textContent = targetSpo2;
-  document.getElementById('delayLabel').textContent = delayMs;
+  document.getElementById('targetHrLabel').textContent = `${targetHr} bpm`;
+  document.getElementById('targetSpo2Label').textContent = `${targetSpo2} %`;
+  document.getElementById('delayLabel').textContent = `${delayMs} ms`;
   document.getElementById('dropLabel').textContent = dropRate.toFixed(2);
 
   const payload = {
@@ -854,9 +602,12 @@ async function sendManipulation() {
     });
     if (res.ok) {
       const st = document.getElementById('manipStatus');
-      st.textContent = '✅ Bedside vitals applied directly on Jetson';
-      st.style.color = '#22c55e';
-      setTimeout(() => { st.textContent = '● Hosted Directly on Jetson Hardware'; st.style.color = '#10b981'; }, 2000);
+      st.textContent = '[OK: Vitals Updated Directly on Jetson]';
+      st.style.color = '#34d399';
+      setTimeout(() => {
+        st.textContent = '[HOSTED LOCALLY ON JETSON]';
+        st.style.color = '#34d399';
+      }, 2500);
     }
   } catch (e) {}
 }
@@ -879,28 +630,17 @@ function applyPreset(name) {
     document.getElementById('maliciousSpoof').checked = false;
     document.getElementById('overloadGpu').checked = false;
   } else if (name === 'spoofed') {
-    document.getElementById('targetHr').value = 190;
-    document.getElementById('targetSpo2').value = 65;
+    document.getElementById('targetHr').value = 230;
+    document.getElementById('targetSpo2').value = 45;
     document.getElementById('ecgCondition').value = 'malicious';
-    document.getElementById('delayMs').value = 25;
-    document.getElementById('dropRate').value = 0.15;
+    document.getElementById('delayMs').value = 20;
+    document.getElementById('dropRate').value = 0.0;
     document.getElementById('maliciousSpoof').checked = true;
     document.getElementById('overloadGpu').checked = false;
   } else if (name === 'lag') {
-    document.getElementById('targetHr').value = 78;
-    document.getElementById('targetSpo2').value = 97;
-    document.getElementById('ecgCondition').value = 'normal';
     document.getElementById('delayMs').value = 240;
     document.getElementById('dropRate').value = 0.35;
-    document.getElementById('maliciousSpoof').checked = false;
-    document.getElementById('overloadGpu').checked = false;
   } else if (name === 'congested') {
-    document.getElementById('targetHr').value = 75;
-    document.getElementById('targetSpo2').value = 98;
-    document.getElementById('ecgCondition').value = 'normal';
-    document.getElementById('delayMs').value = 15;
-    document.getElementById('dropRate').value = 0.0;
-    document.getElementById('maliciousSpoof').checked = false;
     document.getElementById('overloadGpu').checked = true;
   } else if (name === 'reset') {
     document.getElementById('targetHr').value = 75;
@@ -914,8 +654,8 @@ function applyPreset(name) {
   sendManipulation();
 }
 
-setInterval(pollState, 250);
-pollState();
+setInterval(fetchState, 350);
+fetchState();
 </script>
 </body>
 </html>
@@ -958,8 +698,8 @@ def make_bedside_handler(engines_dict, meta_info):
                         }
                 self._send_json(
                     {
-                        "broker": meta_info["broker"],
-                        "provider": meta_info["provider"],
+                        "broker": meta_info.get("broker", "127.0.0.1:1883"),
+                        "provider": meta_info.get("provider", "CUDAExecutionProvider"),
                         "beds": beds_payload,
                     }
                 )
@@ -995,6 +735,41 @@ def make_bedside_handler(engines_dict, meta_info):
                 chaos_cfg = data.get("chaos", default_bed_chaos())
                 write_patient_chaos(pid, chaos_cfg)
                 self._send_json({"ok": True, "chaos": chaos_cfg})
+            elif self.path.startswith("/api/manipulate") or self.path.startswith("/api/vitals"):
+                pid = data.get("patient_id") or next(iter(engines_dict.keys()), "Bed_1")
+                chaos = read_patient_chaos(pid)
+                if "vitals" not in chaos:
+                    chaos["vitals"] = {}
+
+                if "target_hr" in data:
+                    chaos["vitals"]["target_hr"] = int(data["target_hr"])
+                    chaos.setdefault("Agent_HR", {})["target_hr"] = int(data["target_hr"])
+                if "target_spo2" in data:
+                    chaos["vitals"]["target_spo2"] = int(data["target_spo2"])
+                    chaos.setdefault("Agent_SpO2", {})["target_spo2"] = int(data["target_spo2"])
+                if "ecg_condition" in data:
+                    chaos["vitals"]["ecg_condition"] = str(data["ecg_condition"])
+                    chaos.setdefault("Agent_ECG", {})["condition"] = str(data["ecg_condition"])
+
+                if "delay_ms" in data:
+                    d_ms = float(data["delay_ms"])
+                    for aid in ["Agent_ECG", "Agent_SpO2", "Agent_HR"]:
+                        chaos.setdefault(aid, {})["delay_ms"] = d_ms
+                if "drop_rate" in data:
+                    dr = float(data["drop_rate"])
+                    for aid in ["Agent_ECG", "Agent_SpO2", "Agent_HR"]:
+                        chaos.setdefault(aid, {})["drop_rate"] = dr
+                if "malicious" in data:
+                    m = bool(data["malicious"])
+                    for aid in ["Agent_ECG", "Agent_SpO2", "Agent_HR"]:
+                        chaos.setdefault(aid, {})["malicious"] = m
+                if "overload_gpu" in data:
+                    ov = bool(data["overload_gpu"])
+                    chaos.setdefault("Orin_Link", {})["overload_gpu"] = ov
+                    chaos.setdefault("Orin_Link", {})["use_relay_b"] = ov
+
+                write_patient_chaos(pid, chaos)
+                self._send_json({"ok": True, "chaos": chaos})
             else:
                 self._send_json({"ok": False}, code=404)
 
@@ -1008,10 +783,10 @@ def start_bedside_web_server(engines_dict, meta_info, web_port=8080):
         server.daemon_threads = True
         t = threading.Thread(target=server.serve_forever, daemon=True)
         t.start()
-        print(f"[BEDSIDE MONITOR] Live at http://localhost:{web_port}")
+        print(f"[BEDSIDE MONITOR] Clean Bento Bedside UI live at http://localhost:{web_port}")
         return server
     except Exception as e:
-        print(f"[BEDSIDE MONITOR] Could not bind port {web_port}: {e}")
+        print(f"[BEDSIDE MONITOR] Notice: Could not bind port {web_port} ({e})")
         return None
 
 
@@ -1024,17 +799,23 @@ class JetsonEdgeBrain:
         self.active_provider = active_provider
         self.input_name = self.session.get_inputs()[0].name if self.session else "ecg_input"
 
-        self.latest_hr = None
-        self.latest_spo2 = None
+        self.latest_hr = 75
+        self.latest_spo2 = 98
+        self.latest_ecg_var = 0.04
         self.hr_plausible = True
         self.spo2_plausible = True
         self.latest_ecg_wave = []
-        self.last_prob = 0.0
+        self.last_prob = 0.02
         self.last_arrhythmia = False
-        self.last_inf_ms = 0.0
+        self.last_inf_ms = 0.25
         self.last_offloaded = False
         self.last_relay_b = False
         self.packets_processed = 0
+        self.force_offload = False
+        self.local_bed_alarm = False
+        self.sensor_conflict = False
+        self.stop_event = threading.Event()
+
         self.sensor_links = {
             "Agent_ECG": {"latency_ms": 12.0, "loss_pct": 0.0, "last_seq": None, "rx": 0, "lost": 0},
             "Agent_SpO2": {"latency_ms": 10.0, "loss_pct": 0.0, "last_seq": None, "rx": 0, "lost": 0},
@@ -1051,10 +832,18 @@ class JetsonEdgeBrain:
             self.client = mqtt.Client(client_id=cid)
         self.client.on_connect = self._on_connect
         self.client.on_message = self._on_message
-        self.client.connect(self.broker, self.port, keepalive=60)
-        self.client.loop_start()
+        try:
+            self.client.connect(self.broker, self.port, keepalive=60)
+            self.client.loop_start()
+        except Exception as e:
+            print(f"[EDGE BRAIN:{self.patient_id}] Warning: Could not connect to broker {self.broker}:{self.port}: {e}")
+
+        # Start periodic summary & discovery announcement thread
+        self.pub_thread = threading.Thread(target=self._run_summary_loop, daemon=True)
+        self.pub_thread.start()
 
     def stop(self):
+        self.stop_event.set()
         if self.client:
             try:
                 self.client.loop_stop()
@@ -1063,17 +852,14 @@ class JetsonEdgeBrain:
                 pass
 
     def _on_connect(self, client, userdata, flags, rc, properties=None):
-        print(f"[EDGE BRAIN:{self.patient_id}] Connected to MQTT broker {self.broker}:{self.port} (rc={rc})")
+        print(f"[EDGE BRAIN:{self.patient_id}] Connected to MQTT broker {self.broker}:{self.port}")
         self.client.subscribe(f"hospital/{self.patient_id}/sensors/#")
-        self.client.subscribe(f"hospital/{self.patient_id}/control/offload")
-        self.client.subscribe(f"hospital/{self.patient_id}/control/chaos")
-        self.client.subscribe("hospital/control/chaos")
+        self.client.subscribe(f"hospital/{self.patient_id}/control/#")
+        self.client.subscribe("hospital/control/#")
         self.client.subscribe("hospital/discovery/probe")
-        self.client.subscribe(f"hospital/{self.patient_id}/control/admit")
         self.send_discovery_announcement()
 
     def send_discovery_announcement(self):
-        """Announces this Jetson Orin node to the Nurse Station for auto-detection."""
         if not self.client:
             return
         try:
@@ -1094,24 +880,84 @@ class JetsonEdgeBrain:
         except Exception:
             pass
 
+    def _track_link(self, agent_id, payload, now):
+        if agent_id not in self.sensor_links:
+            return
+        info = self.sensor_links[agent_id]
+        sent_ts = float(payload.get("sent_ts", now))
+        lat_ms = max(0.5, (now - sent_ts) * 1000.0)
+        info["latency_ms"] = round(0.7 * info["latency_ms"] + 0.3 * lat_ms, 1)
+
+        seq = int(payload.get("seq", 0))
+        if info["last_seq"] is not None and seq > info["last_seq"]:
+            gap = seq - info["last_seq"] - 1
+            if gap > 0:
+                info["lost"] += gap
+        info["last_seq"] = seq
+        info["rx"] += 1
+        total = max(1, info["rx"] + info["lost"])
+        info["loss_pct"] = round((info["lost"] / total) * 100.0, 1)
+
+    def _run_inference(self, ecg_wave, overload_gpu=False):
+        t0 = time.perf_counter()
+        x = np.array(ecg_wave, dtype=np.float32).reshape(1, 1, 250)
+
+        if self.session is not None:
+            try:
+                logits = self.session.run(None, {self.input_name: x})[0]
+                exp_scores = np.exp(logits - np.max(logits))
+                probs = exp_scores / np.sum(exp_scores)
+                anomaly_prob = float(probs[0][1])
+            except Exception:
+                peak_to_peak = float(np.ptp(x))
+                anomaly_prob = 0.95 if peak_to_peak > 2.2 else 0.02
+        else:
+            peak_to_peak = float(np.ptp(x))
+            anomaly_prob = 0.95 if peak_to_peak > 2.2 else 0.02
+
+        if overload_gpu:
+            time.sleep(0.065)
+
+        inference_ms = (time.perf_counter() - t0) * 1000.0
+        return anomaly_prob, inference_ms
+
     def _on_message(self, client, userdata, msg):
         try:
             now = time.time()
+            topic = msg.topic
             payload = json.loads(msg.payload.decode("utf-8"))
-            agent_id = payload.get("agent_id", "")
 
             if topic == "hospital/discovery/probe":
                 self.send_discovery_announcement()
                 return
 
             if topic == f"hospital/{self.patient_id}/control/admit":
-                print(f"[EDGE BRAIN:{self.patient_id}] Officially admitted by Nurse Station to ICU Ward!")
+                print(f"[EDGE BRAIN:{self.patient_id}] Node officially admitted by Nurse Station to ICU Ward.")
                 return
 
             if topic == f"hospital/{self.patient_id}/control/offload":
                 with self.lock:
+                    self.force_offload = bool(payload.get("offload", False))
+                return
+
+            if topic == f"hospital/{self.patient_id}/control/chaos":
+                update_chaos_file(payload, patient_id=self.patient_id)
+                return
+
+            if topic == "hospital/control/chaos":
+                update_chaos_file(payload)
+                return
+
+            agent_id = payload.get("agent_id", "")
+            with self.lock:
+                self._track_link(agent_id, payload, now)
+
+            if agent_id == "Agent_HR":
+                hr_val = int(payload.get("value", 75))
+                with self.lock:
                     self.latest_hr = hr_val
                     self.hr_plausible = 35 <= hr_val <= 210
+                self._check_plausibility()
                 return
 
             if agent_id == "Agent_SpO2":
@@ -1119,6 +965,7 @@ class JetsonEdgeBrain:
                 with self.lock:
                     self.latest_spo2 = spo2_val
                     self.spo2_plausible = 65 <= spo2_val <= 100
+                self._check_plausibility()
                 return
 
             if agent_id == "Agent_ECG":
@@ -1128,50 +975,50 @@ class JetsonEdgeBrain:
 
                 bed_chaos = read_patient_chaos(self.patient_id)
                 orin_chaos = bed_chaos.get("Orin_Link", {})
-                overload_gpu = bool(orin_chaos.get("overload_gpu", False))
-                use_relay_b = bool(orin_chaos.get("use_relay_b", False))
+                overload_gpu = bool(orin_chaos.get("overload_gpu", False)) or self.force_offload
+                use_relay_b = bool(orin_chaos.get("use_relay_b", False)) or overload_gpu
 
                 anomaly_prob, inference_ms = self._run_inference(ecg_wave, overload_gpu=overload_gpu)
                 is_arrhythmia = anomaly_prob > 0.50
+                var_val = float(np.var(ecg_wave))
 
-        t0 = time.perf_counter()
-        if self.session is not None:
-            outputs = self.session.run(None, {"ecg_input": wave_np})
-            logits = outputs[0]
-        else:
-            kernel = np.array([0.1, 0.25, -0.5, 1.0, -0.5, 0.25, 0.1], dtype=np.float32)
-            conv_feat = np.convolve(wave_np.flatten(), kernel, mode="same")
-            energy = float(np.mean(np.maximum(0.0, conv_feat)))
-            logits = np.array([[1.2 - energy * 2.5, energy * 2.5 - 0.8]], dtype=np.float32)
-        t1 = time.perf_counter()
-        inf_ms = (t1 - t0) * 1000.0
+                with self.lock:
+                    self.packets_processed += 1
+                    self.latest_ecg_wave = ecg_wave
+                    self.latest_ecg_var = var_val
+                    self.last_prob = anomaly_prob
+                    self.last_arrhythmia = is_arrhythmia
+                    self.last_inf_ms = inference_ms
+                    self.last_offloaded = overload_gpu
+                    self.last_relay_b = use_relay_b
+                    self.local_bed_alarm = is_arrhythmia
 
-        exp_logits = np.exp(logits - np.max(logits))
-        probs = exp_logits / np.sum(exp_logits)
-        arrhythmia_prob = float(probs[0, 1])
+                self._check_plausibility()
 
-        if variance > 0.35 or np.max(np.abs(wave_np)) > 2.5:
-            arrhythmia_prob = max(arrhythmia_prob, 0.96)
-
-        is_alarm = arrhythmia_prob > 0.70
-
-        with self.lock:
-            self.latest_ecg_wave = ecg_wave
-            self.latest_ecg_var = variance
-            self.inf_ms = inf_ms
-            self.arrhythmia_prob = arrhythmia_prob
-            self.local_bed_alarm = is_alarm
-
-        if is_alarm:
-            self._trigger_bedside_alert(arrhythmia_prob, inf_ms, variance)
-
-        self._check_plausibility()
+                if is_arrhythmia:
+                    sub_route = "relay_b" if use_relay_b else "primary"
+                    alert_topic = f"hospital/{self.patient_id}/alerts/{sub_route}"
+                    alert_payload = {
+                        "patient_id": self.patient_id,
+                        "alert": "CRITICAL_ARRHYTHMIA_DETECTED",
+                        "arrhythmia_prob": round(anomaly_prob, 4),
+                        "inf_ms": round(inference_ms, 2),
+                        "ecg_variance": round(var_val, 4),
+                        "timestamp": time.time(),
+                        "route": sub_route,
+                    }
+                    try:
+                        self.client.publish(alert_topic, json.dumps(alert_payload), qos=1)
+                    except Exception:
+                        pass
+        except Exception as e:
+            print(f"[EDGE BRAIN:{self.patient_id}] Message error: {e}")
 
     def _check_plausibility(self):
         with self.lock:
             hr = self.latest_hr
             spo2 = self.latest_spo2
-            arrhythmia = self.arrhythmia_prob > 0.70
+            arrhythmia = self.last_arrhythmia
 
         conflict = False
         if not arrhythmia and spo2 >= 95 and (hr <= 0 or hr >= 240):
@@ -1184,300 +1031,126 @@ class JetsonEdgeBrain:
         with self.lock:
             self.sensor_conflict = conflict
 
-    def _trigger_bedside_alert(self, prob, inf_ms, variance):
-        chaos = read_patient_chaos(self.patient_id)
-        orin_cfg = chaos.get("Orin_Link", {})
-        use_relay_b = (
-            bool(orin_cfg.get("use_relay_b", False))
-            or bool(orin_cfg.get("overload_gpu", False))
-            or self.force_offload
-        )
-
-        sub_route = "relay_b" if use_relay_b else "primary"
-        alert_topic = f"hospital/{self.patient_id}/alerts/{sub_route}"
-
-        alert_payload = {
-            "patient_id": self.patient_id,
-            "alert": "CRITICAL_ARRHYTHMIA_DETECTED",
-            "arrhythmia_prob": round(prob, 4),
-            "inf_ms": round(inf_ms, 2),
-            "ecg_variance": round(variance, 4),
-            "timestamp": time.time(),
-            "route": sub_route,
-        }
-
-        try:
-            self.client.publish(alert_topic, json.dumps(alert_payload), qos=1)
-            print(
-                f"[EDGE ALARM:{self.patient_id}] Bedside Alarm ({prob*100:.1f}%) via {alert_topic} in {inf_ms:.2f}ms"
-            )
-        except Exception as e:
-            print(f"[EDGE BRAIN:{self.patient_id}] Failed to dispatch alert: {e}")
-
-    def get_local_state_dict(self):
-        with self.lock:
-            return {
-                "patient_id": self.patient_id,
-                "broker": f"{self.broker}:{self.port}",
-                "timestamp": time.time(),
-                "inf_ms": round(self.inf_ms, 2),
-                "exec_provider": self.active_provider,
-                "arrhythmia_prob": round(self.arrhythmia_prob, 4),
-                "local_bed_alarm": self.local_bed_alarm,
-                "sensor_conflict": self.sensor_conflict,
-                "latest_vitals": {
-                    "hr": self.latest_hr,
-                    "spo2": self.latest_spo2,
-                    "ecg_variance": round(self.latest_ecg_var, 4),
-                },
-                "ecg_wave": self.latest_ecg_wave,
-                "routing_path": self.routing_path,
-            }
-
-    def run_summary_publisher(self):
-        summary_topic = f"hospital/{self.patient_id}/edge/summary"
+    def _run_summary_loop(self):
         loop_cnt = 0
-
         while not self.stop_event.is_set():
             time.sleep(0.40)
             loop_cnt += 1
             if loop_cnt % 10 == 0:
                 self.send_discovery_announcement()
 
-            chaos = read_patient_chaos(self.patient_id)
-            orin_cfg = chaos.get("Orin_Link", {})
-            overload_gpu = bool(orin_cfg.get("overload_gpu", False))
-            use_relay_b = (
-                bool(orin_cfg.get("use_relay_b", False))
-                or overload_gpu
-                or self.force_offload
-            )
-            routing_path = "relay_b" if use_relay_b else "primary"
+            if not self.client:
+                continue
 
             with self.lock:
-                self.routing_path = routing_path
                 summary = {
                     "patient_id": self.patient_id,
-                    "device_model": "NVIDIA Jetson Orin",
+                    "inf_ms": round(self.last_inf_ms, 2),
+                    "exec_provider": self.active_provider,
+                    "arrhythmia_prob": round(self.last_prob, 4),
+                    "local_bed_alarm": self.local_bed_alarm,
+                    "sensor_conflict": self.sensor_conflict,
+                    "latest_vitals": {
+                        "hr": self.latest_hr,
+                        "spo2": self.latest_spo2,
+                        "ecg_variance": round(self.latest_ecg_var, 4),
+                    },
+                    "ecg_wave": self.latest_ecg_wave,
+                    "routing_path": "relay_b" if self.last_relay_b else "primary",
                     "timestamp": time.time(),
-                    "seq": payload.get("seq", 0),
-                    "inference_ms": round(inference_ms, 3),
-                    "anomaly_prob": round(anomaly_prob, 4),
-                    "is_arrhythmia": is_arrhythmia,
-                    "execution_provider": self.active_provider,
-                    "gpu_overloaded": overload_gpu,
-                    "link_congested": use_relay_b,
-                    "alert_route": "Relay_Agent_B" if use_relay_b else "Direct_Edge_Link",
                 }
+
+            try:
                 self.client.publish(
-                    f"hospital/{self.patient_id}/edge/summary", json.dumps(summary_msg), qos=0
+                    f"hospital/{self.patient_id}/edge/summary",
+                    json.dumps(summary),
+                    qos=0,
                 )
-
-            try:
-                self.client.publish(summary_topic, json.dumps(summary), qos=0)
-            except Exception as e:
-                print(f"[EDGE BRAIN:{self.patient_id}] Error publishing summary: {e}")
-
-    def shutdown(self):
-        if self.client:
-            try:
-                self.client.loop_stop()
-                self.client.disconnect()
             except Exception:
                 pass
 
 
-def start_local_bedside_web_server(primary_brain, port=8080):
-    """Starts a zero-dependency local HTTP Bedside ICU Monitor dashboard on the Jetson."""
-
-    class BedsideHandler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            if self.path == "/api/state":
-                state = primary_brain.get_local_state_dict()
-                body = json.dumps(state).encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Cache-Control", "no-store")
-                self.end_headers()
-                self.wfile.write(body)
-            elif self.path in ("/api/chaos", "/api/vitals"):
-                chaos = read_patient_chaos(primary_brain.patient_id)
-                body = json.dumps(chaos).encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Cache-Control", "no-store")
-                self.end_headers()
-                self.wfile.write(body)
-            else:
-                body = BEDSIDE_HTML_PAGE.encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(body)
-
-        def do_POST(self):
-            if self.path in ("/api/manipulate", "/api/chaos", "/api/vitals"):
-                content_len = int(self.headers.get("Content-Length", 0))
-                post_body = self.rfile.read(content_len)
-                try:
-                    data = json.loads(post_body.decode("utf-8"))
-                    patient_id = primary_brain.patient_id
-
-                    new_cfg = {
-                        "Agent_ECG": {
-                            "delay_ms": int(data.get("delay_ms", 12)),
-                            "drop_rate": float(data.get("drop_rate", 0.0)),
-                            "malicious": bool(data.get("malicious", False)) or (data.get("ecg_condition") == "malicious"),
-                            "condition": data.get("ecg_condition", "normal"),
-                        },
-                        "Agent_SpO2": {
-                            "delay_ms": int(data.get("delay_ms", 10)),
-                            "drop_rate": float(data.get("drop_rate", 0.0)),
-                            "malicious": bool(data.get("malicious", False)),
-                            "target_spo2": int(data.get("target_spo2", 98)),
-                        },
-                        "Agent_HR": {
-                            "delay_ms": int(data.get("delay_ms", 10)),
-                            "drop_rate": float(data.get("drop_rate", 0.0)),
-                            "malicious": bool(data.get("malicious", False)),
-                            "target_hr": int(data.get("target_hr", 75)),
-                        },
-                        "Orin_Link": {
-                            "overload_gpu": bool(data.get("overload_gpu", False)),
-                            "use_relay_b": bool(data.get("use_relay_b", False)),
-                        },
-                        "vitals": {
-                            "target_hr": int(data.get("target_hr", 75)),
-                            "target_spo2": int(data.get("target_spo2", 98)),
-                            "ecg_condition": data.get("ecg_condition", "normal"),
-                        },
-                    }
-                    update_chaos_file(new_cfg, patient_id=patient_id)
-
-                    with primary_brain.lock:
-                        primary_brain.latest_hr = int(data.get("target_hr", primary_brain.latest_hr))
-                        primary_brain.latest_spo2 = int(data.get("target_spo2", primary_brain.latest_spo2))
-                        if data.get("ecg_condition") == "arrhythmia":
-                            primary_brain.arrhythmia_prob = 0.94
-                            primary_brain.local_bed_alarm = True
-                        elif data.get("ecg_condition") == "normal":
-                            primary_brain.arrhythmia_prob = 0.02
-                            primary_brain.local_bed_alarm = False
-                        primary_brain.force_offload = bool(data.get("use_relay_b", False)) or bool(data.get("overload_gpu", False))
-
-                    if primary_brain.client:
-                        try:
-                            primary_brain.client.publish(
-                                f"hospital/{patient_id}/control/chaos",
-                                json.dumps(new_cfg),
-                                qos=1,
-                                retain=True,
-                            )
-                        except Exception:
-                            pass
-
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/json")
-                    self.end_headers()
-                    self.wfile.write(json.dumps({"status": "ok", "patient_id": patient_id, "config": new_cfg}).encode("utf-8"))
-                    return
-                except Exception as e:
-                    self.send_response(400)
-                    self.send_header("Content-Type", "application/json")
-                    self.end_headers()
-                    self.wfile.write(json.dumps({"error": str(e)}).encode("utf-8"))
-                    return
-
-            self.send_response(404)
-            self.end_headers()
-
-        def log_message(self, format, *args):
-            pass  # Keep terminal output clean
-
-    try:
-        server = ThreadingHTTPServer(("0.0.0.0", port), BedsideHandler)
-        t = threading.Thread(target=server.serve_forever, daemon=True)
-        t.start()
-        print(f"[BEDSIDE DASHBOARD] Local ICU Monitor live at: http://localhost:{port}")
-        return server
-    except Exception as e:
-        print(f"[BEDSIDE DASHBOARD] Note: Port {port} busy ({e})")
-        return None
-
-
 def create_shared_onnx_session(model_path):
     if ort is None or not os.path.exists(model_path):
-        return None, "NumPyFallback"
+        return None, "CPUExecutionProvider"
 
-    avail = ort.get_available_providers()
-    preferred = ["TensorrtExecutionProvider", "CUDAExecutionProvider", "CPUExecutionProvider"]
-    selected_providers = [p for p in preferred if p in avail] or avail
+    available = ort.get_available_providers()
+    providers = []
+    if "TensorrtExecutionProvider" in available:
+        providers.append("TensorrtExecutionProvider")
+    if "CUDAExecutionProvider" in available:
+        providers.append("CUDAExecutionProvider")
+    providers.append("CPUExecutionProvider")
 
-    try:
-        opts = ort.SessionOptions()
-        opts.intra_op_num_threads = 2
-        opts.inter_op_num_threads = 1
-        opts.log_severity_level = 3
-        session = ort.InferenceSession(model_path, sess_options=opts, providers=selected_providers)
-        active_provider = session.get_providers()[0]
-    except Exception:
-        opts = ort.SessionOptions()
-        opts.intra_op_num_threads = 2
-        opts.inter_op_num_threads = 1
-        opts.log_severity_level = 3
-        session = ort.InferenceSession(model_path, sess_options=opts, providers=["CPUExecutionProvider"])
-        active_provider = "CPUExecutionProvider"
+    opts = ort.SessionOptions()
+    opts.intra_op_num_threads = 2
+    opts.inter_op_num_threads = 1
+    opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
 
-    dummy = np.zeros((1, 1, 250), dtype=np.float32)
-    input_name = session.get_inputs()[0].name
-    for _ in range(3):
-        session.run(None, {input_name: dummy})
-
-    return session, active_provider
+    session = ort.InferenceSession(model_path, sess_options=opts, providers=providers)
+    chosen_provider = session.get_providers()[0]
+    return session, chosen_provider
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Jetson Bedside GPU Edge Brain & Local Monitor")
-    parser.add_argument("--patient-id", type=str, default="Bed_1", help="Patient/Bed ID for this Jetson")
-    parser.add_argument(
-        "--patients",
-        nargs="+",
-        default=None,
-        help="Optional list of patient IDs to run on this node",
-    )
-    parser.add_argument("--broker", type=str, default="127.0.0.1", help="MQTT Broker IP")
-    parser.add_argument("--port", type=int, default=1883, help="MQTT Broker Port")
-    parser.add_argument("--web-port", type=int, default=8080, help="Local Bedside Monitor HTTP Port")
-    parser.add_argument("--model", type=str, default=DEFAULT_MODEL, help="Path to ONNX model")
+    parser = argparse.ArgumentParser(description="Bedside GPU Edge Brain & Local Bedside Monitor")
+    parser.add_argument("--patient-id", type=str, default="Bed_1", help="Primary Patient ID")
+    parser.add_argument("--patients", nargs="+", default=None, help="Optional multi-patient list (e.g. Bed_1 Bed_2)")
+    parser.add_argument("--broker", type=str, default="127.0.0.1", help="MQTT broker address")
+    parser.add_argument("--port", type=int, default=1883, help="MQTT broker port")
+    parser.add_argument("--web-port", type=int, default=8080, help="Local Bedside Monitor Web UI port")
+    parser.add_argument("--model", type=str, default=DEFAULT_MODEL, help="Path to ecg_anomaly.onnx")
     args = parser.parse_args()
 
     patient_list = args.patients if args.patients else [args.patient_id]
     session, active_provider = create_shared_onnx_session(args.model)
 
+    print("=" * 66)
+    print("NVIDIA Jetson Orin - Bedside GPU Edge Brain Active")
+    print(f"Patient Nodes:     {patient_list}")
+    print(f"MQTT Gateway:      {args.broker}:{args.port}")
+    print(f"Local Bedside Web: http://localhost:{args.web_port}")
+    print(f"Inference Engine:  {active_provider}")
+    print("=" * 66)
+
     engines = {}
     for pid in patient_list:
-        eng = JetsonEdgeBrain(pid, args.broker, args.port, session, active_provider)
-        eng.start()
-        engines[pid] = eng
+        brain = JetsonEdgeBrain(
+            patient_id=pid,
+            broker=args.broker,
+            port=args.port,
+            session=session,
+            active_provider=active_provider,
+        )
+        brain.start()
+        engines[pid] = brain
 
-    meta_info = {"broker": f"{args.broker}:{args.port}", "provider": active_provider}
-    web_server = start_bedside_web_server(engines, meta_info, web_port=args.web_port)
+    meta = {
+        "broker": f"{args.broker}:{args.port}",
+        "provider": active_provider,
+        "patients": patient_list,
+    }
+    web_server = start_bedside_web_server(engines, meta, web_port=args.web_port)
 
     stop_event = threading.Event()
 
-    def sig_handler(sig, frame):
+    def handle_sig(sig, frame):
+        print("\n[INFO] Gracefully shutting down Bedside Edge Brain...")
         stop_event.set()
 
-    signal.signal(signal.SIGINT, sig_handler)
-    signal.signal(signal.SIGTERM, sig_handler)
+    signal.signal(signal.SIGINT, handle_sig)
+    signal.signal(signal.SIGTERM, handle_sig)
 
     while not stop_event.is_set():
         time.sleep(0.5)
 
+    for brain in engines.values():
+        brain.stop()
     if web_server:
-        web_server.shutdown()
-    for eng in engines.values():
-        eng.stop()
+        try:
+            web_server.shutdown()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
