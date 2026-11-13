@@ -1,73 +1,215 @@
 {
-  "Bed_2": {
+  "Bed_1": {
     "Agent_ECG": {
       "delay_ms": 12,
       "drop_rate": 0.0,
-      "malicious": false
+      "malicious": false,
+      "condition": "normal"
     },
     "Agent_SpO2": {
       "delay_ms": 10,
       "drop_rate": 0.0,
-      "malicious": false
+      "malicious": false,
+      "target_spo2": 100
     },
     "Agent_HR": {
       "delay_ms": 10,
       "drop_rate": 0.0,
-      "malicious": false
-    },
-    "Orin_Link": {
-      "overload_gpu": false,
-      "use_relay_b": false
-    }
-  },
-  "Bed_3": {
-    "Agent_ECG": {
-      "delay_ms": 5,
-      "drop_rate": 0.0,
-      "malicious": false
-    },
-    "Agent_SpO2": {
-      "delay_ms": 10,
-      "drop_rate": 0.0,
-      "malicious": false
-    },
-    "Agent_HR": {
-      "delay_ms": 10,
-      "drop_rate": 0.0,
-      "malicious": false
-    },
-    "Orin_Link": {
-      "overload_gpu": false,
-      "use_relay_b": false
-    }
-  },
-  "Bed_1": {
-    "Agent_ECG": {
-      "delay_ms": 15.0,
-      "drop_rate": 0.05,
       "malicious": false,
-      "condition": "arrhythmia"
-    },
-    "Agent_SpO2": {
-      "delay_ms": 15.0,
-      "drop_rate": 0.05,
-      "malicious": false,
-      "target_spo2": 93
-    },
-    "Agent_HR": {
-      "delay_ms": 15.0,
-      "drop_rate": 0.05,
-      "malicious": false,
-      "target_hr": 142
+      "target_hr": 30
     },
     "Orin_Link": {
       "overload_gpu": false,
       "use_relay_b": false
     },
     "vitals": {
-      "target_hr": 142,
-      "target_spo2": 93,
-      "ecg_condition": "arrhythmia"
+      "target_hr": 30,
+      "target_spo2": 100,
+      "ecg_condition": "normal"
+    },
+    "Bed_2": {
+      "Agent_ECG": {
+        "delay_ms": 12,
+        "drop_rate": 0.0,
+        "malicious": false
+      },
+      "Agent_SpO2": {
+        "delay_ms": 10,
+        "drop_rate": 0.0,
+        "malicious": false
+      },
+      "Agent_HR": {
+        "delay_ms": 10,
+        "drop_rate": 0.0,
+        "malicious": false
+      },
+      "Orin_Link": {
+        "overload_gpu": false,
+        "use_relay_b": false
+      }
+    },
+    "Bed_3": {
+      "Agent_ECG": {
+        "delay_ms": 5,
+        "drop_rate": 0.0,
+        "malicious": false
+      },
+      "Agent_SpO2": {
+        "delay_ms": 10,
+        "drop_rate": 0.0,
+        "malicious": false
+      },
+      "Agent_HR": {
+        "delay_ms": 10,
+        "drop_rate": 0.0,
+        "malicious": false
+      },
+      "Orin_Link": {
+        "overload_gpu": false,
+        "use_relay_b": false
+      }
+    }
+  },
+  "Bed_2": {
+    "Agent_ECG": {
+      "delay_ms": 12,
+      "drop_rate": 0.0,
+      "malicious": false,
+      "condition": "normal"
+    },
+    "Agent_SpO2": {
+      "delay_ms": 10,
+      "drop_rate": 0.0,
+      "malicious": false,
+      "target_spo2": 98
+    },
+    "Agent_HR": {
+      "delay_ms": 10,
+      "drop_rate": 0.0,
+      "malicious": false,
+      "target_hr": 75
+    },
+    "Orin_Link": {
+      "overload_gpu": false,
+      "use_relay_b": false
+    },
+    "vitals": {
+      "target_hr": 75,
+      "target_spo2": 98,
+      "ecg_condition": "normal"
+    },
+    "Bed_2": {
+      "Agent_ECG": {
+        "delay_ms": 12,
+        "drop_rate": 0.0,
+        "malicious": false
+      },
+      "Agent_SpO2": {
+        "delay_ms": 10,
+        "drop_rate": 0.0,
+        "malicious": false
+      },
+      "Agent_HR": {
+        "delay_ms": 10,
+        "drop_rate": 0.0,
+        "malicious": false
+      },
+      "Orin_Link": {
+        "overload_gpu": false,
+        "use_relay_b": false
+      }
+    },
+    "Bed_3": {
+      "Agent_ECG": {
+        "delay_ms": 5,
+        "drop_rate": 0.0,
+        "malicious": false
+      },
+      "Agent_SpO2": {
+        "delay_ms": 10,
+        "drop_rate": 0.0,
+        "malicious": false
+      },
+      "Agent_HR": {
+        "delay_ms": 10,
+        "drop_rate": 0.0,
+        "malicious": false
+      },
+      "Orin_Link": {
+        "overload_gpu": false,
+        "use_relay_b": false
+      }
+    }
+  },
+  "Bed_3": {
+    "Agent_ECG": {
+      "delay_ms": 5,
+      "drop_rate": 0.0,
+      "malicious": false,
+      "condition": "normal"
+    },
+    "Agent_SpO2": {
+      "delay_ms": 10,
+      "drop_rate": 0.0,
+      "malicious": false,
+      "target_spo2": 98
+    },
+    "Agent_HR": {
+      "delay_ms": 10,
+      "drop_rate": 0.0,
+      "malicious": false,
+      "target_hr": 75
+    },
+    "Orin_Link": {
+      "overload_gpu": false,
+      "use_relay_b": false
+    },
+    "vitals": {
+      "target_hr": 75,
+      "target_spo2": 98,
+      "ecg_condition": "normal"
+    },
+    "Bed_2": {
+      "Agent_ECG": {
+        "delay_ms": 12,
+        "drop_rate": 0.0,
+        "malicious": false
+      },
+      "Agent_SpO2": {
+        "delay_ms": 10,
+        "drop_rate": 0.0,
+        "malicious": false
+      },
+      "Agent_HR": {
+        "delay_ms": 10,
+        "drop_rate": 0.0,
+        "malicious": false
+      },
+      "Orin_Link": {
+        "overload_gpu": false,
+        "use_relay_b": false
+      }
+    },
+    "Bed_3": {
+      "Agent_ECG": {
+        "delay_ms": 5,
+        "drop_rate": 0.0,
+        "malicious": false
+      },
+      "Agent_SpO2": {
+        "delay_ms": 10,
+        "drop_rate": 0.0,
+        "malicious": false
+      },
+      "Agent_HR": {
+        "delay_ms": 10,
+        "drop_rate": 0.0,
+        "malicious": false
+      },
+      "Orin_Link": {
+        "overload_gpu": false,
+        "use_relay_b": false
+      }
     }
   }
 }

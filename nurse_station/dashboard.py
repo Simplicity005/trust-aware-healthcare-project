@@ -14,6 +14,7 @@ Features:
 """
 
 import os
+import re
 import sys
 import time
 import json
@@ -27,6 +28,7 @@ import streamlit as st
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_FILE = os.path.join(BASE_DIR, "ecg_anomaly.onnx")
+HTML_TEMPLATE_FILE = os.path.join(BASE_DIR, "dashboard.html")
 AGENT_IDS = ["Agent_ECG", "Agent_SpO2", "Agent_HR"]
 AGENT_LABELS = {
     "Agent_ECG": "ECG Sensor",
@@ -42,14 +44,14 @@ class AgentTrustTracker:
     with weights w1=0.25, w2=0.20, w3=0.25, w4=0.30 and EWMA smoothing.
     """
 
-    def __init__(self, agent_id, w1=0.25, w2=0.20, w3=0.25, w4=0.30, alpha=0.35):
+    def __init__(self, agent_id, window_size=25, w1=0.25, w2=0.20, w3=0.25, w4=0.30, alpha=0.35):
         self.agent_id = agent_id
         self.w1, self.w2, self.w3, self.w4 = w1, w2, w3, w4
         self.alpha = alpha
 
-        self.latencies = deque(maxlen=25)
-        self.delivery_window = deque(maxlen=30)
-        self.validity_window = deque(maxlen=15)
+        self.latencies = deque(maxlen=window_size)
+        self.delivery_window = deque(maxlen=max(window_size, 30))
+        self.validity_window = deque(maxlen=min(window_size, 15))
 
         self.last_seq = None
         self.last_rx_time = time.time()
@@ -162,6 +164,7 @@ class AgentTrustTracker:
             np.clip(self.alpha * raw_trust + (1.0 - self.alpha) * self.trust_score, 0.0, 1.0)
         )
         self.evaluate_status()
+        return self.trust_score
 
     def evaluate_status(self, orin_link_congested=False):
         now = time.time()
@@ -688,6 +691,37 @@ def get_engine():
     return MultiPatientTrustEngine()
 
 
+def load_html_templates():
+    """Reads dashboard.html from disk on every render so HTML/CSS edits apply immediately."""
+    if not os.path.exists(HTML_TEMPLATE_FILE):
+        return "", {}
+    with open(HTML_TEMPLATE_FILE, "r", encoding="utf-8") as f:
+        raw = f.read()
+
+    style_match = re.search(r"(<style[^>]*>.*?</style>)", raw, flags=re.DOTALL | re.IGNORECASE)
+    css_block = style_match.group(1) if style_match else ""
+
+    templates = {}
+    for m in re.finditer(
+        r'<template\s+id=["\']([^"\']+)["\']\s*>(.*?)</template>',
+        raw,
+        flags=re.DOTALL | re.IGNORECASE,
+    ):
+        tid = m.group(1)
+        body = re.sub(r"<!--.*?-->", "", m.group(2), flags=re.DOTALL)
+        compact = "\n".join(line.strip() for line in body.splitlines() if line.strip())
+        templates[tid] = compact
+
+    return css_block, templates
+
+
+def render_template(templates, name, **kwargs):
+    html = templates.get(name, "")
+    for k, v in kwargs.items():
+        html = html.replace(f"{{{{{k}}}}}", str(v))
+    return html
+
+
 def svg_ecg(wave, color="#10b981", width=600, height=140):
     if not wave:
         wave = [0.0] * 250
@@ -761,7 +795,9 @@ def dot_color(status):
     return "#ef4444"
 
 
-def ward_tile(pid, bed, is_selected):
+def ward_tile(pid, bed, is_selected, templates=None):
+    if templates is None:
+        _, templates = load_html_templates()
     label, pill_cls = status_pill_info(bed)
     hr_ag = bed["agents"]["Agent_HR"]
     sp_ag = bed["agents"]["Agent_SpO2"]
@@ -772,28 +808,30 @@ def ward_tile(pid, bed, is_selected):
     ecg_col = "#ef4444" if (ecg_ag["status"] == "ISOLATED" or bed["edge"].get("local_bed_alarm")) else "#10b981"
     border_col = "#3b82f6" if is_selected else "#1f2228"
 
-    return (
-        f'<div class="tile" style="border-color:{border_col}; margin-bottom:12px;">'
-        f'<div class="row-between">'
-        f'<div><span class="bed-id">{pid}</span> <span class="room-sub">({bed["room"].split()[0]})</span></div>'
-        f'<span class="pill {pill_cls}">{label}</span>'
-        f"</div>"
-        f'<div class="ward-vitals">'
-        f'<div><div class="lbl">Heart Rate</div><div class="val-sm">{hr_txt} <span class="unit">bpm</span></div></div>'
-        f'<div><div class="lbl">SpO2</div><div class="val-sm">{sp_txt}</div></div>'
-        f'<div><div class="lbl">Compute</div><div class="val-xs">{bed["compute_mode"]}</div></div>'
-        f"</div>"
-        f'<div style="margin:10px 0 8px 0;">{svg_ecg(bed["ecg_wave"], color=ecg_col, width=360, height=54)}</div>'
-        f'<div class="trust-dots">'
-        f'<span><i class="dot" style="background:{dot_color(ecg_ag["status"])}"></i>ECG {ecg_ag["trust"]:.2f}</span>'
-        f'<span><i class="dot" style="background:{dot_color(sp_ag["status"])}"></i>SpO2 {sp_ag["trust"]:.2f}</span>'
-        f'<span><i class="dot" style="background:{dot_color(hr_ag["status"])}"></i>HR {hr_ag["trust"]:.2f}</span>'
-        f"</div>"
-        f"</div>"
+    return render_template(
+        templates,
+        "ward_tile",
+        border_col=border_col,
+        pid=pid,
+        room_short=bed["room"].split()[0],
+        pill_cls=pill_cls,
+        label=label,
+        hr_txt=hr_txt,
+        sp_txt=sp_txt,
+        compute_mode=bed["compute_mode"],
+        ecg_svg=svg_ecg(bed["ecg_wave"], color=ecg_col, width=360, height=54),
+        ecg_dot=dot_color(ecg_ag["status"]),
+        ecg_trust=f"{ecg_ag['trust']:.2f}",
+        spo2_dot=dot_color(sp_ag["status"]),
+        spo2_trust=f"{sp_ag['trust']:.2f}",
+        hr_dot=dot_color(hr_ag["status"]),
+        hr_trust=f"{hr_ag['trust']:.2f}",
     )
 
 
-def detail_view(pid, bed, logs):
+def detail_view(pid, bed, logs, templates=None):
+    if templates is None:
+        _, templates = load_html_templates()
     ecg_ag = bed["agents"]["Agent_ECG"]
     sp_ag = bed["agents"]["Agent_SpO2"]
     hr_ag = bed["agents"]["Agent_HR"]
@@ -802,10 +840,14 @@ def detail_view(pid, bed, logs):
     ecg_quarantined = ecg_ag["status"] == "ISOLATED"
     is_arr = bool(edge.get("local_bed_alarm")) and not ecg_quarantined
     ecg_col = "#ef4444" if (is_arr or ecg_quarantined) else "#10b981"
-    rhythm_txt = "Quarantined (Byzantine Signal)" if ecg_quarantined else ("Ventricular Arrhythmia" if is_arr else "Normal Sinus Rhythm")
+    rhythm_txt = (
+        "Quarantined (Byzantine Signal)"
+        if ecg_quarantined
+        else ("Ventricular Arrhythmia" if is_arr else "Normal Sinus Rhythm")
+    )
     rhythm_col = "#ef4444" if (is_arr or ecg_quarantined) else "#ededef"
 
-    def sensor_tile(title, ag, unit):
+    def build_sensor_tile(title, ag, unit):
         st_name = ag["status"]
         p_cls = "pill-green" if st_name == "TRUSTED" else ("pill-amber" if st_name == "SUSPICIOUS" else "pill-red")
         bar_col = dot_color(st_name)
@@ -814,343 +856,78 @@ def detail_view(pid, bed, logs):
             reading = "250 Hz Stream Nominal" if st_name != "ISOLATED" else "Stream Quarantined"
         else:
             v = ag["value"]
-            reading = f"{v} {unit}".strip() if (v is not None and st_name != "ISOLATED") else ("Quarantined" if st_name == "ISOLATED" else "--")
+            reading = (
+                f"{v} {unit}".strip()
+                if (v is not None and st_name != "ISOLATED")
+                else ("Quarantined" if st_name == "ISOLATED" else "--")
+            )
 
-        return (
-            f'<div class="tile span-4">'
-            f'<div class="row-between"><span class="lbl">{title}</span><span class="pill {p_cls}">{st_name}</span></div>'
-            f'<div class="row-between" style="align-items:baseline;margin-top:8px;">'
-            f'<div class="val-lg">{ag["trust"]:.2f}</div>'
-            f'<div class="sub">{reading}</div>'
-            f"</div>"
-            f'<div class="bar-bg"><div class="bar-fill" style="width:{pct}%;background:{bar_col};"></div></div>'
-            f'<div class="sub-metrics">'
-            f'<span>Latency {ag["s_l"]:.2f}</span><span>Jitter {ag["s_j"]:.2f}</span><span>Packet {ag["s_p"]:.2f}</span><span>Plausibility {ag["s_d"]:.2f}</span>'
-            f"</div>"
-            f"</div>"
+        return render_template(
+            templates,
+            "sensor_tile",
+            title=title,
+            p_cls=p_cls,
+            st_name=st_name,
+            trust_val=f"{ag['trust']:.2f}",
+            reading=reading,
+            pct=pct,
+            bar_col=bar_col,
+            s_l=f"{ag['s_l']:.2f}",
+            s_j=f"{ag['s_j']:.2f}",
+            s_p=f"{ag['s_p']:.2f}",
+            s_d=f"{ag['s_d']:.2f}",
         )
+
+    sensor_tiles_html = (
+        build_sensor_tile("ECG Sensor (Agent_ECG)", ecg_ag, "")
+        + build_sensor_tile("SpO2 Sensor (Agent_SpO2)", sp_ag, "%")
+        + build_sensor_tile("Heart Rate Sensor (Agent_HR)", hr_ag, "bpm")
+    )
 
     bed_logs = [e for e in logs if pid in e][:6]
     if bed_logs:
-        rows = "".join(f'<div class="log-row"><span class="log-msg">{entry}</span></div>' for entry in bed_logs)
+        log_rows_html = "".join(f'<div class="log-row"><span class="log-msg">{entry}</span></div>' for entry in bed_logs)
     else:
-        rows = '<div class="sub" style="padding:6px 0;">No anomaly alerts or quarantine events for this patient bed.</div>'
+        log_rows_html = '<div class="sub" style="padding:6px 0;">No anomaly alerts or quarantine events for this patient bed.</div>'
 
-    return (
-        f'<div class="bento">'
-        f'<div class="tile span-8">'
-        f'<div class="row-between"><span class="lbl">ECG Lead II &mdash; {pid} ({bed["room"]})</span><span class="sub">250 Hz Continuous</span></div>'
-        f'<div style="margin-top:10px;">{svg_ecg(bed["ecg_wave"], color=ecg_col, width=720, height=150)}</div>'
-        f"</div>"
-        f'<div class="tile span-4">'
-        f'<div class="lbl">Rhythm &amp; Edge Inference</div>'
-        f'<div class="val-md" style="color:{rhythm_col};margin-top:6px;">{rhythm_txt}</div>'
-        f'<div class="kv-list">'
-        f'<div class="kv"><span>Arrhythmia Risk</span><span>{edge.get("arrhythmia_prob", 0.0) * 100:.1f}%</span></div>'
-        f'<div class="kv"><span>Edge Latency</span><span>{edge.get("inf_ms", 0.0):.2f} ms</span></div>'
-        f'<div class="kv"><span>Compute Provider</span><span>{bed["compute_mode"]}</span></div>'
-        f'<div class="kv"><span>Alert Routing Path</span><span>{bed["alert_route"]}</span></div>'
-        f"</div>"
-        f"</div>"
-        + sensor_tile("ECG Sensor (Agent_ECG)", ecg_ag, "")
-        + sensor_tile("SpO2 Sensor (Agent_SpO2)", sp_ag, "%")
-        + sensor_tile("Heart Rate Sensor (Agent_HR)", hr_ag, "bpm")
-        + f'<div class="tile span-8">'
-        f'<div class="row-between">'
-        f'<span class="lbl">Trust Score Timeline (Zero-Trust Thresholds: 0.70 Nominal, 0.45 Quarantine)</span>'
-        f'<span class="legend">'
-        f'<span><i class="dot" style="background:#10b981"></i>ECG</span>'
-        f'<span><i class="dot" style="background:#3b82f6"></i>SpO2</span>'
-        f'<span><i class="dot" style="background:#f59e0b"></i>HR</span>'
-        f"</span>"
-        f"</div>"
-        f'<div style="margin-top:10px;">{svg_trust_chart(bed["history"], width=720, height=130)}</div>'
-        f"</div>"
-        f'<div class="tile span-4">'
-        f'<div class="lbl">Clinical Alert Log</div>'
-        f'<div class="log-list">{rows}</div>'
-        f"</div>"
-        f"</div>"
+    return render_template(
+        templates,
+        "detail_view",
+        pid=pid,
+        room=bed["room"],
+        ecg_svg=svg_ecg(bed["ecg_wave"], color=ecg_col, width=720, height=150),
+        rhythm_col=rhythm_col,
+        rhythm_txt=rhythm_txt,
+        arrhythmia_prob=f"{edge.get('arrhythmia_prob', 0.0) * 100:.1f}",
+        inf_ms=f"{edge.get('inf_ms', 0.0):.2f}",
+        compute_mode=bed["compute_mode"],
+        alert_route=bed["alert_route"],
+        sensor_tiles_html=sensor_tiles_html,
+        trust_chart_svg=svg_trust_chart(bed["history"], width=720, height=130),
+        log_rows_html=log_rows_html,
     )
 
 
-BENTO_CSS = """
-<style>
-  header, footer, #MainMenu {
-    display: none !important;
-  }
-  .stApp {
-    background-color: #0a0a0c !important;
-    color: #ededef !important;
-  }
-  [data-testid="stSidebar"] {
-    background-color: #0e1014 !important;
-    border-right: 1px solid #1f2228 !important;
-    padding-top: 1rem !important;
-  }
-  .block-container {
-    padding-top: 1.2rem !important;
-    padding-bottom: 2rem !important;
-    max-width: 1400px !important;
-  }
-  .topbar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding-bottom: 14px;
-    margin-bottom: 16px;
-    border-bottom: 1px solid #1f2228;
-  }
-  .title {
-    font-size: 19px;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    color: #f8fafc;
-  }
-  .meta {
-    font-size: 12px;
-    color: #7c828d;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  }
-  .sec-label {
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: #7c828d;
-    margin: 16px 0 10px 0;
-  }
-  .ward-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
-    gap: 12px;
-    margin-bottom: 16px;
-  }
-  .bento {
-    display: grid;
-    grid-template-columns: repeat(12, 1fr);
-    gap: 12px;
-  }
-  .tile {
-    background: #121316;
-    border: 1px solid #1f2228;
-    border-radius: 10px;
-    padding: 16px;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-  }
-  .span-4 { grid-column: span 4; }
-  .span-6 { grid-column: span 6; }
-  .span-8 { grid-column: span 8; }
-  .span-12 { grid-column: span 12; }
-
-  .bed-id {
-    font-size: 15px;
-    font-weight: 700;
-    color: #f8fafc;
-  }
-  .room-sub {
-    font-size: 12px;
-    color: #7c828d;
-  }
-  .lbl {
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: #7c828d;
-  }
-  .sub {
-    font-size: 11px;
-    color: #7c828d;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  }
-  .val-xl {
-    font-size: 32px;
-    font-weight: 700;
-    letter-spacing: -0.03em;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  }
-  .val-lg {
-    font-size: 24px;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  }
-  .val-md {
-    font-size: 15px;
-    font-weight: 700;
-  }
-  .val-sm {
-    font-size: 15px;
-    font-weight: 700;
-    color: #f1f5f9;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  }
-  .val-xs {
-    font-size: 12px;
-    font-weight: 600;
-    color: #94a3b8;
-  }
-  .unit {
-    font-size: 11px;
-    color: #7c828d;
-    font-weight: 400;
-  }
-  .row-between {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-  .ward-vitals {
-    display: flex;
-    gap: 16px;
-    margin-top: 10px;
-  }
-  .pill {
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.05em;
-    padding: 3px 8px;
-    border-radius: 9999px;
-    text-transform: uppercase;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  }
-  .pill-green { background: #064e3b; color: #34d399; }
-  .pill-amber { background: #78350f; color: #fbbf24; }
-  .pill-red { background: #7f1d1d; color: #f87171; }
-  .pill-blue { background: #1e3a8a; color: #93c5fd; }
-  .pill-muted { background: #1f2228; color: #7c828d; }
-
-  .bar-bg {
-    width: 100%;
-    height: 4px;
-    background: #1c1f26;
-    border-radius: 2px;
-    overflow: hidden;
-    margin: 8px 0;
-  }
-  .bar-fill { height: 100%; }
-  .sub-metrics {
-    display: flex;
-    justify-content: space-between;
-    font-size: 10px;
-    color: #7c828d;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  }
-  .trust-dots {
-    display: flex;
-    gap: 12px;
-    font-size: 11px;
-    color: #94a3b8;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  }
-  .trust-dots span { display: flex; align-items: center; gap: 4px; }
-  .dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    display: inline-block;
-  }
-  .legend {
-    display: flex;
-    gap: 12px;
-    font-size: 11px;
-    color: #7c828d;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  }
-  .legend span { display: flex; align-items: center; gap: 4px; }
-  .kv-list {
-    margin-top: 10px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-  .kv {
-    display: flex;
-    justify-content: space-between;
-    font-size: 12px;
-    padding: 3px 0;
-    border-bottom: 1px solid #1a1c22;
-  }
-  .kv span:first-child { color: #7c828d; }
-  .kv span:last-child {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-weight: 600;
-  }
-  .log-list {
-    margin-top: 8px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    max-height: 140px;
-    overflow-y: auto;
-  }
-  .log-row {
-    font-size: 11px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    color: #cbd5e1;
-    padding: 3px 0;
-    border-bottom: 1px solid #181a20;
-  }
-
-  /* Sidebar styling */
-  .sidebar-section {
-    padding: 8px 0;
-    border-bottom: 1px solid #1c1f26;
-    margin-bottom: 12px;
-  }
-  .room-header {
-    font-size: 13px;
-    font-weight: 700;
-    color: #f1f5f9;
-    margin-bottom: 6px;
-  }
-  .device-row {
-    background: #14161b;
-    border: 1px solid #20242e;
-    border-radius: 6px;
-    padding: 8px 10px;
-    margin-bottom: 6px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-</style>
-"""
-
-
-def render_sidebar_room_directory(engine, all_snap, selected_bed):
-    st.sidebar.markdown(
-        f'<div class="lbl" style="margin-bottom:4px;">NURSE STATION GATEWAY</div>'
-        f'<div class="title" style="font-size:16px;">Central ICU Ward</div>',
-        unsafe_allow_html=True,
-    )
-
+def render_sidebar_room_directory(engine, all_snap, selected_bed, templates):
     ha = all_snap["ha"]
     role_cls = "pill-green" if ha["is_primary"] else "pill-amber"
     role_name = "PRIMARY LEADER" if ha["is_primary"] else "HOT STANDBY"
+
     st.sidebar.markdown(
-        f'<div style="background:#12141a;border:1px solid #1f232d;border-radius:8px;padding:10px;margin:10px 0 14px 0;">'
-        f'<div class="row-between">'
-        f'<span style="font-size:12px;font-weight:700;color:#f8fafc;">{ha["station_id"]}</span>'
-        f'<span class="pill {role_cls}">{role_name}</span>'
-        f"</div>"
-        f'<div style="font-size:11px;color:#7c828d;margin-top:6px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">'
-        f'Port: {ha["station_port"]} | Active Stations: {ha["total_stations_online"]}'
-        f"</div>"
-        f"</div>",
+        render_template(
+            templates,
+            "sidebar_header",
+            station_id=ha["station_id"],
+            role_cls=role_cls,
+            role_name=role_name,
+            station_port=ha["station_port"],
+            total_stations_online=ha["total_stations_online"],
+        ),
         unsafe_allow_html=True,
     )
 
     if ha["failover_triggered"]:
-        st.sidebar.markdown(
-            '<div style="background:#7f1d1d;color:#fecaca;padding:8px;border-radius:6px;font-size:11px;font-weight:700;margin-bottom:12px;">'
-            '[HA ACTIVE] Primary station failed. Standby promoted to Leader.'
-            '</div>',
-            unsafe_allow_html=True,
-        )
+        st.sidebar.markdown(render_template(templates, "sidebar_failover_banner"), unsafe_allow_html=True)
 
     with st.sidebar.expander("High Availability (HA) Failover Controls", expanded=False):
         st.markdown(
@@ -1187,7 +964,6 @@ def render_sidebar_room_directory(engine, all_snap, selected_bed):
 
         st.sidebar.markdown(f'<div class="room-header">{rm} ({len(bed_list)} Bed)</div>', unsafe_allow_html=True)
         for pid, b in bed_list:
-            is_cur = pid == selected_bed
             st_lbl, pill_cls = status_pill_info(b)
             v = b["edge"].get("latest_vitals", {})
             hr_v = v.get("hr", 75)
@@ -1196,9 +972,15 @@ def render_sidebar_room_directory(engine, all_snap, selected_bed):
             col1, col2 = st.sidebar.columns([3, 1])
             with col1:
                 st.markdown(
-                    f"**{pid}** &nbsp; <span class='pill {pill_cls}'>{st_lbl}</span>  \n"
-                    f"<span style='font-size:11px;color:#7c828d;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;'>"
-                    f"HR {hr_v} bpm | SpO2 {sp_v}%</span>",
+                    render_template(
+                        templates,
+                        "sidebar_bed_row",
+                        pid=pid,
+                        pill_cls=pill_cls,
+                        st_lbl=st_lbl,
+                        hr_v=hr_v,
+                        sp_v=sp_v,
+                    ),
                     unsafe_allow_html=True,
                 )
             with col2:
@@ -1206,7 +988,6 @@ def render_sidebar_room_directory(engine, all_snap, selected_bed):
                     st.session_state["selected_bed"] = pid
                     st.rerun()
 
-    # Unassigned Jetson Nodes
     unadded = all_snap["unadded_jetsons"]
     if unadded:
         st.sidebar.markdown(
@@ -1216,10 +997,12 @@ def render_sidebar_room_directory(engine, all_snap, selected_bed):
         for dev in unadded:
             pid = dev["patient_id"]
             st.sidebar.markdown(
-                f"<div class='device-row'>"
-                f"<div><strong>{pid}</strong><br><span style='font-size:10px;color:#7c828d;'>{dev.get('exec_provider','CUDA')}</span></div>"
-                f"<span class='pill pill-amber'>READY</span>"
-                f"</div>",
+                render_template(
+                    templates,
+                    "sidebar_unassigned_row",
+                    pid=pid,
+                    exec_provider=dev.get("exec_provider", "CUDA"),
+                ),
                 unsafe_allow_html=True,
             )
             target_rm = dev.get("room", "Room 101 (Cardiac ICU)")
@@ -1228,27 +1011,11 @@ def render_sidebar_room_directory(engine, all_snap, selected_bed):
                 st.session_state["selected_bed"] = pid
                 st.rerun()
 
-    st.sidebar.markdown('<div class="sec-label">Bedside Jetson Link</div>', unsafe_allow_html=True)
-    st.sidebar.markdown(
-        '<div style="font-size:11px;color:#7c828d;margin-bottom:6px;">Direct local monitor running on Jetson Orin:</div>'
-        '<a href="http://localhost:8080" target="_blank" style="font-size:12px;color:#38bdf8;text-decoration:none;font-weight:600;">'
-        '[OPEN] Jetson Bedside Monitor (:8080) &rarr;</a>',
-        unsafe_allow_html=True,
-    )
+    st.sidebar.markdown(render_template(templates, "sidebar_bedside_link"), unsafe_allow_html=True)
 
 
-def render_admission_modal(engine, unadded_jetsons, added_bed_ids):
-    st.markdown(
-        '<div style="background:#10131a;border:1px solid #2563eb;border-radius:10px;padding:16px;margin-bottom:20px;">'
-        '<div class="row-between">'
-        '<div>'
-        '<span style="font-size:15px;font-weight:700;color:#f8fafc;">Dynamic Bed Admission &mdash; Jetson Orin Discovery</span>'
-        '<div style="font-size:12px;color:#7c828d;margin-top:2px;">Scans the hospital network and MQTT broker for online Jetson boards ready to pair with patient beds.</div>'
-        '</div>'
-        '</div>'
-        '</div>',
-        unsafe_allow_html=True,
-    )
+def render_admission_modal(engine, unadded_jetsons, added_bed_ids, templates):
+    st.markdown(render_template(templates, "admission_banner"), unsafe_allow_html=True)
 
     c1, c2, c3 = st.columns([2, 1, 1])
     with c1:
@@ -1300,12 +1067,7 @@ def render_admission_modal(engine, unadded_jetsons, added_bed_ids):
                     st.session_state["show_add_bed"] = False
                     st.rerun()
     else:
-        st.markdown(
-            '<div style="padding:14px;background:#14161b;border-radius:8px;font-size:13px;color:#94a3b8;margin:12px 0;">'
-            'No unassigned Jetson Orin nodes currently broadcasting. Power on a Jetson board or start <code>jetson_edge_brain.py</code> on LAN.'
-            '</div>',
-            unsafe_allow_html=True,
-        )
+        st.markdown(render_template(templates, "admission_empty"), unsafe_allow_html=True)
         sim_id = f"Bed_{len(added_bed_ids) + 1}"
         if st.button(f"+ Simulate & Detect New Jetson Node ({sim_id})", key="btn_sim_jetson"):
             engine.admit_jetson(sim_id, "Room 102 (Cardiac ICU)")
@@ -1320,7 +1082,8 @@ def main():
         layout="wide",
         initial_sidebar_state="expanded",
     )
-    st.markdown(BENTO_CSS, unsafe_allow_html=True)
+    css_block, templates = load_html_templates()
+    st.markdown(css_block, unsafe_allow_html=True)
 
     engine = get_engine()
     all_snap = engine.snapshot()
@@ -1334,18 +1097,22 @@ def main():
         st.session_state["selected_bed"] = next(iter(beds_snap.keys()), "Bed_1")
 
     selected_bed = st.session_state["selected_bed"]
-    render_sidebar_room_directory(engine, all_snap, selected_bed)
+    render_sidebar_room_directory(engine, all_snap, selected_bed, templates)
 
-    # Topbar Header
     add_bed_badge = f" ({len(unadded_jetsons)} Detected)" if unadded_jetsons else ""
     role_label = "[PRIMARY LEADER]" if ha["is_primary"] else "[HOT STANDBY]"
-    role_color = "#34d399" if ha["is_primary"] else "#fbbf24"
 
     top_c1, top_c2 = st.columns([8, 4])
     with top_c1:
         st.markdown(
-            f'<div class="title">Central Nurse Station &mdash; Multi-Patient Trust Engine</div>'
-            f'<div class="meta">{ha["station_id"]} {role_label} | Gateway Port: {ha["station_port"]} | Monitored Beds: {len(beds_snap)}</div>',
+            render_template(
+                templates,
+                "topbar",
+                station_id=ha["station_id"],
+                role_label=role_label,
+                station_port=ha["station_port"],
+                bed_count=len(beds_snap),
+            ),
             unsafe_allow_html=True,
         )
     with top_c2:
@@ -1363,17 +1130,15 @@ def main():
                 st.rerun()
 
     if st.session_state.get("show_add_bed", False):
-        render_admission_modal(engine, unadded_jetsons, added_bed_ids)
+        render_admission_modal(engine, unadded_jetsons, added_bed_ids, templates)
 
-    # Section 1: Multi-Patient Ward Overview
     st.markdown('<div class="sec-label">ICU Multi-Patient Ward Overview</div>', unsafe_allow_html=True)
     if not beds_snap:
         st.info("No active patient beds admitted. Click '+ Add New Bed' above to detect and admit Jetson bedside nodes.")
     else:
-        ward_html = "".join(ward_tile(pid, b, pid == selected_bed) for pid, b in beds_snap.items())
+        ward_html = "".join(ward_tile(pid, b, pid == selected_bed, templates=templates) for pid, b in beds_snap.items())
         st.markdown(f'<div class="ward-grid">{ward_html}</div>', unsafe_allow_html=True)
 
-    # Bed selector if multiple beds are admitted
     bed_keys = list(beds_snap.keys())
     if len(bed_keys) > 1:
         sel_c1, sel_c2 = st.columns([3, 9])
@@ -1390,13 +1155,12 @@ def main():
                 st.session_state["selected_bed"] = new_sel
                 st.rerun()
 
-    # Section 2: Detailed Bedside & Trust Inspector
     st.markdown(
         f'<div class="sec-label">Detailed Telemetry &amp; Trust Inspection &mdash; {selected_bed} ({engine.get_bed_room(selected_bed)})</div>',
         unsafe_allow_html=True,
     )
     if selected_bed in beds_snap:
-        st.markdown(detail_view(selected_bed, beds_snap[selected_bed], logs), unsafe_allow_html=True)
+        st.markdown(detail_view(selected_bed, beds_snap[selected_bed], logs, templates=templates), unsafe_allow_html=True)
 
     time.sleep(0.6)
     st.rerun()

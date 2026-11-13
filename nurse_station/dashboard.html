@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <title>Nurse Station Dashboard Templates &amp; Styles</title>
+
+  <!-- ==========================================================================
+     1. GLOBAL BENTO BOX STYLESHEET (Edit colors, fonts, and layout here)
+     ========================================================================== -->
+  <style id="bento-styles">
+    :root {
+      --bg: #0a0a0c;
+      --sidebar-bg: #0e1014;
+      --card: #121316;
+      --border: #1f2228;
+      --text: #ededef;
+      --muted: #7c828d;
+      --green: #10b981;
+      --amber: #f59e0b;
+      --red: #ef4444;
+      --blue: #3b82f6;
+    }
+
+    header,
+    footer,
+    #MainMenu {
+      display: none !important;
+    }
+
+    .stApp {
+      background-color: var(--bg) !important;
+      color: var(--text) !important;
+    }
+
+    [data-testid="stSidebar"] {
+      background-color: var(--sidebar-bg) !important;
+      border-right: 1px solid var(--border) !important;
+      padding-top: 1rem !important;
+    }
+
+    .block-container {
+      padding-top: 1.2rem !important;
+      padding-bottom: 2rem !important;
+      max-width: 1400px !important;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 14px;
+      margin-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .title {
+      font-size: 19px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: #f8fafc;
+    }
+
+    .meta {
+      font-size: 12px;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .sec-label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin: 16px 0 10px 0;
+    }
+
+    .ward-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .bento {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 12px;
+    }
+
+    .tile {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .span-4 {
+      grid-column: span 4;
+    }
+
+    .span-6 {
+      grid-column: span 6;
+    }
+
+    .span-8 {
+      grid-column: span 8;
+    }
+
+    .span-12 {
+      grid-column: span 12;
+    }
+
+    .bed-id {
+      font-size: 15px;
+      font-weight: 700;
+      color: #f8fafc;
+    }
+
+    .room-sub {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .lbl {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+    }
+
+    .sub {
+      font-size: 11px;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .val-xl {
+      font-size: 32px;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .val-lg {
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .val-md {
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .val-sm {
+      font-size: 15px;
+      font-weight: 700;
+      color: #f1f5f9;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .val-xs {
+      font-size: 12px;
+      font-weight: 600;
+      color: #94a3b8;
+    }
+
+    .unit {
+      font-size: 11px;
+      color: var(--muted);
+      font-weight: 400;
+    }
+
+    .row-between {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .ward-vitals {
+      display: flex;
+      gap: 16px;
+      margin-top: 10px;
+    }
+
+    .pill {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      padding: 3px 8px;
+      border-radius: 9999px;
+      text-transform: uppercase;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .pill-green {
+      background: #064e3b;
+      color: #34d399;
+    }
+
+    .pill-amber {
+      background: #78350f;
+      color: #fbbf24;
+    }
+
+    .pill-red {
+      background: #7f1d1d;
+      color: #f87171;
+    }
+
+    .pill-blue {
+      background: #1e3a8a;
+      color: #93c5fd;
+    }
+
+    .pill-muted {
+      background: #1f2228;
+      color: #7c828d;
+    }
+
+    .bar-bg {
+      width: 100%;
+      height: 4px;
+      background: #1c1f26;
+      border-radius: 2px;
+      overflow: hidden;
+      margin: 8px 0;
+    }
+
+    .bar-fill {
+      height: 100%;
+    }
+
+    .sub-metrics {
+      display: flex;
+      justify-content: space-between;
+      font-size: 10px;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .trust-dots {
+      display: flex;
+      gap: 12px;
+      font-size: 11px;
+      color: #94a3b8;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .trust-dots span {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    .legend {
+      display: flex;
+      gap: 12px;
+      font-size: 11px;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .legend span {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .kv-list {
+      margin-top: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .kv {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      padding: 3px 0;
+      border-bottom: 1px solid #1a1c22;
+    }
+
+    .kv span:first-child {
+      color: var(--muted);
+    }
+
+    .kv span:last-child {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-weight: 600;
+    }
+
+    .log-list {
+      margin-top: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      max-height: 140px;
+      overflow-y: auto;
+    }
+
+    .log-row {
+      font-size: 11px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: #cbd5e1;
+      padding: 3px 0;
+      border-bottom: 1px solid #181a20;
+    }
+
+    /* Sidebar styling */
+    .sidebar-section {
+      padding: 8px 0;
+      border-bottom: 1px solid #1c1f26;
+      margin-bottom: 12px;
+    }
+
+    .room-header {
+      font-size: 13px;
+      font-weight: 700;
+      color: #f1f5f9;
+      margin-bottom: 6px;
+    }
+
+    .device-row {
+      background: #14161b;
+      border: 1px solid #20242e;
+      border-radius: 6px;
+      padding: 8px 10px;
+      margin-bottom: 6px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- ==========================================================================
+     2. TOPBAR HEADER TEMPLATE
+     ========================================================================== -->
+  <template id="topbar">
+    <div class="title">Central Nurse Station &mdash; Multi-Patient Trust Engine</div>
+    <div class="meta">{{station_id}} {{role_label}} | Gateway Port: {{station_port}} | Monitored Beds: {{bed_count}}
+    </div>
+  </template>
+
+
+  <!-- ==========================================================================
+     3. ICU WARD OVERVIEW CARD TEMPLATE (One card per admitted bed)
+     ========================================================================== -->
+  <template id="ward_tile">
+    <div class="tile" style="border-color:{{border_col}}; margin-bottom:12px;">
+      <div class="row-between">
+        <div><span class="bed-id">{{pid}}</span> <span class="room-sub">({{room_short}})</span></div>
+        <span class="pill {{pill_cls}}">{{label}}</span>
+      </div>
+      <div class="ward-vitals">
+        <div>
+          <div class="lbl">Heart Rate</div>
+          <div class="val-sm">{{hr_txt}} <span class="unit">bpm</span></div>
+        </div>
+        <div>
+          <div class="lbl">SpO2</div>
+          <div class="val-sm">{{sp_txt}}</div>
+        </div>
+        <div>
+          <div class="lbl">Compute</div>
+          <div class="val-xs">{{compute_mode}}</div>
+        </div>
+      </div>
+      <div style="margin:10px 0 8px 0;">{{ecg_svg}}</div>
+      <div class="trust-dots">
+        <span><i class="dot" style="background:{{ecg_dot}}"></i>ECG {{ecg_trust}}</span>
+        <span><i class="dot" style="background:{{spo2_dot}}"></i>SpO2 {{spo2_trust}}</span>
+        <span><i class="dot" style="background:{{hr_dot}}"></i>HR {{hr_trust}}</span>
+      </div>
+    </div>
+  </template>
+
+
+  <!-- ==========================================================================
+     4. INDIVIDUAL SENSOR TRUST TILE TEMPLATE (ECG, SpO2, HR)
+     ========================================================================== -->
+  <template id="sensor_tile">
+    <div class="tile span-4">
+      <div class="row-between">
+        <span class="lbl">{{title}}</span>
+        <span class="pill {{p_cls}}">{{st_name}}</span>
+      </div>
+      <div class="row-between" style="align-items:baseline;margin-top:8px;">
+        <div class="val-lg">{{trust_val}}</div>
+        <div class="sub">{{reading}}</div>
+      </div>
+      <div class="bar-bg">
+        <div class="bar-fill" style="width:{{pct}}%;background:{{bar_col}};"></div>
+      </div>
+      <div class="sub-metrics">
+        <span>Latency {{s_l}}</span>
+        <span>Jitter {{s_j}}</span>
+        <span>Packet {{s_p}}</span>
+        <span>Plausibility {{s_d}}</span>
+      </div>
+    </div>
+  </template>
+
+
+  <!-- ==========================================================================
+     5. DETAILED BENTO INSPECTOR TEMPLATE (12-Column Grid for Selected Bed)
+     ========================================================================== -->
+  <template id="detail_view">
+    <div class="bento">
+      <!-- Row 1: ECG Waveform (8 cols) + Rhythm & Edge Inference (4 cols) -->
+      <div class="tile span-8">
+        <div class="row-between">
+          <span class="lbl">ECG Lead II &mdash; {{pid}} ({{room}})</span>
+          <span class="sub">250 Hz Continuous</span>
+        </div>
+        <div style="margin-top:10px;">{{ecg_svg}}</div>
+      </div>
+
+      <div class="tile span-4">
+        <div class="lbl">Rhythm &amp; Edge Inference</div>
+        <div class="val-md" style="color:{{rhythm_col}};margin-top:6px;">{{rhythm_txt}}</div>
+        <div class="kv-list">
+          <div class="kv"><span>Arrhythmia Risk</span><span>{{arrhythmia_prob}}%</span></div>
+          <div class="kv"><span>Edge Latency</span><span>{{inf_ms}} ms</span></div>
+          <div class="kv"><span>Compute Provider</span><span>{{compute_mode}}</span></div>
+          <div class="kv"><span>Alert Routing Path</span><span>{{alert_route}}</span></div>
+        </div>
+      </div>
+
+      <!-- Row 2: Three 4-Column Sensor Trust Tiles -->
+      {{sensor_tiles_html}}
+
+      <!-- Row 3: Trust Score Timeline (8 cols) + Clinical Alert Log (4 cols) -->
+      <div class="tile span-8">
+        <div class="row-between">
+          <span class="lbl">Trust Score Timeline (Zero-Trust Thresholds: 0.70 Nominal, 0.45 Quarantine)</span>
+          <span class="legend">
+            <span><i class="dot" style="background:#10b981"></i>ECG</span>
+            <span><i class="dot" style="background:#3b82f6"></i>SpO2</span>
+            <span><i class="dot" style="background:#f59e0b"></i>HR</span>
+          </span>
+        </div>
+        <div style="margin-top:10px;">{{trust_chart_svg}}</div>
+      </div>
+
+      <div class="tile span-4">
+        <div class="lbl">Clinical Alert Log</div>
+        <div class="log-list">{{log_rows_html}}</div>
+      </div>
+    </div>
+  </template>
+
+
+  <!-- ==========================================================================
+     6. LEFT SIDEBAR TEMPLATES
+     ========================================================================== -->
+  <template id="sidebar_header">
+    <div class="lbl" style="margin-bottom:4px;">NURSE STATION GATEWAY</div>
+    <div class="title" style="font-size:16px;">Central ICU Ward</div>
+    <div style="background:#12141a;border:1px solid #1f232d;border-radius:8px;padding:10px;margin:10px 0 14px 0;">
+      <div class="row-between">
+        <span style="font-size:12px;font-weight:700;color:#f8fafc;">{{station_id}}</span>
+        <span class="pill {{role_cls}}">{{role_name}}</span>
+      </div>
+      <div style="font-size:11px;color:#7c828d;margin-top:6px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">
+        Port: {{station_port}} | Active Stations: {{total_stations_online}}
+      </div>
+    </div>
+  </template>
+
+  <template id="sidebar_failover_banner">
+    <div
+      style="background:#7f1d1d;color:#fecaca;padding:8px;border-radius:6px;font-size:11px;font-weight:700;margin-bottom:12px;">
+      [HA ACTIVE] Primary station failed. Standby promoted to Leader.
+    </div>
+  </template>
+
+  <template id="sidebar_bed_row">
+    <strong>{{pid}}</strong> &nbsp; <span class="pill {{pill_cls}}">{{st_lbl}}</span><br>
+    <span style="font-size:11px;color:#7c828d;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">
+      HR {{hr_v}} bpm | SpO2 {{sp_v}}%
+    </span>
+  </template>
+
+  <template id="sidebar_unassigned_row">
+    <div class="device-row">
+      <div>
+        <strong>{{pid}}</strong><br>
+        <span style="font-size:10px;color:#7c828d;">{{exec_provider}}</span>
+      </div>
+      <span class="pill pill-amber">READY</span>
+    </div>
+  </template>
+
+  <template id="sidebar_bedside_link">
+    <div class="sec-label">Bedside Jetson Link</div>
+    <div style="font-size:11px;color:#7c828d;margin-bottom:6px;">Direct local monitor running on Jetson Orin:</div>
+    <a href="http://localhost:8080" target="_blank"
+      style="font-size:12px;color:#38bdf8;text-decoration:none;font-weight:600;">
+      [OPEN] Jetson Bedside Monitor (:8080) &rarr;
+    </a>
+  </template>
+
+
+  <!-- ==========================================================================
+     7. DYNAMIC BED ADMISSION PANEL TEMPLATES
+     ========================================================================== -->
+  <template id="admission_banner">
+    <div style="background:#10131a;border:1px solid #2563eb;border-radius:10px;padding:16px;margin-bottom:20px;">
+      <div class="row-between">
+        <div>
+          <span style="font-size:15px;font-weight:700;color:#f8fafc;">Dynamic Bed Admission &mdash; Jetson Orin
+            Discovery</span>
+          <div style="font-size:12px;color:#7c828d;margin-top:2px;">Scans the hospital network and MQTT broker for
+            online Jetson boards ready to pair with patient beds.</div>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <template id="admission_empty">
+    <div style="padding:14px;background:#14161b;border-radius:8px;font-size:13px;color:#94a3b8;margin:12px 0;">
+      No unassigned Jetson Orin nodes currently broadcasting. Power on a Jetson board or start
+      <code>jetson_edge_brain.py</code> on LAN.
+    </div>
+  </template>
+
+</body>
+
+</html>
