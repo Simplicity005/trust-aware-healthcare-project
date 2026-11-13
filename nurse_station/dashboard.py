@@ -38,6 +38,16 @@ AGENT_LABELS = {
     "Agent_SpO2": "SpO2 Sensor",
     "Agent_HR": "Heart Rate Sensor",
 }
+HOSPITAL_DEPARTMENTS = [
+    ("ICU", "Intensive Care Unit"),
+    ("CCU", "Coronary Care Unit"),
+    ("NCU", "Neurological Care Unit"),
+    ("NICU", "Neonatal Intensive Care Unit"),
+    ("PICU", "Pediatric Intensive Care Unit"),
+    ("SICU", "Surgical Intensive Care Unit"),
+    ("Trauma / ER", "Emergency & Trauma"),
+    ("General Ward", "General & Step-Down Ward"),
+]
 
 
 class AgentTrustTracker:
@@ -254,13 +264,20 @@ class MultiPatientTrustEngine:
         self.failover_triggered = False
         self.failover_simulated = False
 
-        # Room mapping for ICU beds
+        # Department & Room mapping for hospital beds
+        self.bed_departments = {
+            "Bed_1": "ICU",
+            "Bed_2": "CCU",
+            "Bed_3": "NCU",
+            "Bed_4": "SICU",
+            "Bed_5": "Trauma / ER",
+        }
         self.bed_rooms = {
-            "Bed_1": "Room 101 (Cardiac ICU)",
-            "Bed_2": "Room 102 (Cardiac ICU)",
-            "Bed_3": "Room 103 (Neuro ICU)",
-            "Bed_4": "Room 104 (Surgical ICU)",
-            "Bed_5": "Room 105 (Trauma ICU)",
+            "Bed_1": "Room 101",
+            "Bed_2": "Room 201",
+            "Bed_3": "Room 301",
+            "Bed_4": "Room 401",
+            "Bed_5": "Room 501",
         }
 
         # CPU fallback ONNX inference
@@ -293,12 +310,21 @@ class MultiPatientTrustEngine:
         self.hb_thread = threading.Thread(target=self._run_heartbeat_broadcaster, daemon=True)
         self.hb_thread.start()
 
+    def get_bed_department(self, pid):
+        if pid in self.bed_departments:
+            return self.bed_departments[pid]
+        return "ICU"
+
+    def set_bed_department(self, pid, department):
+        with self.lock:
+            self.bed_departments[pid] = department
+
     def get_bed_room(self, pid):
         if pid in self.bed_rooms:
             return self.bed_rooms[pid]
         digits = "".join(filter(str.isdigit, pid))
         num = f"10{digits}" if digits else "105"
-        return f"Room {num} (ICU Ward)"
+        return f"Room {num}"
 
     def set_bed_room(self, pid, room_name):
         with self.lock:
@@ -591,22 +617,33 @@ class MultiPatientTrustEngine:
             except Exception:
                 pass
 
-    def admit_jetson(self, patient_id, room_name=None):
+    def admit_jetson(self, patient_id, department=None, room_name=None):
         with self.lock:
             self.added_bed_ids.add(patient_id)
+            if department:
+                self.bed_departments[patient_id] = department
             if room_name:
                 self.bed_rooms[patient_id] = room_name
+            elif patient_id not in self.bed_rooms:
+                dept_idx = next(
+                    (i + 1 for i, (code, _) in enumerate(HOSPITAL_DEPARTMENTS) if code == self.get_bed_department(patient_id)),
+                    1,
+                )
+                digits = "".join(filter(str.isdigit, patient_id)) or str(len(self.added_bed_ids))
+                self.bed_rooms[patient_id] = f"Room {dept_idx}0{digits}"
             self._get_or_create_bed(patient_id)
+            dept_lbl = self.get_bed_department(patient_id)
+            rm_lbl = self.get_bed_room(patient_id)
             if self.client:
                 try:
                     self.client.publish(
                         f"hospital/{patient_id}/control/admit",
-                        json.dumps({"admitted": True, "room": room_name or self.get_bed_room(patient_id)}),
+                        json.dumps({"admitted": True, "department": dept_lbl, "room": rm_lbl}),
                         qos=1,
                     )
                 except Exception:
                     pass
-            entry = f"[{time.strftime('%H:%M:%S')}] [WARD ADMISSION] Jetson node {patient_id} admitted to {self.get_bed_room(patient_id)}."
+            entry = f"[{time.strftime('%H:%M:%S')}] [WARD ADMISSION] Jetson node {patient_id} admitted to {dept_lbl} ({rm_lbl})."
             self.global_alert_log.appendleft(entry)
 
     def release_jetson(self, patient_id):
@@ -641,7 +678,9 @@ class MultiPatientTrustEngine:
                     }
                 beds_snap[pid] = {
                     "patient_id": pid,
-                    "room": self.get_bed_room(pid),
+                    "department": self.get_bed_department(pid),
+                    "room_only": self.get_bed_room(pid),
+                    "room": f"{self.get_bed_department(pid)} · {self.get_bed_room(pid)}",
                     "online": (now - bed.last_seen_ts) <= 8.0,
                     "seconds_since_seen": round(now - bed.last_seen_ts, 1),
                     "agents": agents_snap,
@@ -661,6 +700,7 @@ class MultiPatientTrustEngine:
                     unadded_jetsons.append(
                         {
                             **dev,
+                            "department": self.get_bed_department(pid),
                             "room": self.get_bed_room(pid),
                             "online": is_active,
                             "seconds_since_seen": round(now - dev["last_seen_ts"], 1),
@@ -816,7 +856,7 @@ def ward_tile(pid, bed, is_selected, templates=None):
         "ward_tile",
         border_col=border_col,
         pid=pid,
-        room_short=bed["room"].split()[0],
+        room_short=f"{bed.get('department', 'ICU')} · {bed.get('room_only', bed['room'])}",
         pill_cls=pill_cls,
         label=label,
         hr_txt=hr_txt,
@@ -949,47 +989,56 @@ def render_sidebar_room_directory(engine, all_snap, selected_bed, templates):
             engine.trigger_failover_test()
             st.rerun()
 
-    st.sidebar.markdown('<div class="sec-label">ICU Room Directory</div>', unsafe_allow_html=True)
+    st.sidebar.markdown('<div class="sec-label">Hospital Departments</div>', unsafe_allow_html=True)
 
-    rooms = {}
+    dept_map = {code: [] for code, _ in HOSPITAL_DEPARTMENTS}
     for pid, b in all_snap["beds"].items():
-        rm = b["room"]
-        if rm not in rooms:
-            rooms[rm] = []
-        rooms[rm].append((pid, b))
+        dept = b.get("department", "ICU")
+        if dept not in dept_map:
+            dept_map[dept] = []
+        dept_map[dept].append((pid, b))
 
-    all_rooms_list = ["All Rooms"] + sorted(rooms.keys())
-    selected_room_filter = st.sidebar.selectbox("Filter Rooms", options=all_rooms_list, index=0)
+    all_depts_list = ["All Departments"] + [code for code, _ in HOSPITAL_DEPARTMENTS]
+    selected_dept_filter = st.sidebar.selectbox("Filter Department", options=all_depts_list, index=0)
 
-    for rm, bed_list in sorted(rooms.items()):
-        if selected_room_filter != "All Rooms" and rm != selected_room_filter:
+    for dept_code, dept_full in HOSPITAL_DEPARTMENTS:
+        if selected_dept_filter != "All Departments" and dept_code != selected_dept_filter:
             continue
 
-        st.sidebar.markdown(f'<div class="room-header">{rm} ({len(bed_list)} Bed)</div>', unsafe_allow_html=True)
-        for pid, b in bed_list:
-            st_lbl, pill_cls = status_pill_info(b)
-            v = b["edge"].get("latest_vitals", {})
-            hr_v = v.get("hr", 75)
-            sp_v = v.get("spo2", 98)
+        bed_list = dept_map.get(dept_code, [])
+        expander_label = f"{dept_code} ({len(bed_list)} Bed{'s' if len(bed_list) != 1 else ''})"
+        with st.sidebar.expander(expander_label, expanded=bool(bed_list)):
+            st.caption(dept_full)
+            if not bed_list:
+                st.caption("No active beds assigned.")
+                continue
 
-            col1, col2 = st.sidebar.columns([3, 1])
-            with col1:
-                st.markdown(
-                    render_template(
-                        templates,
-                        "sidebar_bed_row",
-                        pid=pid,
-                        pill_cls=pill_cls,
-                        st_lbl=st_lbl,
-                        hr_v=hr_v,
-                        sp_v=sp_v,
-                    ),
-                    unsafe_allow_html=True,
-                )
-            with col2:
-                if st.button("View", key=f"sel_btn_{pid}", use_container_width=True):
-                    st.session_state["selected_bed"] = pid
-                    st.rerun()
+            for pid, b in bed_list:
+                st_lbl, pill_cls = status_pill_info(b)
+                v = b["edge"].get("latest_vitals", {})
+                hr_v = v.get("hr", 75)
+                sp_v = v.get("spo2", 98)
+                rm_lbl = b.get("room_only", "Room 101")
+
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.markdown(
+                        render_template(
+                            templates,
+                            "sidebar_bed_row",
+                            pid=pid,
+                            pill_cls=pill_cls,
+                            st_lbl=st_lbl,
+                            room_label=rm_lbl,
+                            hr_v=hr_v,
+                            sp_v=sp_v,
+                        ),
+                        unsafe_allow_html=True,
+                    )
+                with col2:
+                    if st.button("View", key=f"sel_btn_{pid}", use_container_width=True):
+                        st.session_state["selected_bed"] = pid
+                        st.rerun()
 
     unadded = all_snap["unadded_jetsons"]
     if unadded:
@@ -1008,9 +1057,10 @@ def render_sidebar_room_directory(engine, all_snap, selected_bed, templates):
                 ),
                 unsafe_allow_html=True,
             )
-            target_rm = dev.get("room", "Room 101 (Cardiac ICU)")
-            if st.sidebar.button(f"+ Admit {pid}", key=f"side_admit_{pid}", use_container_width=True):
-                engine.admit_jetson(pid, target_rm)
+            target_dept = dev.get("department", "ICU")
+            target_rm = dev.get("room", "Room 101")
+            if st.sidebar.button(f"+ Admit {pid} ({target_dept})", key=f"side_admit_{pid}", use_container_width=True):
+                engine.admit_jetson(pid, department=target_dept, room_name=target_rm)
                 st.session_state["selected_bed"] = pid
                 st.rerun()
 
@@ -1050,33 +1100,40 @@ def render_admission_modal(engine, unadded_jetsons, added_bed_ids, templates):
                     f"Vitals Snapshot: **HR {hr} bpm** | **SpO2 {spo2}%**"
                 )
             with col_room:
-                room_opts = [
-                    "Room 101 (Cardiac ICU)",
-                    "Room 102 (Cardiac ICU)",
-                    "Room 103 (Neuro ICU)",
-                    "Room 104 (Surgical ICU)",
-                    "Room 105 (Trauma ICU)",
-                ]
-                assigned_room = st.selectbox(
-                    "Assign Room",
-                    options=room_opts,
+                dept_opts = [f"{code} - {name}" for code, name in HOSPITAL_DEPARTMENTS]
+                default_dept = dev.get("department", "ICU")
+                default_idx = next((i for i, (code, _) in enumerate(HOSPITAL_DEPARTMENTS) if code == default_dept), 0)
+                assigned_dept_full = st.selectbox(
+                    "Assign Department",
+                    options=dept_opts,
+                    index=default_idx,
                     key=f"rm_select_{pid}",
                     label_visibility="collapsed",
                 )
+                assigned_dept = assigned_dept_full.split(" - ", 1)[0]
             with col_act:
                 if st.button(f"+ Admit {pid}", key=f"admit_btn_{pid}", type="primary", use_container_width=True):
-                    engine.admit_jetson(pid, assigned_room)
+                    engine.admit_jetson(pid, department=assigned_dept)
                     st.session_state["selected_bed"] = pid
                     st.session_state["show_add_bed"] = False
                     st.rerun()
     else:
         st.markdown(render_template(templates, "admission_empty"), unsafe_allow_html=True)
         sim_id = f"Bed_{len(added_bed_ids) + 1}"
-        if st.button(f"+ Simulate & Detect New Jetson Node ({sim_id})", key="btn_sim_jetson"):
-            engine.admit_jetson(sim_id, "Room 102 (Cardiac ICU)")
-            st.session_state["selected_bed"] = sim_id
-            st.session_state["show_add_bed"] = False
-            st.rerun()
+        sim_col1, sim_col2 = st.columns([4, 3])
+        with sim_col1:
+            sim_dept_full = st.selectbox(
+                "Target Department",
+                options=[f"{code} - {name}" for code, name in HOSPITAL_DEPARTMENTS],
+                key="sim_dept_select",
+            )
+        with sim_col2:
+            st.write("")
+            if st.button(f"+ Simulate & Detect New Jetson Node ({sim_id})", key="btn_sim_jetson", use_container_width=True):
+                engine.admit_jetson(sim_id, department=sim_dept_full.split(" - ", 1)[0])
+                st.session_state["selected_bed"] = sim_id
+                st.session_state["show_add_bed"] = False
+                st.rerun()
 
 
 def main():
@@ -1159,7 +1216,7 @@ def main():
                 st.rerun()
 
     st.markdown(
-        f'<div class="sec-label">Detailed Telemetry &amp; Trust Inspection &mdash; {selected_bed} ({engine.get_bed_room(selected_bed)})</div>',
+        f'<div class="sec-label">Detailed Telemetry &amp; Trust Inspection &mdash; {selected_bed} ({engine.get_bed_department(selected_bed)} &middot; {engine.get_bed_room(selected_bed)})</div>',
         unsafe_allow_html=True,
     )
     if selected_bed in beds_snap:
