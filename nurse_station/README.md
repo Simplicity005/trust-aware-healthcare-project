@@ -1,4 +1,4 @@
-# Central Nurse Station (`nurse_station/`) - Nurse's Table Laptop
+# Central Nurse Station (`nurse_station/`) - Nurse's Table Laptop Hi
 
 This folder contains **everything that runs on the Nurse's Table Laptop** (including its own `requirements.txt` and pre-built `ecg_anomaly.onnx`):
 
