@@ -10,21 +10,21 @@
       "delay_ms": 10,
       "drop_rate": 0.0,
       "malicious": false,
-      "target_spo2": 100
+      "target_spo2": 98
     },
     "Agent_HR": {
       "delay_ms": 10,
       "drop_rate": 0.0,
       "malicious": false,
-      "target_hr": 30
+      "target_hr": 75
     },
     "Orin_Link": {
       "overload_gpu": false,
       "use_relay_b": false
     },
     "vitals": {
-      "target_hr": 30,
-      "target_spo2": 100,
+      "target_hr": 75,
+      "target_spo2": 98,
       "ecg_condition": "normal"
     },
     "Bed_2": {
