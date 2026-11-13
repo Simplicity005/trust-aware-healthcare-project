@@ -10,6 +10,7 @@
 # ==============================================================================
 
 set -e
+export PATH="$PATH:/opt/homebrew/sbin:/opt/homebrew/bin:/usr/local/sbin:/usr/local/bin"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -42,10 +43,14 @@ while [[ $# -gt 0 ]]; do
 done
 
 SENSOR_PID=""
+BRAIN_PID=""
 
 cleanup() {
     echo ""
-    echo "[SHUTDOWN] Stopping bedside sensor agents..."
+    echo "[SHUTDOWN] Stopping bedside sensor agents and edge brain..."
+    if [[ -n "$BRAIN_PID" ]] && kill -0 "$BRAIN_PID" 2>/dev/null; then
+        kill "$BRAIN_PID" 2>/dev/null || true
+    fi
     if [[ -n "$SENSOR_PID" ]] && kill -0 "$SENSOR_PID" 2>/dev/null; then
         kill "$SENSOR_PID" 2>/dev/null || true
     fi
@@ -107,19 +112,27 @@ fi
 echo "[2/3] Verified bedside model configuration."
 echo "[3/3] Starting Bedside Sensors, Edge Brain & Local Bedside ICU Monitor (http://localhost:8080)..."
 
-# Automatically open the Local Bedside Dashboard on the Jetson screen if a display is attached
-if [[ -n "$DISPLAY" ]] && [[ -z "$PATIENTS_LIST" ]]; then
-    (sleep 1.5 && xdg-open "http://localhost:8080" >/dev/null 2>&1 || firefox "http://localhost:8080" >/dev/null 2>&1 || true) &
+# Automatically open the Local Bedside Dashboard on the screen if a display is attached
+if [[ -z "$PATIENTS_LIST" ]]; then
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        (sleep 1.5 && open "http://localhost:8080" >/dev/null 2>&1 || true) &
+    elif [[ -n "$DISPLAY" ]]; then
+        (sleep 1.5 && xdg-open "http://localhost:8080" >/dev/null 2>&1 || firefox "http://localhost:8080" >/dev/null 2>&1 || true) &
+    fi
 fi
 
 if [[ -n "$PATIENTS_LIST" ]]; then
     python3 sensor_agents.py --patients $PATIENTS_LIST --primary-broker "$BROKER" --backup-broker "$BROKER" &
     SENSOR_PID=$!
     sleep 0.5
-    python3 jetson_edge_brain.py --patients $PATIENTS_LIST --broker "$BROKER"
+    python3 jetson_edge_brain.py --patients $PATIENTS_LIST --broker "$BROKER" &
+    BRAIN_PID=$!
+    wait "$BRAIN_PID"
 else
     python3 sensor_agents.py --patient-id "$PATIENT_ID" --primary-broker "$BROKER" --backup-broker "$BROKER" &
     SENSOR_PID=$!
     sleep 0.5
-    python3 jetson_edge_brain.py --patient-id "$PATIENT_ID" --broker "$BROKER"
+    python3 jetson_edge_brain.py --patient-id "$PATIENT_ID" --broker "$BROKER" &
+    BRAIN_PID=$!
+    wait "$BRAIN_PID"
 fi

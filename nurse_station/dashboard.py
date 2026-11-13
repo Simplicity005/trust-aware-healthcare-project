@@ -22,7 +22,10 @@ import random
 import threading
 from collections import deque
 import numpy as np
-import onnxruntime as ort
+try:
+    import onnxruntime as ort
+except ImportError:
+    ort = None
 import paho.mqtt.client as mqtt
 import streamlit as st
 
@@ -263,7 +266,7 @@ class MultiPatientTrustEngine:
         # CPU fallback ONNX inference
         self.cpu_session = None
         self.cpu_input_name = "ecg_input"
-        if os.path.exists(MODEL_FILE):
+        if ort is not None and os.path.exists(MODEL_FILE):
             try:
                 opts = ort.SessionOptions()
                 opts.intra_op_num_threads = 2

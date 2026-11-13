@@ -6,6 +6,7 @@
 # ==============================================================================
 
 set -e
+export PATH="$PATH:/opt/homebrew/sbin:/opt/homebrew/bin:/usr/local/sbin:/usr/local/bin"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -60,9 +61,10 @@ else
 fi
 
 # 3. Always verify required packages are installed in the active venv
-if ! python3 -c "import paho.mqtt.client, streamlit, pandas, numpy, onnxruntime, matplotlib" >/dev/null 2>&1; then
+if ! python3 -c "import paho.mqtt.client, streamlit, pandas, numpy, matplotlib" >/dev/null 2>&1; then
     echo "[1/3] Installing missing dependencies from requirements.txt..."
-    pip install -r "$SCRIPT_DIR/requirements.txt"
+    pip install "paho-mqtt>=1.6.1" "streamlit>=1.28.0" "pandas>=1.5.0" "numpy>=1.21.0" "matplotlib>=3.6.0"
+    pip install "onnxruntime>=1.14.0" || echo "  -> Note: onnxruntime wheel unavailable; using NumPy fallback."
 else
     echo "[1/3] Verified all Nurse Station Python dependencies are installed."
 fi
@@ -78,10 +80,13 @@ else
 fi
 
 # 5. Ensure Mosquitto MQTT broker is running
-if ! systemctl is-active --quiet mosquitto 2>/dev/null && ! pgrep -x "mosquitto" >/dev/null 2>&1; then
+if ! python3 -c "import socket; s=socket.socket(); s.settimeout(0.5); s.connect(('127.0.0.1', 1883)); s.close()" >/dev/null 2>&1; then
     if command -v mosquitto >/dev/null 2>&1; then
         echo "Starting Mosquitto MQTT broker on port 1883..."
-        mosquitto -p 1883 -d || true
+        mosquitto -p 1883 -d 2>/dev/null || mosquitto -p 1883 >/dev/null 2>&1 &
+        sleep 0.5
+    else
+        echo "[WARN] Mosquitto MQTT broker is not installed (brew install mosquitto / apt install mosquitto)."
     fi
 fi
 

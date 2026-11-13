@@ -2,178 +2,211 @@
 
 A fault-tolerant, multi-patient ICU monitoring system powered by **Bedside Edge AI (NVIDIA Jetson Orin)** and a **Central Nurse Station Trust & Routing Engine**.
 
-It monitors multiple patient beds (`Bed_1`, `Bed_2`, `Bed_3`, ...) simultaneously, detects cardiac arrhythmias in **`< 5 ms`** directly at each patient's bed, grades every sensor's **Trust Score ($0.0 - 1.0$)** in real time, reroutes alerts over backup paths when hospital Wi-Fi lags, and automatically quarantines broken or spoofed sensors so nurses never get flooded with false alarms.
+It monitors multiple patient beds (`Bed_1`, `Bed_2`, `Bed_3`, ...) simultaneously, detects cardiac arrhythmias in **`< 5 ms`** directly at each patient's bed, grades every sensor's **Trust Score ($T_i(t) \in [0.0, 1.0]$)** in real time, reroutes alerts over backup paths when hospital Wi-Fi lags, and automatically quarantines broken or spoofed sensors so nurses never get flooded with false alarms.
 
 ---
 
-## Modular Folder Structure (Separated by Hardware Role)
-
-The repository includes a root `requirements.txt` for the full project, and is cleanly divided into **two self-contained folders** (`jetson_bedside/` and `nurse_station/`), each with its own `requirements.txt` and launcher:
+## Project Structure
 
 ```text
 trust-aware-healthcare-project/
-├── README.md                        # Master project guide
-├── requirements.txt                 # Full project Python dependencies
-├── start_local_demo.sh              # One-click local simulator (runs 3 patient beds + nurse dashboard on 1 laptop)
+├── README.md                              # Complete setup & usage guide (macOS, Linux, Windows WSL, Jetson)
+├── requirements.txt                       # Full Python dependency list
+├── start_local_demo.sh                    # One-command local simulator (3 beds + both dashboards)
 │
-├── jetson_bedside/                  # [BEDSIDE] CODE THAT RUNS ON EACH BEDSIDE JETSON ORIN (PATIENT'S BED)
-│   ├── README.md                    # Jetson setup & multi-bed launch instructions
-│   ├── requirements.txt             # Lightweight Edge AI & MQTT dependencies (paho-mqtt, numpy, onnxruntime)
-│   ├── chaos.json                   # Bedside fault config (auto-synced via MQTT from Nurse Station)
-│   ├── ecg_anomaly.onnx             # Pre-built 1D-CNN ECG anomaly detector model
-│   ├── make_model.py                # Re-generates ecg_anomaly.onnx if needed
-│   ├── sensor_agents.py             # Patient bedside sensors (Agent_ECG, Agent_SpO2, Agent_HR)
-│   ├── jetson_edge_brain.py         # Bedside GPU AI (<5 ms arrhythmia inference & local alarm)
-│   └── start_bedside.sh             # One-command Jetson launcher (--patient-id Bed_1 --broker <LAPTOP_IP>)
+├── jetson_bedside/                        # Bedside Node (runs on NVIDIA Jetson Orin or simulated locally)
+│   ├── bedside_monitor.html               # Local Bedside Monitor UI (http://localhost:8080)
+│   ├── jetson_edge_brain.py               # Edge 1D-CNN inference, local alarm, and HTTP server (:8080)
+│   ├── sensor_agents.py                   # Bedside sensor streamers (Agent_ECG, Agent_SpO2, Agent_HR)
+│   ├── ecg_anomaly.onnx                   # Pre-built 1D-CNN ECG arrhythmia model
+│   ├── make_model.py                      # Script to regenerate ecg_anomaly.onnx
+│   ├── chaos.json                         # Local bedside vitals & fault configuration
+│   ├── requirements.txt                   # Lightweight bedside dependencies
+│   └── start_bedside.sh                   # Bedside node launcher
 │
-└── nurse_station/                   # [GATEWAY] CODE THAT RUNS ON THE NURSE'S TABLE LAPTOP
-    ├── README.md                    # Nurse laptop setup & LAN broker instructions
-    ├── requirements.txt             # Dashboard, Trust Engine & benchmark dependencies
-    ├── chaos.json                   # Per-patient fault injection settings
-    ├── ecg_anomaly.onnx             # Pre-built 1D-CNN ECG model for Gateway CPU fallback
-    ├── make_model.py                # Re-generates ecg_anomaly.onnx if needed
-    ├── dashboard.py                 # Multi-Patient Nurse Station Dashboard & Trust Engine
-    ├── run_benchmarks.py            # Automated benchmark & plot generator
-    ├── start_nurse_station.sh       # One-command Nurse Station launcher
-    └── benchmarks/                  # Generated 200-DPI PNG charts & CSV reports
+└── nurse_station/                         # Central Nurse Station (runs on the Nurse's Laptop)
+    ├── dashboard.html                     # Nurse Station Bento Box UI templates & CSS
+    ├── dashboard.py                       # Multi-patient Trust Engine, HA failover & Streamlit app (:8501)
+    ├── ecg_anomaly.onnx                   # Gateway CPU fallback model (used during Jetson GPU offload)
+    ├── make_model.py                      # Script to regenerate ecg_anomaly.onnx
+    ├── run_benchmarks.py                  # Automated benchmark & chart generator
+    ├── start_nurse_station.sh             # Single Nurse Station launcher
+    ├── start_dual_nurse_stations.sh       # High-Availability dual Nurse Station launcher (:8501 + :8502)
+    ├── requirements.txt                   # Nurse Station Python dependencies
+    └── benchmarks/                        # Generated 200-DPI PNG plots & CSV logs
 ```
 
 ---
 
-## How It Works (Multi-Jetson ICU Architecture)
+## Quick Start on a Brand-New Laptop (No Requirements Installed)
 
-```text
-┌─────────────────────────────────────────────────────────┐
-│ BEDSIDE JETSON #1 (jetson_bedside/ — Patient Bed_1)     │
-│  [sensor_agents.py] ──▶ [jetson_edge_brain.py (<5ms)]   │
-└───────────────────────────┬─────────────────────────────┘
-                            │
-┌───────────────────────────┼─────────────────────────────┐
-│ BEDSIDE JETSON #2 (jetson_bedside/ — Patient Bed_2)     │
-│  [sensor_agents.py] ──▶ [jetson_edge_brain.py (<5ms)]   │
-└───────────────────────────┼─────────────────────────────┘
-                            │  Hospital Wi-Fi / MQTT (hospital/<Bed_ID>/...)
-                            ▼
-┌─────────────────────────────────────────────────────────┐
-│ CENTRAL NURSE STATION LAPTOP (nurse_station/)           │
-│  • Multi-Patient Ward Overview (Bed_1, Bed_2, Bed_3...) │
-│  • Mathematical Trust Engine T_i(t) in [0.0, 1.0]       │
-│  • Dynamic Offloading (Gateway CPU + Relay Path B)      │
-│  • Byzantine Sensor Quarantine (< 1.5s isolation)       │
-│  • Per-Patient Live Chaos Sliders (synced over MQTT)    │
-└─────────────────────────────────────────────────────────┘
+Follow the steps for your operating system below. Once **Python 3** and **Mosquitto** are installed, the launcher script automatically creates a virtual environment and installs every Python package for you.
+
+### Step 1: Install System Prerequisites (One-Time Setup)
+
+#### macOS (Apple Silicon M1/M2/M3/M4 or Intel)
+1. **Install Homebrew** (skip if `brew --version` already works in Terminal):
+   ```bash
+   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+   ```
+   *(After Homebrew finishes on Apple Silicon, run the two `echo` / `eval` commands it prints in your terminal so `brew` is added to your `PATH`.)*
+2. **Install Python 3, Mosquitto (MQTT broker), and Git:**
+   ```bash
+   brew install python@3.12 mosquitto git
+   ```
+   *(You do **not** need to run Mosquitto as a background service — `./start_local_demo.sh` starts it automatically when needed.)*
+
+#### Ubuntu / Debian Linux
+```bash
+sudo apt update
+sudo apt install -y python3 python3-venv python3-pip mosquitto git
 ```
+
+#### Windows 10 / 11 (via WSL2 Ubuntu)
+1. Open PowerShell as Administrator and install Ubuntu WSL:
+   ```powershell
+   wsl --install
+   ```
+2. Reboot if prompted, open the **Ubuntu** app from the Start Menu, and run:
+   ```bash
+   sudo apt update
+   sudo apt install -y python3 python3-venv python3-pip mosquitto git
+   ```
 
 ---
 
-## How to Download & Install Requirements
-
-You can either download the **entire project** (for local testing or development) or download **only the specific folder** needed for a Jetson Orin or Nurse Station Laptop:
-
-### Option A: Download the Entire Project & Install `requirements.txt`
+### Step 2: Download the Project
 
 ```bash
 git clone https://github.com/Simplicity005/trust-aware-healthcare-project.git
 cd trust-aware-healthcare-project
-
-# Create virtual environment and install all requirements
-python3 -m venv venv
-source venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
 ```
 
-*(Or without `git`:)*
+*(If you don't have `git`, download and extract it with `curl`:)*
 ```bash
 curl -L https://github.com/Simplicity005/trust-aware-healthcare-project/archive/refs/heads/main.tar.gz | tar -xz
 cd trust-aware-healthcare-project-main
-python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt
 ```
 
 ---
 
-### Option B: Download Only the Folder You Need (Device-Specific)
+### Step 3: Run Everything with One Command (Local Simulation Mode)
 
-* **On a Bedside Jetson Orin (downloads ONLY `jetson_bedside/` & installs its `requirements.txt`):**
-  ```bash
-  curl -L https://github.com/Simplicity005/trust-aware-healthcare-project/archive/refs/heads/main.tar.gz | tar -xz --strip-components=1 trust-aware-healthcare-project-main/jetson_bedside
-  cd jetson_bedside
-  chmod +x start_bedside.sh
-
-  # Optional manual venv setup (start_bedside.sh also does this automatically):
-  python3 -m venv --system-site-packages venv
-  source venv/bin/activate
-  pip install -r requirements.txt
-  ```
-
-* **On the Nurse's Table Laptop (downloads ONLY `nurse_station/` & installs its `requirements.txt`):**
-  ```bash
-  curl -L https://github.com/Simplicity005/trust-aware-healthcare-project/archive/refs/heads/main.tar.gz | tar -xz --strip-components=1 trust-aware-healthcare-project-main/nurse_station
-  cd nurse_station
-  chmod +x start_nurse_station.sh
-
-  # Optional manual venv setup (start_nurse_station.sh also does this automatically):
-  python3 -m venv venv
-  source venv/bin/activate
-  pip install -r requirements.txt
-  ```
-
----
-
-## Mode 1: Run the Full Multi-Patient Demo Locally on 1 Laptop
-
-You can simulate **3 Bedside Jetsons (`Bed_1`, `Bed_2`, `Bed_3`) + the Central Nurse Station** on a single laptop:
+No Jetson hardware is required. Run the one-click launcher from the project root:
 
 ```bash
 chmod +x start_local_demo.sh
 ./start_local_demo.sh
 ```
-Open `http://localhost:8501` in your browser:
-- **Room-Based Device Navigation**: The left sidebar organizes all available and admitted devices by ICU Room (e.g., `Room 101 (Cardiac ICU)`, `Room 102`, `Room 103`) with live status and one-click inspection.
-- **Bedside Vitals Manipulation (on Jetson)**: Open `http://localhost:8080` to access the Jetson Bedside Console. Doctors/testers can manipulate Heart Rate, SpO2, and trigger acute Arrhythmia or Byzantine spoofing directly at the patient's bedside!
-- **Dual Nurse Station Redundancy (High Availability)**: Run `./nurse_station/start_dual_nurse_stations.sh` to launch Nurse Station 1 (`:8501`) and Nurse Station 2 (`:8502`) concurrently with automatic leader failover.
-- **"+ Add New Bed" Action**: Scans the network for newly connected Jetson Orin nodes and allows assigning them to patient rooms.
-- Inspect any patient bed's live 250 Hz ECG wave, vitals, and mathematical trust cards ($T_i(t) \in [0.0, 1.0]$).
 
-### Generate Benchmark Charts & CSV Logs
-```bash
-source venv/bin/activate
-python3 nurse_station/run_benchmarks.py
-```
-Charts and CSVs are saved to `nurse_station/benchmarks/`.
+What this script does automatically:
+1. Creates a local Python virtual environment (`venv/`) and installs all packages from `requirements.txt` (`paho-mqtt`, `streamlit`, `pandas`, `numpy`, `onnxruntime`, `matplotlib`).
+2. Checks if an MQTT broker is listening on port `1883` and starts `mosquitto` if needed.
+3. Launches 3 simulated Bedside Jetson Nodes (`Bed_1`, `Bed_2`, `Bed_3`) streaming live 250 Hz ECG, SpO2, and HR telemetry.
+4. Starts the Local Bedside Monitor (`:8080`) and Central Nurse Station (`:8501`).
 
 ---
 
-## Mode 2: Multi-Device Hardware Deployment (Real Jetsons + Nurse Laptop)
+### Step 4: Open Both Dashboards in Your Browser
 
-Assume your Nurse Station Laptop's Wi-Fi/LAN IP is `<LAPTOP_IP>` (check with `hostname -I | awk '{print $1}'`):
+| Dashboard | URL | What It Shows |
+| :--- | :--- | :--- |
+| **Central Nurse Station** | **`http://localhost:8501`** | Multi-bed ICU ward overview, room directory, dynamic bed discovery (`+ Add New Bed`), composite Trust Scores $T_i(t)$, arrhythmia alarms, compute offloading, and clinical alert log. |
+| **Local Bedside Monitor** | **`http://localhost:8080`** | Bedside Jetson Orin screen: live 250 Hz ECG canvas, Heart Rate, SpO2, inference latency, and **Bedside Vitals & Fault Injection Controls** (trigger arrhythmia, spoof sensor data, inject network delay/packet drops, or overload GPU). |
 
-### 1. On the Nurse's Table Laptop (`nurse_station/`):
-Enable LAN connections on Mosquitto once, then start the Nurse Station:
+#### Things to Try Once Both Pages Are Open:
+1. **Admit More Beds:** In the Nurse Station (`:8501`), `Bed_1` is admitted at startup. Click **+ Add New Bed** (or look under **Unassigned Jetson Nodes** in the left sidebar) to admit `Bed_2` and `Bed_3` into ICU rooms.
+2. **Manipulate Vitals / Inject Faults at the Bedside:** Open **`http://localhost:8080`**, switch beds using the top-right dropdown if desired, and click presets like **[PRESET: Ventricular Arrhythmia]**, **[PRESET: Byzantine Spoof]**, or **[PRESET: Network Latency]**. Watch the Nurse Station (`:8501`) detect the arrhythmia or drop the faulty sensor's trust score below `0.45` and quarantine it.
+3. **Edit UI Layouts Live:** Edit [`jetson_bedside/bedside_monitor.html`](jetson_bedside/bedside_monitor.html) or [`nurse_station/dashboard.html`](nurse_station/dashboard.html) and refresh your browser — changes take effect immediately without restarting Python.
+
+Press **`Ctrl + C`** in the terminal when you are done to stop all processes cleanly.
+
+---
+
+## Optional: Run in Separate Terminals / Test High Availability (HA)
+
+If you want separate logs for the Bedside Node and Nurse Station, open two terminals:
+
+**Terminal 1 — Simulated Bedside Nodes (`http://localhost:8080`):**
 ```bash
-sudo bash -c 'cat > /etc/mosquitto/conf.d/lan.conf << EOF
-listener 1883 0.0.0.0
-allow_anonymous true
-EOF'
-sudo systemctl restart mosquitto
+cd trust-aware-healthcare-project/jetson_bedside
+chmod +x start_bedside.sh
+./start_bedside.sh --patients Bed_1 Bed_2 Bed_3 --broker 127.0.0.1
+```
 
+**Terminal 2 — Central Nurse Station (`http://localhost:8501`):**
+```bash
+cd trust-aware-healthcare-project/nurse_station
+chmod +x start_nurse_station.sh
+./start_nurse_station.sh --broker 127.0.0.1 --port 8501
+```
+
+**Test Dual Nurse Station Failover (`:8501` Primary + `:8502` Hot Standby):**
+```bash
+cd trust-aware-healthcare-project/nurse_station
+chmod +x start_dual_nurse_stations.sh
+./start_dual_nurse_stations.sh
+```
+Open `http://localhost:8501` and `http://localhost:8502`. Expand **High Availability (HA) Failover Controls** in the sidebar and click **Test Failover / Switch Role** to see automatic leader promotion.
+
+---
+
+## Generate Benchmark Charts & CSV Reports
+
+```bash
+cd trust-aware-healthcare-project
+source venv/bin/activate
+python3 nurse_station/run_benchmarks.py
+```
+Outputs 200-DPI PNG plots and CSVs into `nurse_station/benchmarks/`.
+
+---
+
+## Multi-Device Hardware Deployment (Real NVIDIA Jetson Orin + Laptop)
+
+Find your Nurse Station laptop's Wi-Fi/LAN IP (`ipconfig getifaddr en0` on macOS, or `hostname -I | awk '{print $1}'` on Linux):
+
+### 1. On the Nurse Station Laptop (`nurse_station/`):
+Allow LAN devices to connect to Mosquitto on port `1883`:
+- **Linux:**
+  ```bash
+  sudo bash -c 'cat > /etc/mosquitto/conf.d/lan.conf << EOF
+  listener 1883 0.0.0.0
+  allow_anonymous true
+  EOF'
+  sudo systemctl restart mosquitto
+  ```
+- **macOS:**
+  Create `/opt/homebrew/etc/mosquitto/mosquitto.conf` (or `/usr/local/etc/mosquitto/mosquitto.conf` on Intel Mac) with:
+  ```text
+  listener 1883 0.0.0.0
+  allow_anonymous true
+  ```
+  Then start Mosquitto with `mosquitto -c /opt/homebrew/etc/mosquitto/mosquitto.conf -d`.
+
+Start the Nurse Station:
+```bash
 cd nurse_station
 ./start_nurse_station.sh
 ```
 
 ### 2. On Each Bedside NVIDIA Jetson Orin (`jetson_bedside/`):
-Run `start_bedside.sh` with a unique `--patient-id` on each Jetson:
 ```bash
-# On Jetson Orin #1 (Patient Bed 1):
+curl -L https://github.com/Simplicity005/trust-aware-healthcare-project/archive/refs/heads/main.tar.gz | tar -xz --strip-components=1 trust-aware-healthcare-project-main/jetson_bedside
 cd jetson_bedside
+chmod +x start_bedside.sh
 ./start_bedside.sh --patient-id Bed_1 --broker <LAPTOP_IP>
-
-# On Jetson Orin #2 (Patient Bed 2):
-cd jetson_bedside
-./start_bedside.sh --patient-id Bed_2 --broker <LAPTOP_IP>
-
-# On Jetson Orin #3 (Patient Bed 3):
-cd jetson_bedside
-./start_bedside.sh --patient-id Bed_3 --broker <LAPTOP_IP>
 ```
-Each Jetson automatically streams its patient's sensors and `<5 ms` GPU AI summaries into the Nurse Station Dashboard, and receives per-bed Chaos Slider commands over MQTT!
+*(Use `--patient-id Bed_2`, `Bed_3`, etc. on additional Jetsons. Each Jetson serves its own local bedside monitor at `http://localhost:8080`.)*
+
+---
+
+## Troubleshooting
+
+- **`Mosquitto MQTT broker is not installed` (macOS):** Run `brew install mosquitto`, then re-run `./start_local_demo.sh`. If Homebrew was just installed on Apple Silicon, make sure `/opt/homebrew/bin` and `/opt/homebrew/sbin` are in your `PATH`.
+- **`Address already in use` on port `8080` or `8501`:** An older instance is still running. Stop it with:
+  ```bash
+  pkill -f jetson_edge_brain.py; pkill -f sensor_agents.py; pkill -f streamlit
+  ```
+- **macOS `python3` prompts for Command Line Developer Tools:** Click **Install** (or run `xcode-select --install`), or install Python via `brew install python@3.12`.
+- **`onnxruntime` fails to install on Python 3.14+:** Both the Bedside Edge Brain and Nurse Station automatically fall back to pure-NumPy inference if `onnxruntime` is unavailable, or install `python@3.12` via Homebrew (`python3.12 -m venv venv`) for full ONNX Runtime support.

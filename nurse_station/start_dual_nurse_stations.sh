@@ -6,6 +6,7 @@
 # ==============================================================================
 
 set -e
+export PATH="$PATH:/opt/homebrew/sbin:/opt/homebrew/bin:/usr/local/sbin:/usr/local/bin"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -32,10 +33,11 @@ elif [[ -d "../venv" ]] && [[ -f "../venv/bin/activate" ]]; then
 fi
 
 # Ensure Mosquitto is active
-if ! systemctl is-active --quiet mosquitto 2>/dev/null && ! pgrep -x "mosquitto" >/dev/null 2>&1; then
+if ! python3 -c "import socket; s=socket.socket(); s.settimeout(0.5); s.connect(('127.0.0.1', 1883)); s.close()" >/dev/null 2>&1; then
     if command -v mosquitto >/dev/null 2>&1; then
         echo "Starting Mosquitto MQTT broker on port 1883..."
-        mosquitto -p 1883 -d || true
+        mosquitto -p 1883 -d 2>/dev/null || mosquitto -p 1883 >/dev/null 2>&1 &
+        sleep 0.5
     fi
 fi
 

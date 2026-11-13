@@ -6,6 +6,7 @@
 # ==============================================================================
 
 set -e
+export PATH="$PATH:/opt/homebrew/sbin:/opt/homebrew/bin:/usr/local/sbin:/usr/local/bin"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -55,24 +56,33 @@ else
 fi
 
 # Verify all dependencies are installed in venv
-if ! python3 -c "import paho.mqtt.client, streamlit, pandas, numpy, onnxruntime, matplotlib" >/dev/null 2>&1; then
+if ! python3 -c "import paho.mqtt.client, streamlit, pandas, numpy, matplotlib" >/dev/null 2>&1; then
     echo "  -> Installing missing packages from requirements.txt..."
-    pip install -r "$SCRIPT_DIR/requirements.txt"
+    pip install "paho-mqtt>=1.6.1" "streamlit>=1.28.0" "pandas>=1.5.0" "numpy>=1.21.0" "matplotlib>=3.6.0"
+    pip install "onnxruntime>=1.14.0" || echo "  -> Note: onnxruntime wheel not available for this Python version; using NumPy fallback."
+elif ! python3 -c "import onnxruntime" >/dev/null 2>&1; then
+    pip install "onnxruntime>=1.14.0" >/dev/null 2>&1 || true
 fi
 
 # 2. Ensure Mosquitto MQTT broker is running on port 1883
 echo "[2/5] Checking Mosquitto MQTT broker..."
-if systemctl is-active --quiet mosquitto 2>/dev/null; then
-    echo "  -> Mosquitto systemd service is active."
-elif pgrep -x "mosquitto" >/dev/null 2>&1; then
-    echo "  -> Mosquitto process is running."
-else
+if python3 -c "import socket; s=socket.socket(); s.settimeout(0.5); s.connect(('127.0.0.1', 1883)); s.close()" >/dev/null 2>&1; then
+    echo "  -> MQTT broker is already listening on 127.0.0.1:1883."
+elif command -v mosquitto >/dev/null 2>&1; then
     echo "  -> Starting local Mosquitto daemon on port 1883..."
-    mosquitto -p 1883 -d || {
-        mosquitto -p 1883 &
+    mosquitto -p 1883 -d 2>/dev/null || {
+        mosquitto -p 1883 >/dev/null 2>&1 &
         MOSQ_PID=$!
     }
-    sleep 0.5
+    sleep 0.6
+else
+    echo ""
+    echo "[ERROR] Mosquitto MQTT broker is not installed on this machine."
+    echo "  Install it once, then re-run ./start_local_demo.sh:"
+    echo "    - macOS (Homebrew):  brew install mosquitto"
+    echo "    - Ubuntu / Debian:   sudo apt update && sudo apt install -y mosquitto"
+    echo ""
+    exit 1
 fi
 
 # 3. Ensure 1D-CNN ONNX model exists in both folders
@@ -118,5 +128,7 @@ sleep 1.2
 
 # 5. Launch Multi-Patient Nurse Station Dashboard
 echo "[5/5] Launching Multi-Patient Nurse Station Dashboard..."
+echo "  -> Nurse Station Dashboard: http://localhost:8501"
+echo "  -> Local Bedside Monitor:   http://localhost:8080"
 echo "======================================================================"
 ./nurse_station/start_nurse_station.sh
