@@ -12,7 +12,10 @@ It monitors multiple patient beds (`Bed_1`, `Bed_2`, `Bed_3`, ...) simultaneousl
 trust-aware-healthcare-project/
 ├── README.md                              # Complete setup & usage guide (macOS, Linux, Windows WSL, Jetson)
 ├── requirements.txt                       # Full Python dependency list
-├── start_local_demo.sh                    # One-command local simulator (3 beds + both dashboards)
+├── start_local_demo.sh                    # One-command local simulator (macOS/Linux)
+├── start_local_demo.bat                   # One-command local simulator (Windows)
+├── start_nurse_station.bat                # Windows launcher for Central Nurse Station (:8501)
+├── start_bedside.bat                      # Windows launcher for Bedside Monitor (:8080)
 │
 ├── jetson_bedside/                        # Bedside Node (runs on NVIDIA Jetson Orin or simulated locally)
 │   ├── bedside_monitor.html               # Local Bedside Monitor UI (http://localhost:8080)
@@ -94,9 +97,20 @@ cd trust-aware-healthcare-project-main
 
 No Jetson hardware is required. Run the one-click launcher from the project root:
 
+**macOS / Linux / WSL:**
 ```bash
 chmod +x start_local_demo.sh
 ./start_local_demo.sh
+```
+
+**Windows Native (PowerShell or Double-Click):**
+Double-click `start_local_demo.bat` in File Explorer, or run in PowerShell:
+```powershell
+.\start_local_demo.bat
+```
+Or launch just the Nurse Station directly:
+```powershell
+streamlit run nurse_station/dashboard.py
 ```
 
 What this script does automatically:
