@@ -440,8 +440,10 @@ class JetsonEdgeBrain:
                 use_relay_b = bool(orin_chaos.get("use_relay_b", False)) or overload_gpu
 
                 anomaly_prob, inference_ms = self._run_inference(ecg_wave, overload_gpu=overload_gpu)
-                is_arrhythmia = anomaly_prob > 0.50
                 var_val = float(np.var(ecg_wave))
+                ptp_val = float(np.ptp(ecg_wave))
+                # Robust arrhythmia detection: requires elevated variance (>0.18) or ptp (>2.2)
+                is_arrhythmia = (var_val > 0.18 or ptp_val > 2.2) and (anomaly_prob >= 0.50 or var_val > 0.25)
 
                 with self.lock:
                     self.packets_processed += 1
