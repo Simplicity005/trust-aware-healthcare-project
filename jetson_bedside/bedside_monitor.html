@@ -6,1169 +6,259 @@
 <title>ICU Bedside Monitor</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #090d16;
-    --card: #0f1523;
-    --card-hover: #131b2e;
-    --card-inner: #0b101b;
-    --border: rgba(255, 255, 255, 0.08);
-    --border-subtle: rgba(255, 255, 255, 0.04);
-    --text: #f1f5f9;
-    --text-muted: #94a3b8;
-    --text-dim: #64748b;
-    
-    --green: #10b981;
-    --green-bg: rgba(16, 185, 129, 0.12);
-    --green-border: rgba(16, 185, 129, 0.3);
+    --bg:#0a0e13; --card:#111720; --inner:#0c1117;
+    --border:rgba(255,255,255,.07); --text:#eef2f6; --muted:#8a96a6; --dim:#5d6877;
+    --green:#34d399; --amber:#fbbf24; --red:#f87171; --blue:#60a5fa;
+    --ui:'Manrope',-apple-system,'Segoe UI',sans-serif; --mono:'IBM Plex Mono',ui-monospace,Menlo,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:var(--ui);padding:28px 32px;-webkit-font-smoothing:antialiased;min-height:100vh}
+  .wrap{max-width:1280px;margin:0 auto}
 
-    --red: #ef4444;
-    --red-bg: rgba(239, 68, 68, 0.15);
-    --red-border: rgba(239, 68, 68, 0.35);
+  header{display:flex;justify-content:space-between;align-items:center;margin-bottom:22px}
+  h1{font-size:28px;font-weight:800;letter-spacing:-.03em}
+  h1 span{color:var(--dim);font-weight:500;margin:0 6px}
+  .right{display:flex;gap:10px;align-items:center}
+  select{background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:8px 12px;font:600 13px var(--ui);outline:none;cursor:pointer}
+  .status{font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:7px 14px;border-radius:99px;transition:.25s}
+  .s-ok{background:rgba(52,211,153,.12);color:var(--green)}
+  .s-warn{background:rgba(251,191,36,.12);color:var(--amber)}
+  .s-bad{background:rgba(248,113,113,.14);color:var(--red);animation:pulse 1.2s infinite alternate}
+  @keyframes pulse{to{box-shadow:0 0 14px rgba(248,113,113,.35)}}
 
-    --amber: #f59e0b;
-    --amber-bg: rgba(245, 158, 11, 0.12);
-    --amber-border: rgba(245, 158, 11, 0.3);
+  .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px}
+  .tile{background:var(--card);border:1px solid var(--border);border-radius:20px;padding:22px;position:relative;display:flex;flex-direction:column}
+  .c8{grid-column:span 8}.c4{grid-column:span 4}.c6{grid-column:span 6}.c12{grid-column:span 12}
+  @media(max-width:900px){.c8,.c4,.c6{grid-column:span 12}body{padding:18px}}
 
-    --cyan: #38bdf8;
-    --cyan-bg: rgba(56, 189, 248, 0.12);
-    --cyan-border: rgba(56, 189, 248, 0.3);
-  }
+  .lbl{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);display:flex;align-items:center;gap:7px}
+  .head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+  .tag{font-size:12px;font-weight:600;padding:4px 10px;border-radius:99px}
+  .t-ok{background:rgba(52,211,153,.12);color:var(--green)}
+  .t-warn{background:rgba(251,191,36,.12);color:var(--amber)}
+  .t-bad{background:rgba(248,113,113,.14);color:var(--red)}
 
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+  /* info bubble */
+  .info{position:relative;width:16px;height:16px;border-radius:50%;border:1px solid var(--border);color:var(--dim);font:700 10px var(--ui);display:inline-flex;align-items:center;justify-content:center;cursor:help;text-transform:none;letter-spacing:0}
+  .info:hover,.info:focus{color:var(--blue);border-color:var(--blue);outline:none}
+  .tip{visibility:hidden;opacity:0;position:absolute;left:-4px;bottom:calc(100% + 9px);width:230px;background:#1a2230;color:#e6ebf2;border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:9px 11px;font:500 12px/1.45 var(--ui);text-align:left;pointer-events:none;z-index:20;transition:opacity .15s;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+  .info:hover .tip,.info:focus .tip{visibility:visible;opacity:1}
 
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    padding: 24px 28px;
-    line-height: 1.45;
-    -webkit-font-smoothing: antialiased;
-    min-height: 100vh;
-  }
+  canvas{width:100%;height:230px;display:block;background:var(--inner);border-radius:14px;border:1px solid var(--border)}
 
-  .container {
-    max-width: 1360px;
-    margin: 0 auto;
-  }
+  .big{font:600 64px/1 var(--mono);letter-spacing:-.04em;margin:auto 0 0}
+  .big small{font:500 16px var(--ui);color:var(--muted);letter-spacing:0;margin-left:8px}
+  .ref{margin-top:14px;font-size:12px;color:var(--dim);font-weight:500}
+  .vital-body{flex:1;display:flex;flex-direction:column;justify-content:flex-end;padding-top:24px}
 
-  /* Top Bar */
-  .topbar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding-bottom: 18px;
-    margin-bottom: 20px;
-    border-bottom: 1px solid var(--border);
-  }
+  .cond-title{font-size:22px;font-weight:800;letter-spacing:-.02em;margin-top:6px}
+  .cond-desc{font-size:13.5px;line-height:1.55;color:var(--muted);margin-top:8px}
+  .cond{flex:1;display:flex;flex-direction:column;justify-content:center}
+  .cond-card{border-radius:14px;padding:16px;background:var(--inner);border:1px solid var(--border);transition:.25s}
 
-  .brand-group {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .brand-title {
-    font-size: 22px;
-    font-weight: 800;
-    letter-spacing: -0.02em;
-    color: #ffffff;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .brand-badge {
-    background: linear-gradient(135deg, #1e293b, #0f172a);
-    border: 1px solid var(--border);
-    color: var(--cyan);
-    font-size: 11px;
-    font-weight: 700;
-    padding: 3px 8px;
-    border-radius: 6px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  .topbar-actions {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .bed-selector {
-    background: #111827;
-    color: #f1f5f9;
-    border: 1px solid var(--border);
-    padding: 6px 14px;
-    border-radius: 20px;
-    font-size: 13px;
-    font-weight: 600;
-    font-family: inherit;
-    outline: none;
-    cursor: pointer;
-    transition: all 0.2s ease;
-  }
-  .bed-selector:hover, .bed-selector:focus {
-    border-color: var(--cyan);
-    background: #172033;
-  }
-
-  .live-pill {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    padding: 5px 12px;
-    border-radius: 9999px;
-    text-transform: uppercase;
-    font-family: 'JetBrains Mono', monospace;
-    background: var(--green-bg);
-    color: var(--green);
-    border: 1px solid var(--green-border);
-  }
-
-  .pulse-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--green);
-    box-shadow: 0 0 8px var(--green);
-    animation: livePulse 1.8s infinite;
-  }
-
-  @keyframes livePulse {
-    0% { transform: scale(0.95); opacity: 0.8; }
-    50% { transform: scale(1.3); opacity: 1; }
-    100% { transform: scale(0.95); opacity: 0.8; }
-  }
-
-  .status-pill {
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    padding: 5px 12px;
-    border-radius: 9999px;
-    text-transform: uppercase;
-    font-family: 'JetBrains Mono', monospace;
-    transition: all 0.3s ease;
-  }
-  .pill-stable {
-    background: var(--green-bg);
-    color: var(--green);
-    border: 1px solid var(--green-border);
-  }
-  .pill-critical {
-    background: var(--red-bg);
-    color: var(--red);
-    border: 1px solid var(--red-border);
-    animation: alertFlash 1s infinite alternate;
-  }
-  @keyframes alertFlash {
-    from { opacity: 0.85; }
-    to { opacity: 1; box-shadow: 0 0 12px rgba(239, 68, 68, 0.4); }
-  }
-
-  /* Bento Grid */
-  .bento {
-    display: grid;
-    grid-template-columns: repeat(12, 1fr);
-    gap: 16px;
-  }
-
-  .tile {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 20px;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
-    transition: border-color 0.2s ease;
-    position: relative;
-  }
-  .tile:hover {
-    border-color: rgba(255, 255, 255, 0.14);
-  }
-
-  .span-4 { grid-column: span 4; }
-  .span-6 { grid-column: span 6; }
-  .span-8 { grid-column: span 8; }
-  .span-12 { grid-column: span 12; }
-
-  @media (max-width: 1024px) {
-    .span-4, .span-8, .span-6 { grid-column: span 12; }
-  }
-
-  /* Info Bubble & Tooltip */
-  .header-left {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .info-bubble {
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 17px;
-    height: 17px;
-    border-radius: 50%;
-    color: var(--text-dim);
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    cursor: help;
-    transition: all 0.2s ease;
-    font-size: 10px;
-    line-height: 1;
-    font-weight: 700;
-  }
-  .info-bubble:hover, .info-bubble:focus {
-    color: var(--cyan);
-    background: var(--cyan-bg);
-    border-color: var(--cyan-border);
-  }
-  .info-bubble .tooltip {
-    visibility: hidden;
-    opacity: 0;
-    position: absolute;
-    bottom: calc(100% + 8px);
-    left: 50%;
-    transform: translateX(-50%) translateY(4px);
-    background: #172033;
-    color: #f1f5f9;
-    border: 1px solid #334155;
-    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.6);
-    padding: 8px 12px;
-    border-radius: 8px;
-    font-size: 11px;
-    font-weight: 500;
-    line-height: 1.4;
-    white-space: normal;
-    width: 230px;
-    text-align: left;
-    pointer-events: none;
-    z-index: 100;
-    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-  .info-bubble:hover .tooltip, .info-bubble:focus .tooltip {
-    visibility: visible;
-    opacity: 1;
-    transform: translateX(-50%) translateY(0);
-  }
-  .info-bubble.tooltip-right .tooltip {
-    left: 0;
-    transform: translateY(4px);
-  }
-  .info-bubble.tooltip-right:hover .tooltip {
-    transform: translateY(0);
-  }
-  .info-bubble .tooltip::after {
-    content: '';
-    position: absolute;
-    top: 100%;
-    left: 50%;
-    transform: translateX(-50%);
-    border-width: 5px;
-    border-style: solid;
-    border-color: #334155 transparent transparent transparent;
-  }
-  .info-bubble.tooltip-right .tooltip::after {
-    left: 14px;
-    transform: none;
-  }
-
-  .lbl {
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.07em;
-    color: var(--text-muted);
-  }
-
-  .row-between {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  /* Vitals Values */
-  .val-xl {
-    font-size: 44px;
-    font-weight: 700;
-    letter-spacing: -0.03em;
-    font-family: 'JetBrains Mono', monospace;
-    line-height: 1;
-  }
-
-  .unit {
-    font-size: 16px;
-    color: var(--text-muted);
-    font-weight: 500;
-    margin-left: 6px;
-    font-family: 'Plus Jakarta Sans', sans-serif;
-  }
-
-  .vital-footer {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-top: 14px;
-    padding-top: 12px;
-    border-top: 1px solid var(--border-subtle);
-    font-size: 12px;
-    color: var(--text-muted);
-  }
-
-  .ref-range {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    color: var(--text-dim);
-  }
-
-  .clinical-tag {
-    font-size: 11px;
-    font-weight: 600;
-    padding: 3px 8px;
-    border-radius: 6px;
-  }
-  .tag-green { background: var(--green-bg); color: var(--green); }
-  .tag-amber { background: var(--amber-bg); color: var(--amber); }
-  .tag-red { background: var(--red-bg); color: var(--red); }
-
-  /* Waveform */
-  canvas {
-    width: 100%;
-    height: 155px;
-    background: #060911;
-    border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    display: block;
-    margin-top: 8px;
-  }
-
-  .waveform-meta {
-    display: flex;
-    justify-content: space-between;
-    font-size: 11px;
-    color: var(--text-dim);
-    margin-top: 8px;
-    font-family: 'JetBrains Mono', monospace;
-  }
-
-  /* Patient Condition Card */
-  .condition-card {
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    height: 100%;
-  }
-
-  .condition-hero {
-    background: var(--card-inner);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 14px;
-    margin: 10px 0;
-  }
-
-  .condition-badge-wrap {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 8px;
-  }
-
-  .condition-title {
-    font-size: 16px;
-    font-weight: 700;
-    color: #ffffff;
-    letter-spacing: -0.01em;
-  }
-
-  .condition-desc {
-    font-size: 12px;
-    color: var(--text-muted);
-    line-height: 1.5;
-    margin-top: 4px;
-  }
-
-  .condition-table {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .c-row {
-    display: flex;
-    justify-content: space-between;
-    font-size: 12px;
-    padding: 5px 0;
-    border-bottom: 1px solid var(--border-subtle);
-  }
-  .c-row:last-child { border-bottom: none; }
-  .c-row span:first-child { color: var(--text-muted); }
-  .c-row span:last-child {
-    font-weight: 600;
-    font-family: 'JetBrains Mono', monospace;
-  }
-
-  /* Bedside Controls / Simulation Tray */
-  .controls-header {
-    margin-bottom: 16px;
-  }
-
-  .controls-title {
-    font-size: 13px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--text-muted);
-  }
-
-  .controls-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 16px;
-  }
-
-  .control-box {
-    background: var(--card-inner);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 16px;
-  }
-
-  .control-top {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text);
-    margin-bottom: 10px;
-  }
-
-  .control-val {
-    font-family: 'JetBrains Mono', monospace;
-    font-weight: 700;
-    font-size: 13px;
-  }
-
-  input[type="range"] {
-    width: 100%;
-    accent-color: var(--cyan);
-    background: #1e293b;
-    height: 5px;
-    border-radius: 3px;
-    cursor: pointer;
-  }
-
-  .slider-ticks {
-    display: flex;
-    justify-content: space-between;
-    font-size: 10px;
-    color: var(--text-dim);
-    margin-top: 6px;
-    font-family: 'JetBrains Mono', monospace;
-  }
-
-  select.control-select {
-    width: 100%;
-    background: #111827;
-    color: #f1f5f9;
-    border: 1px solid var(--border);
-    padding: 8px 12px;
-    border-radius: 8px;
-    font-size: 13px;
-    font-family: inherit;
-    outline: none;
-    cursor: pointer;
-    transition: border-color 0.15s ease;
-  }
-  select.control-select:hover, select.control-select:focus {
-    border-color: var(--cyan);
-  }
-
-  .btn-cluster {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    margin-top: 18px;
-    padding-top: 14px;
-    border-top: 1px solid var(--border-subtle);
-  }
-
-  .action-btn {
-    background: #111827;
-    color: #e2e8f0;
-    border: 1px solid var(--border);
-    padding: 7px 14px;
-    border-radius: 8px;
-    font-size: 12px;
-    font-weight: 600;
-    font-family: inherit;
-    cursor: pointer;
-    transition: all 0.18s ease;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .action-btn:hover {
-    background: #1e293b;
-    border-color: rgba(255, 255, 255, 0.2);
-    transform: translateY(-1px);
-  }
-
-  .btn-baseline {
-    background: rgba(16, 185, 129, 0.12);
-    color: #34d399;
-    border-color: rgba(16, 185, 129, 0.25);
-  }
-  .btn-baseline:hover {
-    background: rgba(16, 185, 129, 0.2);
-    border-color: #34d399;
-  }
-
-  .btn-alert {
-    background: rgba(239, 68, 68, 0.1);
-    color: #f87171;
-    border-color: rgba(239, 68, 68, 0.25);
-  }
-  .btn-alert:hover {
-    background: rgba(239, 68, 68, 0.2);
-    border-color: #f87171;
-  }
-
-  .btn-warning {
-    background: rgba(245, 158, 11, 0.1);
-    color: #fbbf24;
-    border-color: rgba(245, 158, 11, 0.25);
-  }
-  .btn-warning:hover {
-    background: rgba(245, 158, 11, 0.2);
-    border-color: #fbbf24;
-  }
-
-  .feedback-msg {
-    font-size: 12px;
-    font-family: 'JetBrains Mono', monospace;
-    color: var(--green);
-    margin-left: auto;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    opacity: 0;
-    transition: opacity 0.3s ease;
-  }
-  .feedback-msg.show {
-    opacity: 1;
-  }
+  /* simulator */
+  details{margin-top:14px;background:var(--card);border:1px solid var(--border);border-radius:20px}
+  summary{list-style:none;cursor:pointer;padding:18px 22px;display:flex;justify-content:space-between;align-items:center}
+  summary::-webkit-details-marker{display:none}
+  summary .chev{color:var(--dim);transition:.2s}
+  details[open] summary .chev{transform:rotate(180deg)}
+  .sim{padding:0 22px 22px}
+  .sim-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}
+  .box{background:var(--inner);border:1px solid var(--border);border-radius:14px;padding:16px}
+  .row{display:flex;justify-content:space-between;font-size:13px;font-weight:600;margin-bottom:12px}
+  .row b{font-family:var(--mono);font-weight:500}
+  input[type=range]{width:100%;accent-color:var(--blue);cursor:pointer}
+  select.full{width:100%}
+  .btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+  button{background:var(--inner);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:8px 14px;font:600 12.5px var(--ui);cursor:pointer;transition:.15s}
+  button:hover{border-color:rgba(255,255,255,.25);transform:translateY(-1px)}
+  .b-ok{color:var(--green)}.b-bad{color:var(--red)}.b-warn{color:var(--amber)}
+  #fb{font-size:12px;color:var(--green);opacity:0;transition:.3s}#fb.show{opacity:1}
 </style>
 </head>
 <body>
-<div class="container">
-
-  <!-- Top Bar -->
-  <header class="topbar">
-    <div class="brand-group">
-      <h1 class="brand-title">
-        <span>ICU</span>
-        <span style="color:var(--text-dim); font-weight:400;">&bull;</span>
-        <span id="bedDisplayTitle">Bed 1</span>
-      </h1>
-      <span class="brand-badge">Critical Care Unit</span>
-    </div>
-
-    <div class="topbar-actions">
-      <!-- Bed selector -->
-      <select id="bedSelect" class="bed-selector" style="display:none;" onchange="switchBed(this.value)">
-      </select>
-
-      <!-- Live Heartbeat Pill -->
-      <div class="live-pill">
-        <span class="pulse-dot"></span>
-        <span>Live</span>
-      </div>
-
-      <!-- Overall Condition Pill -->
-      <div class="status-pill pill-stable" id="overallPill">Patient Stable</div>
+<div class="wrap">
+  <header>
+    <h1>ICU<span>&middot;</span><b id="bedTitle" style="font-weight:800">Bed 1</b></h1>
+    <div class="right">
+      <select id="bedSelect" style="display:none" onchange="switchBed(this.value)"></select>
+      <div class="status s-ok" id="overall">Stable</div>
     </div>
   </header>
 
-  <!-- Bento Grid -->
-  <main class="bento">
-    
-    <!-- Row 1: Real-time Waveform (8 cols) -->
-    <section class="tile span-8">
-      <div class="row-between">
-        <div class="header-left">
-          <span class="lbl">ECG Lead II Real-Time Waveform</span>
-          <span class="info-bubble tooltip-right" tabindex="0">
-            &#9432;
-            <span class="tooltip">Continuous Lead II electrocardiogram sampled at 250 Hz for real-time cardiac rhythm and morphology analysis.</span>
-          </span>
+  <main class="grid">
+    <section class="tile c8">
+      <div class="head">
+        <div class="lbl">ECG &middot; Lead II
+          <span class="info" tabindex="0">i<span class="tip">Live electrocardiogram. Shows the electrical rhythm of the heart in real time.</span></span>
         </div>
-        <span class="clinical-tag tag-green" id="ecgStatusBadge">Normal Sinus Rhythm</span>
+        <span class="tag t-ok" id="ecgTag">Normal rhythm</span>
       </div>
-
-      <canvas id="ecgCanvas" width="800" height="155"></canvas>
-
-      <div class="waveform-meta">
-        <span>Gain: 10 mm/mV &bull; Sweep: 25 mm/s</span>
-        <span>Sampling: 250 Hz Continuous</span>
-      </div>
+      <canvas id="ecg" width="800" height="230"></canvas>
     </section>
 
-    <!-- Row 1: Patient Condition (4 cols) -->
-    <section class="tile span-4">
-      <div class="condition-card">
-        <div>
-          <div class="row-between">
-            <div class="header-left">
-              <span class="lbl">Patient Condition</span>
-              <span class="info-bubble" tabindex="0">
-                &#9432;
-                <span class="tooltip">Clinical summary assessing patient cardiac rhythm, oxygenation, and physiological stability.</span>
-              </span>
-            </div>
-            <span class="clinical-tag tag-green" id="condStateBadge">Stable</span>
-          </div>
-
-          <div class="condition-hero" id="conditionHero">
-            <div class="condition-badge-wrap">
-              <span class="condition-title" id="conditionTitle">Normal Sinus Rhythm</span>
-            </div>
-            <p class="condition-desc" id="conditionDesc">
-              Patient is clinically stable. Cardiac electrical conduction is regular and vitals are within standard physiological limits.
-            </p>
-          </div>
+    <section class="tile c4">
+      <div class="head">
+        <div class="lbl">Patient condition
+          <span class="info" tabindex="0">i<span class="tip">Plain-language summary of the patient's rhythm, oxygen level and heart rate.</span></span>
         </div>
-
-        <div class="condition-table">
-          <div class="c-row">
-            <span>Cardiac Rhythm</span>
-            <span id="cRhythm">Sinus Rhythm</span>
-          </div>
-          <div class="c-row">
-            <span>Oxygenation</span>
-            <span id="cPerfusion">Adequate (98%)</span>
-          </div>
-          <div class="c-row">
-            <span>Heart Rate Status</span>
-            <span id="cPulse">Normal Range</span>
-          </div>
-          <div class="c-row">
-            <span>Physiological State</span>
-            <span id="cStability" style="color:var(--green);">Nominal</span>
-          </div>
+      </div>
+      <div class="cond">
+        <div class="cond-card" id="condCard">
+          <span class="tag t-ok" id="condTag">Healthy</span>
+          <div class="cond-title" id="condTitle">Patient is healthy</div>
+          <div class="cond-desc" id="condDesc">Heart rhythm, heart rate and oxygen level are all within normal limits.</div>
         </div>
       </div>
     </section>
 
-    <!-- Row 2: Heart Rate (6 cols) -->
-    <section class="tile span-6">
-      <div class="row-between">
-        <div class="header-left">
-          <span class="lbl">Heart Rate</span>
-          <span class="info-bubble tooltip-right" tabindex="0">
-            &#9432;
-            <span class="tooltip">Continuous pulse rate measured in beats per minute (bpm). Standard adult resting range is 60–100 bpm.</span>
-          </span>
+    <section class="tile c6">
+      <div class="head">
+        <div class="lbl">Heart rate
+          <span class="info" tabindex="0">i<span class="tip">Beats per minute. Normal resting adult range is 60&ndash;100.</span></span>
         </div>
-        <span class="clinical-tag tag-green" id="hrStatusTag">Normal</span>
+        <span class="tag t-ok" id="hrTag">Normal</span>
       </div>
-
-      <div style="margin: 16px 0 6px 0;">
-        <div class="val-xl" id="hrDisplay" style="color:var(--cyan);">
-          75 <span class="unit">bpm</span>
-        </div>
-      </div>
-
-      <div class="vital-footer">
-        <span class="ref-range">Reference: 60 &ndash; 100 bpm</span>
-        <span id="hrNote">Resting Rhythm</span>
+      <div class="vital-body">
+        <div class="big" id="hr" style="color:var(--blue)">--<small>bpm</small></div>
+        <div class="ref">Normal 60&ndash;100 bpm</div>
       </div>
     </section>
 
-    <!-- Row 2: Blood Oxygen Saturation (6 cols) -->
-    <section class="tile span-6">
-      <div class="row-between">
-        <div class="header-left">
-          <span class="lbl">Blood Oxygen Saturation (SpO2)</span>
-          <span class="info-bubble tooltip-right" tabindex="0">
-            &#9432;
-            <span class="tooltip">Peripheral capillary oxygen saturation level. Normal healthy clinical range is 95%–100%. Levels below 90% indicate hypoxemia.</span>
-          </span>
+    <section class="tile c6">
+      <div class="head">
+        <div class="lbl">Oxygen saturation
+          <span class="info" tabindex="0">i<span class="tip">SpO2: percentage of oxygen carried in the blood. 95&ndash;100% is normal; below 90% is concerning.</span></span>
         </div>
-        <span class="clinical-tag tag-green" id="spo2StatusTag">Optimal</span>
+        <span class="tag t-ok" id="spTag">Normal</span>
       </div>
-
-      <div style="margin: 16px 0 6px 0;">
-        <div class="val-xl" id="spo2Display" style="color:var(--green);">
-          98 <span class="unit">%</span>
-        </div>
-      </div>
-
-      <div class="vital-footer">
-        <span class="ref-range">Reference: 95 &ndash; 100%</span>
-        <span id="spo2Note">Optimal Oxygenation</span>
+      <div class="vital-body">
+        <div class="big" id="sp" style="color:var(--green)">--<small>%</small></div>
+        <div class="ref">Normal 95&ndash;100 %</div>
       </div>
     </section>
-
-    <!-- Row 3: Bedside Simulation & Controls (12 cols) -->
-    <section class="tile span-12">
-      <div class="controls-header row-between">
-        <div class="header-left">
-          <span class="controls-title">Patient Vitals &amp; Scenario Simulator</span>
-          <span class="info-bubble tooltip-right" tabindex="0">
-            &#9432;
-            <span class="tooltip">Simulate bedside vital sign adjustments and cardiac scenarios to verify bedside monitoring and response.</span>
-          </span>
-        </div>
-        <span class="feedback-msg" id="feedbackMsg">&#10003; Target Vitals Updated</span>
-      </div>
-
-      <div class="controls-grid">
-        <!-- Target Heart Rate -->
-        <div class="control-box">
-          <div class="control-top">
-            <span>Target Heart Rate</span>
-            <span class="control-val" id="targetHrLabel" style="color:var(--cyan);">75 bpm</span>
-          </div>
-          <input type="range" id="targetHr" min="40" max="200" value="75" oninput="sendSimulation()">
-          <div class="slider-ticks">
-            <span>40</span>
-            <span>Brady &lt;60</span>
-            <span>Normal 60-100</span>
-            <span>Tachy &gt;100</span>
-            <span>200</span>
-          </div>
-        </div>
-
-        <!-- Target SpO2 -->
-        <div class="control-box">
-          <div class="control-top">
-            <span>Target Oxygen Saturation</span>
-            <span class="control-val" id="targetSpo2Label" style="color:var(--green);">98 %</span>
-          </div>
-          <input type="range" id="targetSpo2" min="70" max="100" value="98" oninput="sendSimulation()">
-          <div class="slider-ticks">
-            <span>70%</span>
-            <span>Critical &lt;88%</span>
-            <span>Low &lt;95%</span>
-            <span>Optimal 95-100%</span>
-            <span>100%</span>
-          </div>
-        </div>
-
-        <!-- Cardiac Rhythm Profile -->
-        <div class="control-box">
-          <div class="control-top">
-            <span>Cardiac Rhythm Condition</span>
-          </div>
-          <select id="ecgCondition" class="control-select" onchange="sendSimulation()">
-            <option value="normal">Normal Sinus Rhythm (Nominal)</option>
-            <option value="arrhythmia">Ventricular Tachycardia (Arrhythmia Alert)</option>
-            <option value="malicious">Irregular Cardiac Signal / Artifact</option>
-          </select>
-          <div style="font-size:11px; color:var(--text-dim); margin-top:8px;">
-            Simulates cardiac waveform profiles on Lead II stream.
-          </div>
-        </div>
-      </div>
-
-      <!-- Quick Preset Buttons -->
-      <div class="btn-cluster">
-        <button type="button" onclick="applyScenario('healthy')" class="action-btn btn-baseline">
-          &#9679; Normal Baseline
-        </button>
-        <button type="button" onclick="applyScenario('arrhythmia')" class="action-btn btn-alert">
-          &#9888; Ventricular Arrhythmia
-        </button>
-        <button type="button" onclick="applyScenario('tachycardia')" class="action-btn btn-warning">
-          &#8679; Severe Tachycardia (150 bpm)
-        </button>
-        <button type="button" onclick="applyScenario('hypoxia')" class="action-btn btn-warning">
-          &#8681; Acute Hypoxia (86% SpO2)
-        </button>
-        <button type="button" onclick="applyScenario('reset')" class="action-btn">
-          &#8634; Reset Defaults
-        </button>
-      </div>
-    </section>
-
   </main>
+
+  <details>
+    <summary>
+      <span class="lbl">Scenario simulator
+        <span class="info" tabindex="0">i<span class="tip">Demo tool: adjust this patient's vitals and rhythm to see how the monitor responds.</span></span>
+      </span>
+      <span style="display:flex;gap:14px;align-items:center"><span id="fb">&#10003; Updated</span><span class="chev">&#9662;</span></span>
+    </summary>
+    <div class="sim">
+      <div class="sim-grid">
+        <div class="box">
+          <div class="row"><span>Heart rate</span><b id="hrLbl">75 bpm</b></div>
+          <input type="range" id="tHr" min="40" max="200" value="75" oninput="send()">
+        </div>
+        <div class="box">
+          <div class="row"><span>Oxygen saturation</span><b id="spLbl">98 %</b></div>
+          <input type="range" id="tSp" min="70" max="100" value="98" oninput="send()">
+        </div>
+        <div class="box">
+          <div class="row"><span>Rhythm</span></div>
+          <select class="full" id="tEcg" onchange="send()">
+            <option value="normal">Normal sinus rhythm</option>
+            <option value="arrhythmia">Ventricular arrhythmia</option>
+            <option value="malicious">Irregular signal</option>
+          </select>
+        </div>
+      </div>
+      <div class="btns">
+        <button class="b-ok" onclick="preset('healthy')">Healthy</button>
+        <button class="b-bad" onclick="preset('arrhythmia')">Arrhythmia</button>
+        <button class="b-warn" onclick="preset('tachy')">Tachycardia</button>
+        <button class="b-warn" onclick="preset('hypoxia')">Low oxygen</button>
+      </div>
+    </div>
+  </details>
 </div>
 
 <script>
-let selectedBed = null;
-let lastWave = [];
-let currentIsAlarm = false;
-const canvas = document.getElementById('ecgCanvas');
-const ctx = canvas.getContext('2d');
+let bed=null,wave=[],alarm=false;
+const cv=document.getElementById('ecg'),cx=cv.getContext('2d');
+const $=id=>document.getElementById(id);
+const nice=b=>(b||'Bed 1').replace('_',' ');
+function switchBed(b){bed=b;$('bedTitle').textContent=nice(b);poll()}
 
-function formatBedName(bedId) {
-  if (!bedId) return 'Bed 1';
-  return bedId.replace('_', ' ');
+function resize(){const w=Math.floor(cv.getBoundingClientRect().width)||800;if(w>50){cv.width=w;cv.height=230}draw()}
+addEventListener('resize',resize);
+
+function draw(){
+  if(!wave.length)return;
+  const w=cv.width,h=cv.height,mid=h*.56;
+  cx.fillStyle='#0c1117';cx.fillRect(0,0,w,h);
+  cx.strokeStyle='rgba(255,255,255,.035)';cx.lineWidth=1;
+  for(let x=0;x<w;x+=36){cx.beginPath();cx.moveTo(x,0);cx.lineTo(x,h);cx.stroke()}
+  for(let y=0;y<h;y+=36){cx.beginPath();cx.moveTo(0,y);cx.lineTo(w,y);cx.stroke()}
+  cx.strokeStyle=alarm?'#f87171':'#34d399';cx.lineWidth=2.2;cx.lineJoin='round';
+  cx.shadowColor=alarm?'rgba(248,113,113,.5)':'rgba(52,211,153,.45)';cx.shadowBlur=8;
+  cx.beginPath();
+  const st=w/(wave.length-1);
+  wave.forEach((v,i)=>{const y=mid-v*(h*.3);i?cx.lineTo(i*st,y):cx.moveTo(0,y)});
+  cx.stroke();cx.shadowBlur=0;
 }
 
-function switchBed(bedId) {
-  selectedBed = bedId;
-  const titleEl = document.getElementById('bedDisplayTitle');
-  if (titleEl) {
-    titleEl.textContent = formatBedName(bedId);
-  }
-  fetchState();
+function set(el,cls,txt){el.className=cls;el.textContent=txt}
+
+async function poll(){
+  try{
+    const r=await fetch('/api/state');if(!r.ok)return;
+    const d=await r.json(),beds=Object.keys(d.beds||{});if(!beds.length)return;
+    const sel=$('bedSelect');
+    if(beds.length>1){sel.style.display='';if(sel.options.length!==beds.length)sel.innerHTML=beds.map(k=>`<option value="${k}">${nice(k)}</option>`).join('')}
+    if(!bed||!d.beds[bed])bed=beds[0];
+    if(sel.value!==bed)sel.value=bed;
+    $('bedTitle').textContent=nice(bed);
+    const b=d.beds[bed];if(!b)return;
+
+    const hr=b.hr,sp=b.spo2;
+    $('hr').innerHTML=`${hr??'--'}<small>bpm</small>`;
+    $('sp').innerHTML=`${sp??'--'}<small>%</small>`;
+
+    // heart rate / spo2 tags
+    if(hr>100)set($('hrTag'),'tag t-warn','Fast');else if(hr<60)set($('hrTag'),'tag t-warn','Slow');else set($('hrTag'),'tag t-ok','Normal');
+    if(sp<90)set($('spTag'),'tag t-bad','Critical');else if(sp<95)set($('spTag'),'tag t-warn','Low');else set($('spTag'),'tag t-ok','Normal');
+
+    wave=b.ecg_wave||[];
+    let v=0;if(wave.length){const m=wave.reduce((a,c)=>a+c,0)/wave.length;v=wave.reduce((a,c)=>a+(c-m)**2,0)/wave.length}
+    const c=(b.chaos&&b.chaos.vitals&&b.chaos.vitals.ecg_condition)||(b.chaos&&b.chaos.Agent_ECG&&b.chaos.Agent_ECG.condition);
+    const arr=c==='arrhythmia'||v>.2, art=!arr&&c==='malicious';
+    alarm=arr;
+
+    set($('ecgTag'),'tag '+(arr?'t-bad':art?'t-warn':'t-ok'),arr?'Arrhythmia':art?'Irregular signal':'Normal rhythm');
+
+    let o,tagc,tagt,title,desc,col;
+    if(arr){o=['status s-bad','Critical'];tagc='t-bad';tagt='Needs attention';title='Arrhythmia detected';desc='Abnormal ventricular rhythm on the ECG. Please assess the patient immediately.';col='248,113,113'}
+    else if(sp<90){o=['status s-bad','Low oxygen'];tagc='t-bad';tagt='Needs attention';title='Low blood oxygen';desc='Oxygen saturation is dangerously low. Check airway and consider supplemental oxygen.';col='248,113,113'}
+    else if(art){o=['status s-warn','Check leads'];tagc='t-warn';tagt='Check';title='Unclear ECG signal';desc='The ECG trace is erratic. Check that electrodes are attached properly.';col='251,191,36'}
+    else if(hr>130||hr<45){o=['status s-warn','Warning'];tagc='t-warn';tagt='Warning';title=hr>130?'Heart rate very high':'Heart rate very low';desc=`Heart rate is ${hr} bpm, outside the safe range. Please assess the patient.`;col='251,191,36'}
+    else{o=['status s-ok','Stable'];tagc='t-ok';tagt='Healthy';title='Patient is healthy';desc='Heart rhythm, heart rate and oxygen level are all within normal limits.';col=''}
+    $('overall').className=o[0];$('overall').textContent=o[1];
+    set($('condTag'),'tag '+tagc,tagt);$('condTitle').textContent=title;$('condDesc').textContent=desc;
+    const cc=$('condCard');cc.style.background=col?`rgba(${col},.08)`:'';cc.style.borderColor=col?`rgba(${col},.3)`:'';
+    draw();
+  }catch(e){}
 }
 
-function drawECG(wave, isAlarm) {
-  if (!wave || wave.length === 0) return;
-  const w = canvas.width;
-  const h = canvas.height;
-  
-  // Background
-  ctx.fillStyle = '#060911';
-  ctx.fillRect(0, 0, w, h);
-
-  // Subtle Clinical Oscilloscope Grid
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
-  ctx.lineWidth = 1;
-  for (let x = 0; x < w; x += 32) {
-    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
-  }
-  for (let y = 0; y < h; y += 24) {
-    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
-  }
-
-  // Baseline
-  const midY = h * 0.55;
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
-  ctx.beginPath();
-  ctx.moveTo(0, midY); ctx.lineTo(w, midY);
-  ctx.stroke();
-
-  // Waveform with medical monitor glow
-  ctx.strokeStyle = isAlarm ? '#ef4444' : '#10b981';
-  ctx.shadowColor = isAlarm ? 'rgba(239, 68, 68, 0.5)' : 'rgba(16, 185, 129, 0.4)';
-  ctx.shadowBlur = 6;
-  ctx.lineWidth = 2.2;
-  ctx.beginPath();
-  
-  const step = w / (wave.length - 1);
-  for (let i = 0; i < wave.length; i++) {
-    const x = i * step;
-    const y = midY - (wave[i] * (h * 0.28));
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  }
-  ctx.stroke();
-  ctx.shadowBlur = 0; // reset
+async function send(){
+  const hr=+$('tHr').value,sp=+$('tSp').value,ec=$('tEcg').value;
+  $('hrLbl').textContent=hr+' bpm';$('spLbl').textContent=sp+' %';
+  try{
+    const r=await fetch('/api/manipulate',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({patient_id:bed||'Bed_1',target_hr:hr,target_spo2:sp,ecg_condition:ec,delay_ms:10,drop_rate:0,malicious:ec==='malicious',overload_gpu:false,use_relay_b:false})});
+    if(r.ok){$('fb').classList.add('show');setTimeout(()=>$('fb').classList.remove('show'),1800)}
+  }catch(e){}
 }
-
-async function fetchState() {
-  try {
-    const res = await fetch('/api/state');
-    if (!res.ok) return;
-    const data = await res.json();
-    const beds = Object.keys(data.beds || {});
-    if (beds.length === 0) return;
-
-    const sel = document.getElementById('bedSelect');
-    if (beds.length > 1) {
-      sel.style.display = 'inline-block';
-      if (sel.options.length !== beds.length) {
-        sel.innerHTML = beds.map(k => `<option value="${k}">${formatBedName(k)}</option>`).join('');
-      }
-    }
-    if (!selectedBed || !data.beds[selectedBed]) {
-      selectedBed = beds[0];
-    }
-    if (sel.value !== selectedBed) {
-      sel.value = selectedBed;
-    }
-
-    const titleEl = document.getElementById('bedDisplayTitle');
-    if (titleEl) {
-      titleEl.textContent = formatBedName(selectedBed);
-    }
-
-    const b = data.beds[selectedBed];
-    if (!b) return;
-
-    // Heart Rate
-    const hrVal = b.hr !== null ? b.hr : '--';
-    document.getElementById('hrDisplay').innerHTML = `${hrVal} <span class="unit">bpm</span>`;
-    
-    const hrTag = document.getElementById('hrStatusTag');
-    const hrNote = document.getElementById('hrNote');
-    if (typeof hrVal === 'number') {
-      if (hrVal > 100) {
-        hrTag.textContent = 'Tachycardia';
-        hrTag.className = 'clinical-tag tag-amber';
-        hrNote.textContent = 'Elevated pulse rate (>100)';
-      } else if (hrVal < 60) {
-        hrTag.textContent = 'Bradycardia';
-        hrTag.className = 'clinical-tag tag-amber';
-        hrNote.textContent = 'Low pulse rate (<60)';
-      } else {
-        hrTag.textContent = 'Normal';
-        hrTag.className = 'clinical-tag tag-green';
-        hrNote.textContent = 'Normal resting rhythm';
-      }
-    }
-
-    // SpO2
-    const spo2Val = b.spo2 !== null ? b.spo2 : '--';
-    document.getElementById('spo2Display').innerHTML = `${spo2Val} <span class="unit">%</span>`;
-    
-    const spo2Tag = document.getElementById('spo2StatusTag');
-    const spo2Note = document.getElementById('spo2Note');
-    if (typeof spo2Val === 'number') {
-      if (spo2Val < 90) {
-        spo2Tag.textContent = 'Critical Hypoxia';
-        spo2Tag.className = 'clinical-tag tag-red';
-        spo2Note.textContent = 'Severe oxygen desaturation (<90%)';
-      } else if (spo2Val < 95) {
-        spo2Tag.textContent = 'Low Saturation';
-        spo2Tag.className = 'clinical-tag tag-amber';
-        spo2Note.textContent = 'Borderline hypoxemia (90-94%)';
-      } else {
-        spo2Tag.textContent = 'Optimal';
-        spo2Tag.className = 'clinical-tag tag-green';
-        spo2Note.textContent = 'Adequate arterial oxygenation';
-      }
-    }
-
-    lastWave = b.ecg_wave || [];
-    let waveVar = 0;
-    if (lastWave && lastWave.length > 0) {
-      const mean = lastWave.reduce((a, c) => a + c, 0) / lastWave.length;
-      waveVar = lastWave.reduce((a, c) => a + Math.pow(c - mean, 2), 0) / lastWave.length;
-    }
-
-    const chaosCond = (b.chaos && b.chaos.vitals && b.chaos.vitals.ecg_condition) ||
-                      (b.chaos && b.chaos.Agent_ECG && b.chaos.Agent_ECG.condition);
-
-    let isArrhythmia = false;
-    let isArtifact = false;
-
-    if (chaosCond === 'arrhythmia' || waveVar > 0.20) {
-      isArrhythmia = true;
-    } else if (chaosCond === 'malicious') {
-      isArtifact = true;
-    } else if (chaosCond === 'normal') {
-      isArrhythmia = false;
-    } else {
-      isArrhythmia = (waveVar > 0.18);
-    }
-
-    // ECG Badge
-    const ecgBadge = document.getElementById('ecgStatusBadge');
-    if (isArrhythmia) {
-      ecgBadge.textContent = 'Arrhythmia Alert';
-      ecgBadge.className = 'clinical-tag tag-red';
-    } else if (isArtifact) {
-      ecgBadge.textContent = 'Signal Artifact';
-      ecgBadge.className = 'clinical-tag tag-amber';
-    } else {
-      ecgBadge.textContent = 'Normal Sinus Rhythm';
-      ecgBadge.className = 'clinical-tag tag-green';
-    }
-
-    // Patient Condition Panel
-    const overallPill = document.getElementById('overallPill');
-    const condBadge = document.getElementById('condStateBadge');
-    const condTitle = document.getElementById('conditionTitle');
-    const condDesc = document.getElementById('conditionDesc');
-    const condHero = document.getElementById('conditionHero');
-
-    const cRhythm = document.getElementById('cRhythm');
-    const cPerfusion = document.getElementById('cPerfusion');
-    const cPulse = document.getElementById('cPulse');
-    const cStability = document.getElementById('cStability');
-
-    if (isArrhythmia) {
-      overallPill.textContent = 'Critical Alert';
-      overallPill.className = 'status-pill pill-critical';
-
-      condBadge.textContent = 'Critical';
-      condBadge.className = 'clinical-tag tag-red';
-
-      condTitle.textContent = 'Ventricular Arrhythmia Detected';
-      condTitle.style.color = '#f87171';
-      condDesc.textContent = 'Acute abnormal ventricular cardiac pattern detected on Lead II. High risk of compromised cardiac output. Immediate clinical evaluation recommended.';
-      condHero.style.borderColor = 'rgba(239, 68, 68, 0.3)';
-      condHero.style.background = 'rgba(239, 68, 68, 0.08)';
-
-      cRhythm.textContent = 'Arrhythmia Detected';
-      cRhythm.style.color = '#f87171';
-      cStability.textContent = 'Unstable';
-      cStability.style.color = '#f87171';
-    } else if (isArtifact) {
-      overallPill.textContent = 'Signal Warning';
-      overallPill.className = 'status-pill pill-critical';
-
-      condBadge.textContent = 'Warning';
-      condBadge.className = 'clinical-tag tag-amber';
-
-      condTitle.textContent = 'Irregular Cardiac Signal / Artifact';
-      condTitle.style.color = '#fbbf24';
-      condDesc.textContent = 'Erratic waveform pattern detected on Lead II. Inspect electrode placement and verify patient leads contact.';
-      condHero.style.borderColor = 'rgba(245, 158, 11, 0.3)';
-      condHero.style.background = 'rgba(245, 158, 11, 0.08)';
-
-      cRhythm.textContent = 'Signal Noise / Artifact';
-      cRhythm.style.color = '#fbbf24';
-      cStability.textContent = 'Checking Leads';
-      cStability.style.color = '#fbbf24';
-    } else if (typeof spo2Val === 'number' && spo2Val < 90) {
-      overallPill.textContent = 'Hypoxia Alert';
-      overallPill.className = 'status-pill pill-critical';
-
-      condBadge.textContent = 'Warning';
-      condBadge.className = 'clinical-tag tag-red';
-
-      condTitle.textContent = 'Critical Hypoxemia Detected';
-      condTitle.style.color = '#f87171';
-      condDesc.textContent = 'Arterial blood oxygen saturation is significantly below target threshold. Supplemental oxygen or airway review advised.';
-      condHero.style.borderColor = 'rgba(239, 68, 68, 0.3)';
-      condHero.style.background = 'rgba(239, 68, 68, 0.08)';
-
-      cRhythm.textContent = 'Sinus Rhythm';
-      cRhythm.style.color = 'var(--text)';
-      cStability.textContent = 'Compromised';
-      cStability.style.color = '#f87171';
-    } else if (typeof hrVal === 'number' && (hrVal > 130 || hrVal < 45)) {
-      overallPill.textContent = 'Vital Warning';
-      overallPill.className = 'status-pill pill-critical';
-
-      condBadge.textContent = 'Warning';
-      condBadge.className = 'clinical-tag tag-amber';
-
-      condTitle.textContent = hrVal > 130 ? 'Severe Tachycardia' : 'Severe Bradycardia';
-      condTitle.style.color = '#fbbf24';
-      condDesc.textContent = `Patient heart rate is outside physiological tolerance limits (${hrVal} bpm). Evaluate patient hemodynamics.`;
-      condHero.style.borderColor = 'rgba(245, 158, 11, 0.3)';
-      condHero.style.background = 'rgba(245, 158, 11, 0.08)';
-
-      cRhythm.textContent = hrVal > 130 ? 'Rapid Sinus' : 'Slow Sinus';
-      cRhythm.style.color = '#fbbf24';
-      cStability.textContent = 'Borderline';
-      cStability.style.color = '#fbbf24';
-    } else {
-      overallPill.textContent = 'Patient Stable';
-      overallPill.className = 'status-pill pill-stable';
-
-      condBadge.textContent = 'Stable';
-      condBadge.className = 'clinical-tag tag-green';
-
-      condTitle.textContent = 'Normal Sinus Rhythm';
-      condTitle.style.color = '#ffffff';
-      condDesc.textContent = 'Patient is clinically stable. Cardiac electrical conduction is regular and vitals are within standard physiological limits.';
-      condHero.style.borderColor = 'var(--border)';
-      condHero.style.background = 'var(--card-inner)';
-
-      cRhythm.textContent = 'Regular Sinus';
-      cRhythm.style.color = 'var(--text)';
-      cStability.textContent = 'Nominal';
-      cStability.style.color = 'var(--green)';
-    }
-
-    cPerfusion.textContent = typeof spo2Val === 'number' ? (spo2Val >= 95 ? `Optimal (${spo2Val}%)` : `Reduced (${spo2Val}%)`) : '--';
-    cPulse.textContent = typeof hrVal === 'number' ? (hrVal > 100 ? 'Tachycardic' : hrVal < 60 ? 'Bradycardic' : 'Normal Range') : '--';
-
-    currentIsAlarm = isArrhythmia;
-    drawECG(lastWave, currentIsAlarm);
-  } catch (e) {}
+function preset(n){
+  const P={healthy:[75,98,'normal'],arrhythmia:[142,93,'arrhythmia'],tachy:[150,97,'normal'],hypoxia:[108,86,'normal']}[n];
+  $('tHr').value=P[0];$('tSp').value=P[1];$('tEcg').value=P[2];send();
 }
-
-async function sendSimulation() {
-  const targetHr = parseInt(document.getElementById('targetHr').value);
-  const targetSpo2 = parseInt(document.getElementById('targetSpo2').value);
-  const ecgCondition = document.getElementById('ecgCondition').value;
-
-  document.getElementById('targetHrLabel').textContent = `${targetHr} bpm`;
-  document.getElementById('targetSpo2Label').textContent = `${targetSpo2} %`;
-
-  const isMalicious = (ecgCondition === 'malicious');
-
-  const payload = {
-    patient_id: selectedBed || 'Bed_1',
-    target_hr: targetHr,
-    target_spo2: targetSpo2,
-    ecg_condition: ecgCondition,
-    delay_ms: 10,
-    drop_rate: 0.0,
-    malicious: isMalicious,
-    overload_gpu: false,
-    use_relay_b: false
-  };
-
-  try {
-    const res = await fetch('/api/manipulate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    if (res.ok) {
-      const fb = document.getElementById('feedbackMsg');
-      fb.classList.add('show');
-      setTimeout(() => fb.classList.remove('show'), 2000);
-    }
-  } catch (e) {}
-}
-
-function applyScenario(name) {
-  if (name === 'healthy') {
-    document.getElementById('targetHr').value = 75;
-    document.getElementById('targetSpo2').value = 98;
-    document.getElementById('ecgCondition').value = 'normal';
-  } else if (name === 'arrhythmia') {
-    document.getElementById('targetHr').value = 142;
-    document.getElementById('targetSpo2').value = 93;
-    document.getElementById('ecgCondition').value = 'arrhythmia';
-  } else if (name === 'tachycardia') {
-    document.getElementById('targetHr').value = 150;
-    document.getElementById('targetSpo2').value = 97;
-    document.getElementById('ecgCondition').value = 'normal';
-  } else if (name === 'hypoxia') {
-    document.getElementById('targetHr').value = 108;
-    document.getElementById('targetSpo2').value = 86;
-    document.getElementById('ecgCondition').value = 'normal';
-  } else if (name === 'reset') {
-    document.getElementById('targetHr').value = 75;
-    document.getElementById('targetSpo2').value = 98;
-    document.getElementById('ecgCondition').value = 'normal';
-  }
-  sendSimulation();
-}
-
-// Responsive Canvas resizing
-function handleResize() {
-  const rect = canvas.getBoundingClientRect();
-  const w = Math.floor(rect.width) || 800;
-  if (w > 50) {
-    canvas.width = w;
-    canvas.height = 155;
-  }
-  if (lastWave.length > 0) {
-    drawECG(lastWave, currentIsAlarm);
-  }
-}
-window.addEventListener('resize', handleResize);
-handleResize();
-
-setInterval(fetchState, 350);
-fetchState();
+resize();setInterval(poll,350);poll();
 </script>
 </body>
 </html>

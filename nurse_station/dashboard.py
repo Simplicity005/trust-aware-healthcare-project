@@ -765,7 +765,7 @@ def render_template(templates, name, **kwargs):
     return html
 
 
-def svg_ecg(wave, color="#10b981", width=600, height=140):
+def svg_ecg(wave, color="#34d399", width=600, height=140):
     if not wave:
         wave = [0.0] * 250
     pts = []
@@ -779,8 +779,8 @@ def svg_ecg(wave, color="#10b981", width=600, height=140):
     poly = " ".join(pts)
     return (
         f'<svg viewBox="0 0 {width} {height}" width="100%" height="{height}" '
-        f'style="display:block;background:#08090b;border-radius:6px;border:1px solid #1a1d24;">'
-        f'<line x1="0" y1="{mid:.1f}" x2="{width}" y2="{mid:.1f}" stroke="#161820" stroke-width="1"/>'
+        f'style="display:block;background:#0a0e13;border-radius:12px;border:1px solid rgba(255,255,255,0.06);">'
+        f'<line x1="0" y1="{mid:.1f}" x2="{width}" y2="{mid:.1f}" stroke="#1a2230" stroke-width="1"/>'
         f'<polyline fill="none" stroke="{color}" stroke-width="2" points="{poly}"/>'
         f"</svg>"
     )
@@ -805,12 +805,12 @@ def svg_trust_chart(history, width=600, height=130):
 
     return (
         f'<svg viewBox="0 0 {width} {height}" width="100%" height="{height}" '
-        f'style="display:block;background:#08090b;border-radius:6px;border:1px solid #1a1d24;">'
+        f'style="display:block;background:#0a0e13;border-radius:12px;border:1px solid rgba(255,255,255,0.06);">'
         f'<line x1="0" y1="{y70:.1f}" x2="{width}" y2="{y70:.1f}" stroke="#22c55e" stroke-dasharray="4 4" stroke-width="1"/>'
-        f'<line x1="0" y1="{y45:.1f}" x2="{width}" y2="{y45:.1f}" stroke="#ef4444" stroke-dasharray="4 4" stroke-width="1"/>'
-        f'<polyline fill="none" stroke="#10b981" stroke-width="2" points="{line_pts("Agent_ECG")}"/>'
+        f'<line x1="0" y1="{y45:.1f}" x2="{width}" y2="{y45:.1f}" stroke="#f87171" stroke-dasharray="4 4" stroke-width="1"/>'
+        f'<polyline fill="none" stroke="#34d399" stroke-width="2" points="{line_pts("Agent_ECG")}"/>'
         f'<polyline fill="none" stroke="#3b82f6" stroke-width="2" points="{line_pts("Agent_SpO2")}"/>'
-        f'<polyline fill="none" stroke="#f59e0b" stroke-width="2" points="{line_pts("Agent_HR")}"/>'
+        f'<polyline fill="none" stroke="#fbbf24" stroke-width="2" points="{line_pts("Agent_HR")}"/>'
         f"</svg>"
     )
 
@@ -832,10 +832,10 @@ def status_pill_info(bed):
 
 def dot_color(status):
     if status == "TRUSTED":
-        return "#10b981"
+        return "#34d399"
     if status == "SUSPICIOUS":
-        return "#f59e0b"
-    return "#ef4444"
+        return "#fbbf24"
+    return "#f87171"
 
 
 def ward_tile(pid, bed, is_selected, templates=None):
@@ -848,7 +848,7 @@ def ward_tile(pid, bed, is_selected, templates=None):
 
     hr_txt = "ISO" if hr_ag["status"] == "ISOLATED" else (str(hr_ag["value"]) if hr_ag["value"] is not None else "--")
     sp_txt = "ISO" if sp_ag["status"] == "ISOLATED" else (f"{sp_ag['value']}%" if sp_ag["value"] is not None else "--")
-    ecg_col = "#ef4444" if (ecg_ag["status"] == "ISOLATED" or bed["edge"].get("local_bed_alarm")) else "#10b981"
+    ecg_col = "#f87171" if (ecg_ag["status"] == "ISOLATED" or bed["edge"].get("local_bed_alarm")) else "#34d399"
     border_col = "#3b82f6" if is_selected else "#1f2228"
 
     return render_template(
@@ -882,13 +882,13 @@ def detail_view(pid, bed, logs, templates=None):
 
     ecg_quarantined = ecg_ag["status"] == "ISOLATED"
     is_arr = bool(edge.get("local_bed_alarm")) and not ecg_quarantined
-    ecg_col = "#ef4444" if (is_arr or ecg_quarantined) else "#10b981"
+    ecg_col = "#f87171" if (is_arr or ecg_quarantined) else "#34d399"
     rhythm_txt = (
-        "Quarantined (Byzantine Signal)"
+        "Signal unreliable"
         if ecg_quarantined
         else ("Ventricular Arrhythmia" if is_arr else "Normal Sinus Rhythm")
     )
-    rhythm_col = "#ef4444" if (is_arr or ecg_quarantined) else "#ededef"
+    rhythm_col = "#f87171" if (is_arr or ecg_quarantined) else "#ededef"
 
     def build_sensor_tile(title, ag, unit):
         st_name = ag["status"]
@@ -896,13 +896,13 @@ def detail_view(pid, bed, logs, templates=None):
         bar_col = dot_color(st_name)
         pct = int(round(ag["trust"] * 100))
         if "ECG" in title:
-            reading = "250 Hz Stream Nominal" if st_name != "ISOLATED" else "Stream Quarantined"
+            reading = "Signal normal" if st_name != "ISOLATED" else "Signal excluded"
         else:
             v = ag["value"]
             reading = (
                 f"{v} {unit}".strip()
                 if (v is not None and st_name != "ISOLATED")
-                else ("Quarantined" if st_name == "ISOLATED" else "--")
+                else ("Excluded" if st_name == "ISOLATED" else "--")
             )
 
         return render_template(
@@ -922,9 +922,9 @@ def detail_view(pid, bed, logs, templates=None):
         )
 
     sensor_tiles_html = (
-        build_sensor_tile("ECG Sensor (Agent_ECG)", ecg_ag, "")
-        + build_sensor_tile("SpO2 Sensor (Agent_SpO2)", sp_ag, "%")
-        + build_sensor_tile("Heart Rate Sensor (Agent_HR)", hr_ag, "bpm")
+        build_sensor_tile("ECG sensor", ecg_ag, "")
+        + build_sensor_tile("SpO2 sensor", sp_ag, "%")
+        + build_sensor_tile("Heart rate sensor", hr_ag, "bpm")
     )
 
     bed_logs = [e for e in logs if pid in e][:6]
@@ -1192,7 +1192,7 @@ def main():
     if st.session_state.get("show_add_bed", False):
         render_admission_modal(engine, unadded_jetsons, added_bed_ids, templates)
 
-    st.markdown('<div class="sec-label">ICU Multi-Patient Ward Overview</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec-label">Ward overview</div>', unsafe_allow_html=True)
     if not beds_snap:
         st.info("No active patient beds admitted. Click '+ Add New Bed' above to detect and admit Jetson bedside nodes.")
     else:
@@ -1216,7 +1216,7 @@ def main():
                 st.rerun()
 
     st.markdown(
-        f'<div class="sec-label">Detailed Telemetry &amp; Trust Inspection &mdash; {selected_bed} ({engine.get_bed_department(selected_bed)} &middot; {engine.get_bed_room(selected_bed)})</div>',
+        f'<div class="sec-label">{selected_bed} ({engine.get_bed_department(selected_bed)} &middot; {engine.get_bed_room(selected_bed)})</div>',
         unsafe_allow_html=True,
     )
     if selected_bed in beds_snap:
