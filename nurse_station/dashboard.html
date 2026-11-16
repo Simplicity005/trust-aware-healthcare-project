@@ -28,17 +28,33 @@
       --mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
     }
 
-    header, footer, #MainMenu { display: none !important; }
+    header,
+    footer,
+    #MainMenu {
+      display: none !important;
+    }
 
-    .stApp, .stApp * { font-family: var(--ui); }
-    .stApp { background-color: var(--bg) !important; color: var(--text) !important; }
-    code, .mono { font-family: var(--mono) !important; }
+    .stApp,
+    .stApp * {
+      font-family: var(--ui);
+    }
+
+    .stApp {
+      background-color: var(--bg) !important;
+      color: var(--text) !important;
+    }
+
+    code,
+    .mono {
+      font-family: var(--mono) !important;
+    }
 
     [data-testid="stSidebar"] {
       background-color: var(--sidebar-bg) !important;
       border-right: 1px solid var(--border) !important;
       padding-top: 1rem !important;
     }
+
     .block-container {
       padding-top: 1.4rem !important;
       padding-bottom: 2rem !important;
@@ -46,92 +62,363 @@
     }
 
     /* ---------- Header ---------- */
-    .topbar { padding: 4px 0 6px 0; }
-    .title { font-size: 24px; font-weight: 800; letter-spacing: -0.03em; color: #fff; }
-    .meta { font-size: 13px; color: var(--muted); margin-top: 2px; font-weight: 500; }
+    .topbar {
+      padding: 4px 0 6px 0;
+    }
+
+    .title {
+      font-size: 24px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      color: #fff;
+    }
+
+    .meta {
+      font-size: 13px;
+      color: var(--muted);
+      margin-top: 2px;
+      font-weight: 500;
+    }
 
     .sec-label {
-      font-size: 11px; font-weight: 700; text-transform: uppercase;
-      letter-spacing: 0.1em; color: var(--dim); margin: 22px 0 12px 0;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--dim);
+      margin: 22px 0 12px 0;
     }
 
     /* ---------- Bento ---------- */
     .ward-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-      gap: 14px; margin-bottom: 8px;
+      gap: 14px;
+      margin-bottom: 8px;
     }
-    .bento { display: grid; grid-template-columns: repeat(12, 1fr); gap: 14px; }
+
+    .bento {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 14px;
+    }
+
     .tile {
       background: var(--card);
       border: 1px solid var(--border);
       border-radius: 18px;
       padding: 18px 20px;
-      display: flex; flex-direction: column; justify-content: space-between;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
     }
-    .span-4 { grid-column: span 4; }
-    .span-6 { grid-column: span 6; }
-    .span-8 { grid-column: span 8; }
-    .span-12 { grid-column: span 12; }
-    @media (max-width: 1000px) { .span-4, .span-6, .span-8 { grid-column: span 12; } }
 
-    .bed-id { font-size: 16px; font-weight: 700; color: #fff; letter-spacing: -0.01em; }
-    .room-sub { font-size: 12px; color: var(--muted); font-weight: 500; }
-    .lbl { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
-    .sub { font-size: 12px; color: var(--muted); font-weight: 500; }
-    .val-xl { font-size: 40px; font-weight: 600; letter-spacing: -0.03em; font-family: var(--mono); }
-    .val-lg { font-size: 30px; font-weight: 600; letter-spacing: -0.02em; font-family: var(--mono); line-height: 1; }
-    .val-md { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
-    .val-sm { font-size: 22px; font-weight: 600; color: #fff; font-family: var(--mono); letter-spacing: -0.02em; }
-    .val-xs { font-size: 12px; font-weight: 600; color: var(--muted); }
-    .unit { font-size: 12px; color: var(--muted); font-weight: 500; font-family: var(--ui); margin-left: 2px; }
-    .row-between { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-    .ward-vitals { display: flex; gap: 28px; margin-top: 14px; }
+    .span-4 {
+      grid-column: span 4;
+    }
+
+    .span-6 {
+      grid-column: span 6;
+    }
+
+    .span-8 {
+      grid-column: span 8;
+    }
+
+    .span-12 {
+      grid-column: span 12;
+    }
+
+    @media (max-width: 1000px) {
+
+      .span-4,
+      .span-6,
+      .span-8 {
+        grid-column: span 12;
+      }
+    }
+
+    .bed-id {
+      font-size: 16px;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: -0.01em;
+    }
+
+    .room-sub {
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 500;
+    }
+
+    .lbl {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+
+    .sub {
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 500;
+    }
+
+    .val-xl {
+      font-size: 40px;
+      font-weight: 600;
+      letter-spacing: -0.03em;
+      font-family: var(--mono);
+    }
+
+    .val-lg {
+      font-size: 30px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      font-family: var(--mono);
+      line-height: 1;
+    }
+
+    .val-md {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .val-sm {
+      font-size: 22px;
+      font-weight: 600;
+      color: #fff;
+      font-family: var(--mono);
+      letter-spacing: -0.02em;
+    }
+
+    .val-xs {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--muted);
+    }
+
+    .unit {
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 500;
+      font-family: var(--ui);
+      margin-left: 2px;
+    }
+
+    .row-between {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .ward-vitals {
+      display: flex;
+      gap: 28px;
+      margin-top: 14px;
+    }
 
     .pill {
-      font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
-      padding: 4px 10px; border-radius: 9999px; text-transform: uppercase;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      text-transform: uppercase;
       white-space: nowrap;
     }
-    .pill-green { background: rgba(52, 211, 153, 0.12); color: var(--green); }
-    .pill-amber { background: rgba(251, 191, 36, 0.12); color: var(--amber); }
-    .pill-red { background: rgba(248, 113, 113, 0.14); color: var(--red); }
-    .pill-blue { background: rgba(96, 165, 250, 0.14); color: var(--blue); }
-    .pill-muted { background: rgba(255, 255, 255, 0.06); color: var(--muted); }
 
-    .bar-bg { width: 100%; height: 5px; background: rgba(255,255,255,0.06); border-radius: 3px; overflow: hidden; margin: 14px 0 0 0; }
-    .bar-fill { height: 100%; border-radius: 3px; }
+    .pill-green {
+      background: rgba(52, 211, 153, 0.12);
+      color: var(--green);
+    }
 
-    .trust-dots { display: flex; gap: 14px; font-size: 11px; color: var(--muted); font-weight: 600; }
-    .trust-dots span { display: flex; align-items: center; gap: 5px; }
-    .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
-    .legend { display: flex; gap: 12px; font-size: 11px; color: var(--muted); font-weight: 600; }
-    .legend span { display: flex; align-items: center; gap: 5px; }
+    .pill-amber {
+      background: rgba(251, 191, 36, 0.12);
+      color: var(--amber);
+    }
 
-    .kv-list { margin-top: 12px; display: flex; flex-direction: column; gap: 2px; }
-    .kv { display: flex; justify-content: space-between; font-size: 13px; padding: 8px 0; border-bottom: 1px solid var(--border); }
-    .kv:last-child { border-bottom: none; }
-    .kv span:first-child { color: var(--muted); }
-    .kv span:last-child { font-family: var(--mono); font-weight: 500; }
+    .pill-red {
+      background: rgba(248, 113, 113, 0.14);
+      color: var(--red);
+    }
 
-    .log-list { margin-top: 10px; display: flex; flex-direction: column; gap: 2px; max-height: 160px; overflow-y: auto; }
-    .log-row { font-size: 12px; color: #cbd5e1; padding: 7px 0; border-bottom: 1px solid var(--border); }
+    .pill-blue {
+      background: rgba(96, 165, 250, 0.14);
+      color: var(--blue);
+    }
+
+    .pill-muted {
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--muted);
+    }
+
+    .bar-bg {
+      width: 100%;
+      height: 5px;
+      background: rgba(255, 255, 255, 0.06);
+      border-radius: 3px;
+      overflow: hidden;
+      margin: 14px 0 0 0;
+    }
+
+    .bar-fill {
+      height: 100%;
+      border-radius: 3px;
+    }
+
+    .trust-dots {
+      display: flex;
+      gap: 14px;
+      font-size: 11px;
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .trust-dots span {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    .legend {
+      display: flex;
+      gap: 12px;
+      font-size: 11px;
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .legend span {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .kv-list {
+      margin-top: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .kv {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .kv:last-child {
+      border-bottom: none;
+    }
+
+    .kv span:first-child {
+      color: var(--muted);
+    }
+
+    .kv span:last-child {
+      font-family: var(--mono);
+      font-weight: 500;
+    }
+
+    .log-list {
+      margin-top: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      max-height: 160px;
+      overflow-y: auto;
+    }
+
+    .log-row {
+      font-size: 12px;
+      color: #cbd5e1;
+      padding: 7px 0;
+      border-bottom: 1px solid var(--border);
+    }
 
     /* Hover info bubble */
-    .info { position: relative; display: inline-flex; align-items: center; justify-content: center;
-      width: 15px; height: 15px; margin-left: 6px; border-radius: 50%; font-size: 9px; font-weight: 700;
-      color: var(--dim); border: 1px solid var(--border); cursor: help; vertical-align: middle; text-transform: none; letter-spacing: 0; }
-    .info:hover { color: var(--blue); border-color: var(--blue); }
-    .info .tip { visibility: hidden; opacity: 0; position: absolute; left: 0; bottom: calc(100% + 8px);
-      width: 220px; background: #1a2230; color: #e6ebf2; border: 1px solid rgba(255,255,255,0.1);
-      padding: 8px 10px; border-radius: 10px; font-size: 11px; font-weight: 500; line-height: 1.45;
-      pointer-events: none; z-index: 50; transition: opacity .15s; text-transform: none; letter-spacing: 0; }
-    .info:hover .tip { visibility: visible; opacity: 1; }
+    .info {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 15px;
+      height: 15px;
+      margin-left: 6px;
+      border-radius: 50%;
+      font-size: 9px;
+      font-weight: 700;
+      color: var(--dim);
+      border: 1px solid var(--border);
+      cursor: help;
+      vertical-align: middle;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+
+    .info:hover {
+      color: var(--blue);
+      border-color: var(--blue);
+    }
+
+    .info .tip {
+      visibility: hidden;
+      opacity: 0;
+      position: absolute;
+      left: 0;
+      bottom: calc(100% + 8px);
+      width: 220px;
+      background: #1a2230;
+      color: #e6ebf2;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      padding: 8px 10px;
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 500;
+      line-height: 1.45;
+      pointer-events: none;
+      z-index: 50;
+      transition: opacity .15s;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+
+    .info:hover .tip {
+      visibility: visible;
+      opacity: 1;
+    }
 
     /* Sidebar */
-    .room-header { font-size: 13px; font-weight: 700; color: #f1f5f9; margin-bottom: 6px; }
-    .device-row { background: var(--card); border: 1px solid var(--border); border-radius: 12px;
-      padding: 10px 12px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+    .room-header {
+      font-size: 13px;
+      font-weight: 700;
+      color: #f1f5f9;
+      margin-bottom: 6px;
+    }
+
+    .device-row {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
   </style>
 </head>
 
@@ -183,7 +470,9 @@
   <template id="sensor_tile">
     <div class="tile span-4">
       <div class="row-between">
-        <span class="lbl">{{title}}<span class="info">i<span class="tip">Reliability of this sensor feed (0&ndash;1). Combines timing, jitter, packet delivery and physiological plausibility: timing {{s_l}}, jitter {{s_j}}, packets {{s_p}}, plausibility {{s_d}}.</span></span></span>
+        <span class="lbl">{{title}}<span class="info">i<span class="tip">Reliability of this sensor feed (0&ndash;1).
+              Combines timing, jitter, packet delivery and physiological plausibility: timing {{s_l}}, jitter {{s_j}},
+              packets {{s_p}}, plausibility {{s_d}}.</span></span></span>
         <span class="pill {{p_cls}}">{{st_name}}</span>
       </div>
       <div style="margin-top:16px;">
@@ -204,14 +493,16 @@
     <div class="bento">
       <div class="tile span-8">
         <div class="row-between">
-          <span class="lbl">ECG &middot; Lead II<span class="info">i<span class="tip">Live electrocardiogram trace for this patient.</span></span></span>
+          <span class="lbl">ECG &middot; Lead II<span class="info">i<span class="tip">Live electrocardiogram trace for
+                this patient.</span></span></span>
           <span class="sub">{{pid}} &middot; {{room}}</span>
         </div>
         <div style="margin-top:14px;">{{ecg_svg}}</div>
       </div>
 
       <div class="tile span-4">
-        <div class="lbl">Patient condition<span class="info">i<span class="tip">Rhythm assessment from the bedside AI, plus the estimated chance of arrhythmia.</span></span></div>
+        <div class="lbl">Patient condition<span class="info">i<span class="tip">Rhythm assessment from the bedside AI,
+              plus the estimated chance of arrhythmia.</span></span></div>
         <div class="val-md" style="color:{{rhythm_col}};margin-top:14px;">{{rhythm_txt}}</div>
         <div class="kv-list">
           <div class="kv"><span>Arrhythmia risk</span><span>{{arrhythmia_prob}}%</span></div>
@@ -223,7 +514,8 @@
 
       <div class="tile span-8">
         <div class="row-between">
-          <span class="lbl">Sensor reliability over time<span class="info">i<span class="tip">Dashed lines mark the nominal (0.70) and quarantine (0.45) thresholds.</span></span></span>
+          <span class="lbl">Sensor reliability over time<span class="info">i<span class="tip">Dashed lines mark the
+                nominal (0.70) and quarantine (0.45) thresholds.</span></span></span>
           <span class="legend">
             <span><i class="dot" style="background:#34d399"></i>ECG</span>
             <span><i class="dot" style="background:#60a5fa"></i>SpO2</span>
@@ -247,7 +539,8 @@
   <template id="sidebar_header">
     <div class="lbl" style="margin-bottom:4px;">Nurse station</div>
     <div class="title" style="font-size:18px;">Central ICU Ward</div>
-    <div style="background:#111720;border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:10px 12px;margin:12px 0 14px 0;">
+    <div
+      style="background:#111720;border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:10px 12px;margin:12px 0 14px 0;">
       <div class="row-between">
         <span style="font-size:12px;font-weight:700;color:#f8fafc;">{{station_id}}</span>
         <span class="pill {{role_cls}}">{{role_name}}</span>
@@ -256,7 +549,8 @@
   </template>
 
   <template id="sidebar_failover_banner">
-    <div style="background:rgba(248,113,113,0.14);color:#fecaca;padding:10px 12px;border-radius:12px;font-size:12px;font-weight:700;margin-bottom:12px;">
+    <div
+      style="background:rgba(248,113,113,0.14);color:#fecaca;padding:10px 12px;border-radius:12px;font-size:12px;font-weight:700;margin-bottom:12px;">
       Primary station failed. Standby promoted to leader.
     </div>
   </template>
@@ -264,7 +558,8 @@
   <template id="sidebar_bed_row">
     <strong>{{pid}}</strong> &nbsp; <span class="pill {{pill_cls}}">{{st_lbl}}</span><br>
     <span style="font-size:11px;color:#8a96a6;">{{room_label}}</span><br>
-    <span style="font-size:12px;color:#aab4c2;font-family:'IBM Plex Mono',monospace;">HR {{hr_v}} &middot; SpO2 {{sp_v}}%</span>
+    <span style="font-size:12px;color:#aab4c2;font-family:'IBM Plex Mono',monospace;">HR {{hr_v}} &middot; SpO2
+      {{sp_v}}%</span>
   </template>
 
   <template id="sidebar_unassigned_row">
@@ -276,7 +571,8 @@
 
   <template id="sidebar_bedside_link">
     <div class="sec-label">Bedside monitor</div>
-    <a href="http://localhost:8080" target="_blank" style="font-size:13px;color:#60a5fa;text-decoration:none;font-weight:600;">
+    <a href="http://localhost:8080" target="_blank"
+      style="font-size:13px;color:#60a5fa;text-decoration:none;font-weight:600;">
       Open bedside view &rarr;
     </a>
   </template>
@@ -286,9 +582,11 @@
      7. BED ADMISSION
      ========================================================================== -->
   <template id="admission_banner">
-    <div style="background:#111720;border:1px solid rgba(96,165,250,0.35);border-radius:18px;padding:16px 20px;margin-bottom:18px;">
+    <div
+      style="background:#111720;border:1px solid rgba(96,165,250,0.35);border-radius:18px;padding:16px 20px;margin-bottom:18px;">
       <span style="font-size:16px;font-weight:700;color:#f8fafc;">Add a bed</span>
-      <div style="font-size:13px;color:#8a96a6;margin-top:2px;">Detected bedside units ready to be assigned to a patient bed.</div>
+      <div style="font-size:13px;color:#8a96a6;margin-top:2px;">Detected bedside units ready to be assigned to a patient
+        bed.</div>
     </div>
   </template>
 

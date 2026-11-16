@@ -1,264 +1,629 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ICU Bedside Monitor</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<style>
-  :root {
-    --bg:#0a0e13; --card:#111720; --inner:#0c1117;
-    --border:rgba(255,255,255,.07); --text:#eef2f6; --muted:#8a96a6; --dim:#5d6877;
-    --green:#34d399; --amber:#fbbf24; --red:#f87171; --blue:#60a5fa;
-    --ui:'Manrope',-apple-system,'Segoe UI',sans-serif; --mono:'IBM Plex Mono',ui-monospace,Menlo,monospace;
-  }
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{background:var(--bg);color:var(--text);font-family:var(--ui);padding:28px 32px;-webkit-font-smoothing:antialiased;min-height:100vh}
-  .wrap{max-width:1280px;margin:0 auto}
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ICU Bedside Monitor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+    rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0a0e13;
+      --card: #111720;
+      --inner: #0c1117;
+      --border: rgba(255, 255, 255, .07);
+      --text: #eef2f6;
+      --muted: #8a96a6;
+      --dim: #5d6877;
+      --green: #34d399;
+      --amber: #fbbf24;
+      --red: #f87171;
+      --blue: #60a5fa;
+      --ui: 'Manrope', -apple-system, 'Segoe UI', sans-serif;
+      --mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+    }
 
-  header{display:flex;justify-content:space-between;align-items:center;margin-bottom:22px}
-  h1{font-size:28px;font-weight:800;letter-spacing:-.03em}
-  h1 span{color:var(--dim);font-weight:500;margin:0 6px}
-  .right{display:flex;gap:10px;align-items:center}
-  select{background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:8px 12px;font:600 13px var(--ui);outline:none;cursor:pointer}
-  .status{font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:7px 14px;border-radius:99px;transition:.25s}
-  .s-ok{background:rgba(52,211,153,.12);color:var(--green)}
-  .s-warn{background:rgba(251,191,36,.12);color:var(--amber)}
-  .s-bad{background:rgba(248,113,113,.14);color:var(--red);animation:pulse 1.2s infinite alternate}
-  @keyframes pulse{to{box-shadow:0 0 14px rgba(248,113,113,.35)}}
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0
+    }
 
-  .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px}
-  .tile{background:var(--card);border:1px solid var(--border);border-radius:20px;padding:22px;position:relative;display:flex;flex-direction:column}
-  .c8{grid-column:span 8}.c4{grid-column:span 4}.c6{grid-column:span 6}.c12{grid-column:span 12}
-  @media(max-width:900px){.c8,.c4,.c6{grid-column:span 12}body{padding:18px}}
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--ui);
+      padding: 28px 32px;
+      -webkit-font-smoothing: antialiased;
+      min-height: 100vh
+    }
 
-  .lbl{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);display:flex;align-items:center;gap:7px}
-  .head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
-  .tag{font-size:12px;font-weight:600;padding:4px 10px;border-radius:99px}
-  .t-ok{background:rgba(52,211,153,.12);color:var(--green)}
-  .t-warn{background:rgba(251,191,36,.12);color:var(--amber)}
-  .t-bad{background:rgba(248,113,113,.14);color:var(--red)}
+    .wrap {
+      max-width: 1280px;
+      margin: 0 auto
+    }
 
-  /* info bubble */
-  .info{position:relative;width:16px;height:16px;border-radius:50%;border:1px solid var(--border);color:var(--dim);font:700 10px var(--ui);display:inline-flex;align-items:center;justify-content:center;cursor:help;text-transform:none;letter-spacing:0}
-  .info:hover,.info:focus{color:var(--blue);border-color:var(--blue);outline:none}
-  .tip{visibility:hidden;opacity:0;position:absolute;left:-4px;bottom:calc(100% + 9px);width:230px;background:#1a2230;color:#e6ebf2;border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:9px 11px;font:500 12px/1.45 var(--ui);text-align:left;pointer-events:none;z-index:20;transition:opacity .15s;box-shadow:0 10px 30px rgba(0,0,0,.5)}
-  .info:hover .tip,.info:focus .tip{visibility:visible;opacity:1}
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 22px
+    }
 
-  canvas{width:100%;height:230px;display:block;background:var(--inner);border-radius:14px;border:1px solid var(--border)}
+    h1 {
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: -.03em
+    }
 
-  .big{font:600 64px/1 var(--mono);letter-spacing:-.04em;margin:auto 0 0}
-  .big small{font:500 16px var(--ui);color:var(--muted);letter-spacing:0;margin-left:8px}
-  .ref{margin-top:14px;font-size:12px;color:var(--dim);font-weight:500}
-  .vital-body{flex:1;display:flex;flex-direction:column;justify-content:flex-end;padding-top:24px}
+    h1 span {
+      color: var(--dim);
+      font-weight: 500;
+      margin: 0 6px
+    }
 
-  .cond-title{font-size:22px;font-weight:800;letter-spacing:-.02em;margin-top:6px}
-  .cond-desc{font-size:13.5px;line-height:1.55;color:var(--muted);margin-top:8px}
-  .cond{flex:1;display:flex;flex-direction:column;justify-content:center}
-  .cond-card{border-radius:14px;padding:16px;background:var(--inner);border:1px solid var(--border);transition:.25s}
+    .right {
+      display: flex;
+      gap: 10px;
+      align-items: center
+    }
 
-  /* simulator */
-  details{margin-top:14px;background:var(--card);border:1px solid var(--border);border-radius:20px}
-  summary{list-style:none;cursor:pointer;padding:18px 22px;display:flex;justify-content:space-between;align-items:center}
-  summary::-webkit-details-marker{display:none}
-  summary .chev{color:var(--dim);transition:.2s}
-  details[open] summary .chev{transform:rotate(180deg)}
-  .sim{padding:0 22px 22px}
-  .sim-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}
-  .box{background:var(--inner);border:1px solid var(--border);border-radius:14px;padding:16px}
-  .row{display:flex;justify-content:space-between;font-size:13px;font-weight:600;margin-bottom:12px}
-  .row b{font-family:var(--mono);font-weight:500}
-  input[type=range]{width:100%;accent-color:var(--blue);cursor:pointer}
-  select.full{width:100%}
-  .btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
-  button{background:var(--inner);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:8px 14px;font:600 12.5px var(--ui);cursor:pointer;transition:.15s}
-  button:hover{border-color:rgba(255,255,255,.25);transform:translateY(-1px)}
-  .b-ok{color:var(--green)}.b-bad{color:var(--red)}.b-warn{color:var(--amber)}
-  #fb{font-size:12px;color:var(--green);opacity:0;transition:.3s}#fb.show{opacity:1}
-</style>
+    select {
+      background: var(--card);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 8px 12px;
+      font: 600 13px var(--ui);
+      outline: none;
+      cursor: pointer
+    }
+
+    .status {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      padding: 7px 14px;
+      border-radius: 99px;
+      transition: .25s
+    }
+
+    .s-ok {
+      background: rgba(52, 211, 153, .12);
+      color: var(--green)
+    }
+
+    .s-warn {
+      background: rgba(251, 191, 36, .12);
+      color: var(--amber)
+    }
+
+    .s-bad {
+      background: rgba(248, 113, 113, .14);
+      color: var(--red);
+      animation: pulse 1.2s infinite alternate
+    }
+
+    @keyframes pulse {
+      to {
+        box-shadow: 0 0 14px rgba(248, 113, 113, .35)
+      }
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 14px
+    }
+
+    .tile {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 22px;
+      position: relative;
+      display: flex;
+      flex-direction: column
+    }
+
+    .c8 {
+      grid-column: span 8
+    }
+
+    .c4 {
+      grid-column: span 4
+    }
+
+    .c6 {
+      grid-column: span 6
+    }
+
+    .c12 {
+      grid-column: span 12
+    }
+
+    @media(max-width:900px) {
+
+      .c8,
+      .c4,
+      .c6 {
+        grid-column: span 12
+      }
+
+      body {
+        padding: 18px
+      }
+    }
+
+    .lbl {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .09em;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 7px
+    }
+
+    .head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px
+    }
+
+    .tag {
+      font-size: 12px;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 99px
+    }
+
+    .t-ok {
+      background: rgba(52, 211, 153, .12);
+      color: var(--green)
+    }
+
+    .t-warn {
+      background: rgba(251, 191, 36, .12);
+      color: var(--amber)
+    }
+
+    .t-bad {
+      background: rgba(248, 113, 113, .14);
+      color: var(--red)
+    }
+
+    /* info bubble */
+    .info {
+      position: relative;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      color: var(--dim);
+      font: 700 10px var(--ui);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: help;
+      text-transform: none;
+      letter-spacing: 0
+    }
+
+    .info:hover,
+    .info:focus {
+      color: var(--blue);
+      border-color: var(--blue);
+      outline: none
+    }
+
+    .tip {
+      visibility: hidden;
+      opacity: 0;
+      position: absolute;
+      left: -4px;
+      bottom: calc(100% + 9px);
+      width: 230px;
+      background: #1a2230;
+      color: #e6ebf2;
+      border: 1px solid rgba(255, 255, 255, .1);
+      border-radius: 10px;
+      padding: 9px 11px;
+      font: 500 12px/1.45 var(--ui);
+      text-align: left;
+      pointer-events: none;
+      z-index: 20;
+      transition: opacity .15s;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, .5)
+    }
+
+    .info:hover .tip,
+    .info:focus .tip {
+      visibility: visible;
+      opacity: 1
+    }
+
+    canvas {
+      width: 100%;
+      height: 230px;
+      display: block;
+      background: var(--inner);
+      border-radius: 14px;
+      border: 1px solid var(--border)
+    }
+
+    .big {
+      font: 600 64px/1 var(--mono);
+      letter-spacing: -.04em;
+      margin: auto 0 0
+    }
+
+    .big small {
+      font: 500 16px var(--ui);
+      color: var(--muted);
+      letter-spacing: 0;
+      margin-left: 8px
+    }
+
+    .ref {
+      margin-top: 14px;
+      font-size: 12px;
+      color: var(--dim);
+      font-weight: 500
+    }
+
+    .vital-body {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      padding-top: 24px
+    }
+
+    .cond-title {
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: -.02em;
+      margin-top: 6px
+    }
+
+    .cond-desc {
+      font-size: 13.5px;
+      line-height: 1.55;
+      color: var(--muted);
+      margin-top: 8px
+    }
+
+    .cond {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center
+    }
+
+    .cond-card {
+      border-radius: 14px;
+      padding: 16px;
+      background: var(--inner);
+      border: 1px solid var(--border);
+      transition: .25s
+    }
+
+    /* simulator */
+    details {
+      margin-top: 14px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 20px
+    }
+
+    summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 18px 22px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center
+    }
+
+    summary::-webkit-details-marker {
+      display: none
+    }
+
+    summary .chev {
+      color: var(--dim);
+      transition: .2s
+    }
+
+    details[open] summary .chev {
+      transform: rotate(180deg)
+    }
+
+    .sim {
+      padding: 0 22px 22px
+    }
+
+    .sim-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 14px
+    }
+
+    .box {
+      background: var(--inner);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px
+    }
+
+    .row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 12px
+    }
+
+    .row b {
+      font-family: var(--mono);
+      font-weight: 500
+    }
+
+    input[type=range] {
+      width: 100%;
+      accent-color: var(--blue);
+      cursor: pointer
+    }
+
+    select.full {
+      width: 100%
+    }
+
+    .btns {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 16px
+    }
+
+    button {
+      background: var(--inner);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 8px 14px;
+      font: 600 12.5px var(--ui);
+      cursor: pointer;
+      transition: .15s
+    }
+
+    button:hover {
+      border-color: rgba(255, 255, 255, .25);
+      transform: translateY(-1px)
+    }
+
+    .b-ok {
+      color: var(--green)
+    }
+
+    .b-bad {
+      color: var(--red)
+    }
+
+    .b-warn {
+      color: var(--amber)
+    }
+
+    #fb {
+      font-size: 12px;
+      color: var(--green);
+      opacity: 0;
+      transition: .3s
+    }
+
+    #fb.show {
+      opacity: 1
+    }
+  </style>
 </head>
+
 <body>
-<div class="wrap">
-  <header>
-    <h1>ICU<span>&middot;</span><b id="bedTitle" style="font-weight:800">Bed 1</b></h1>
-    <div class="right">
-      <select id="bedSelect" style="display:none" onchange="switchBed(this.value)"></select>
-      <div class="status s-ok" id="overall">Stable</div>
-    </div>
-  </header>
+  <div class="wrap">
+    <header>
+      <h1>ICU<span>&middot;</span><b id="bedTitle" style="font-weight:800">Bed 1</b></h1>
+      <div class="right">
+        <select id="bedSelect" style="display:none" onchange="switchBed(this.value)"></select>
+        <div class="status s-ok" id="overall">Stable</div>
+      </div>
+    </header>
 
-  <main class="grid">
-    <section class="tile c8">
-      <div class="head">
-        <div class="lbl">ECG &middot; Lead II
-          <span class="info" tabindex="0">i<span class="tip">Live electrocardiogram. Shows the electrical rhythm of the heart in real time.</span></span>
+    <main class="grid">
+      <section class="tile c8">
+        <div class="head">
+          <div class="lbl">ECG &middot; Lead II
+            <span class="info" tabindex="0">i<span class="tip">Live electrocardiogram. Shows the electrical rhythm of
+                the heart in real time.</span></span>
+          </div>
+          <span class="tag t-ok" id="ecgTag">Normal rhythm</span>
         </div>
-        <span class="tag t-ok" id="ecgTag">Normal rhythm</span>
-      </div>
-      <canvas id="ecg" width="800" height="230"></canvas>
-    </section>
+        <canvas id="ecg" width="800" height="230"></canvas>
+      </section>
 
-    <section class="tile c4">
-      <div class="head">
-        <div class="lbl">Patient condition
-          <span class="info" tabindex="0">i<span class="tip">Plain-language summary of the patient's rhythm, oxygen level and heart rate.</span></span>
+      <section class="tile c4">
+        <div class="head">
+          <div class="lbl">Patient condition
+            <span class="info" tabindex="0">i<span class="tip">Plain-language summary of the patient's rhythm, oxygen
+                level and heart rate.</span></span>
+          </div>
+        </div>
+        <div class="cond">
+          <div class="cond-card" id="condCard">
+            <span class="tag t-ok" id="condTag">Healthy</span>
+            <div class="cond-title" id="condTitle">Patient is healthy</div>
+            <div class="cond-desc" id="condDesc">Heart rhythm, heart rate and oxygen level are all within normal limits.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="tile c6">
+        <div class="head">
+          <div class="lbl">Heart rate
+            <span class="info" tabindex="0">i<span class="tip">Beats per minute. Normal resting adult range is
+                60&ndash;100.</span></span>
+          </div>
+          <span class="tag t-ok" id="hrTag">Normal</span>
+        </div>
+        <div class="vital-body">
+          <div class="big" id="hr" style="color:var(--blue)">--<small>bpm</small></div>
+          <div class="ref">Normal 60&ndash;100 bpm</div>
+        </div>
+      </section>
+
+      <section class="tile c6">
+        <div class="head">
+          <div class="lbl">Oxygen saturation
+            <span class="info" tabindex="0">i<span class="tip">SpO2: percentage of oxygen carried in the blood.
+                95&ndash;100% is normal; below 90% is concerning.</span></span>
+          </div>
+          <span class="tag t-ok" id="spTag">Normal</span>
+        </div>
+        <div class="vital-body">
+          <div class="big" id="sp" style="color:var(--green)">--<small>%</small></div>
+          <div class="ref">Normal 95&ndash;100 %</div>
+        </div>
+      </section>
+    </main>
+
+    <details>
+      <summary>
+        <span class="lbl">Scenario simulator
+          <span class="info" tabindex="0">i<span class="tip">Demo tool: adjust this patient's vitals and rhythm to see
+              how the monitor responds.</span></span>
+        </span>
+        <span style="display:flex;gap:14px;align-items:center"><span id="fb">&#10003; Updated</span><span
+            class="chev">&#9662;</span></span>
+      </summary>
+      <div class="sim">
+        <div class="sim-grid">
+          <div class="box">
+            <div class="row"><span>Heart rate</span><b id="hrLbl">75 bpm</b></div>
+            <input type="range" id="tHr" min="40" max="200" value="75" oninput="send()">
+          </div>
+          <div class="box">
+            <div class="row"><span>Oxygen saturation</span><b id="spLbl">98 %</b></div>
+            <input type="range" id="tSp" min="70" max="100" value="98" oninput="send()">
+          </div>
+          <div class="box">
+            <div class="row"><span>Rhythm</span></div>
+            <select class="full" id="tEcg" onchange="send()">
+              <option value="normal">Normal sinus rhythm</option>
+              <option value="arrhythmia">Ventricular arrhythmia</option>
+              <option value="malicious">Irregular signal</option>
+            </select>
+          </div>
+        </div>
+        <div class="btns">
+          <button class="b-ok" onclick="preset('healthy')">Healthy</button>
+          <button class="b-bad" onclick="preset('arrhythmia')">Arrhythmia</button>
+          <button class="b-warn" onclick="preset('tachy')">Tachycardia</button>
+          <button class="b-warn" onclick="preset('hypoxia')">Low oxygen</button>
         </div>
       </div>
-      <div class="cond">
-        <div class="cond-card" id="condCard">
-          <span class="tag t-ok" id="condTag">Healthy</span>
-          <div class="cond-title" id="condTitle">Patient is healthy</div>
-          <div class="cond-desc" id="condDesc">Heart rhythm, heart rate and oxygen level are all within normal limits.</div>
-        </div>
-      </div>
-    </section>
+    </details>
+  </div>
 
-    <section class="tile c6">
-      <div class="head">
-        <div class="lbl">Heart rate
-          <span class="info" tabindex="0">i<span class="tip">Beats per minute. Normal resting adult range is 60&ndash;100.</span></span>
-        </div>
-        <span class="tag t-ok" id="hrTag">Normal</span>
-      </div>
-      <div class="vital-body">
-        <div class="big" id="hr" style="color:var(--blue)">--<small>bpm</small></div>
-        <div class="ref">Normal 60&ndash;100 bpm</div>
-      </div>
-    </section>
+  <script>
+    let bed = null, wave = [], alarm = false;
+    const cv = document.getElementById('ecg'), cx = cv.getContext('2d');
+    const $ = id => document.getElementById(id);
+    const nice = b => (b || 'Bed 1').replace('_', ' ');
+    function switchBed(b) { bed = b; $('bedTitle').textContent = nice(b); poll() }
 
-    <section class="tile c6">
-      <div class="head">
-        <div class="lbl">Oxygen saturation
-          <span class="info" tabindex="0">i<span class="tip">SpO2: percentage of oxygen carried in the blood. 95&ndash;100% is normal; below 90% is concerning.</span></span>
-        </div>
-        <span class="tag t-ok" id="spTag">Normal</span>
-      </div>
-      <div class="vital-body">
-        <div class="big" id="sp" style="color:var(--green)">--<small>%</small></div>
-        <div class="ref">Normal 95&ndash;100 %</div>
-      </div>
-    </section>
-  </main>
+    function resize() { const w = Math.floor(cv.getBoundingClientRect().width) || 800; if (w > 50) { cv.width = w; cv.height = 230 } draw() }
+    addEventListener('resize', resize);
 
-  <details>
-    <summary>
-      <span class="lbl">Scenario simulator
-        <span class="info" tabindex="0">i<span class="tip">Demo tool: adjust this patient's vitals and rhythm to see how the monitor responds.</span></span>
-      </span>
-      <span style="display:flex;gap:14px;align-items:center"><span id="fb">&#10003; Updated</span><span class="chev">&#9662;</span></span>
-    </summary>
-    <div class="sim">
-      <div class="sim-grid">
-        <div class="box">
-          <div class="row"><span>Heart rate</span><b id="hrLbl">75 bpm</b></div>
-          <input type="range" id="tHr" min="40" max="200" value="75" oninput="send()">
-        </div>
-        <div class="box">
-          <div class="row"><span>Oxygen saturation</span><b id="spLbl">98 %</b></div>
-          <input type="range" id="tSp" min="70" max="100" value="98" oninput="send()">
-        </div>
-        <div class="box">
-          <div class="row"><span>Rhythm</span></div>
-          <select class="full" id="tEcg" onchange="send()">
-            <option value="normal">Normal sinus rhythm</option>
-            <option value="arrhythmia">Ventricular arrhythmia</option>
-            <option value="malicious">Irregular signal</option>
-          </select>
-        </div>
-      </div>
-      <div class="btns">
-        <button class="b-ok" onclick="preset('healthy')">Healthy</button>
-        <button class="b-bad" onclick="preset('arrhythmia')">Arrhythmia</button>
-        <button class="b-warn" onclick="preset('tachy')">Tachycardia</button>
-        <button class="b-warn" onclick="preset('hypoxia')">Low oxygen</button>
-      </div>
-    </div>
-  </details>
-</div>
+    function draw() {
+      if (!wave.length) return;
+      const w = cv.width, h = cv.height, mid = h * .56;
+      cx.fillStyle = '#0c1117'; cx.fillRect(0, 0, w, h);
+      cx.strokeStyle = 'rgba(255,255,255,.035)'; cx.lineWidth = 1;
+      for (let x = 0; x < w; x += 36) { cx.beginPath(); cx.moveTo(x, 0); cx.lineTo(x, h); cx.stroke() }
+      for (let y = 0; y < h; y += 36) { cx.beginPath(); cx.moveTo(0, y); cx.lineTo(w, y); cx.stroke() }
+      cx.strokeStyle = alarm ? '#f87171' : '#34d399'; cx.lineWidth = 2.2; cx.lineJoin = 'round';
+      cx.shadowColor = alarm ? 'rgba(248,113,113,.5)' : 'rgba(52,211,153,.45)'; cx.shadowBlur = 8;
+      cx.beginPath();
+      const st = w / (wave.length - 1);
+      wave.forEach((v, i) => { const y = mid - v * (h * .3); i ? cx.lineTo(i * st, y) : cx.moveTo(0, y) });
+      cx.stroke(); cx.shadowBlur = 0;
+    }
 
-<script>
-let bed=null,wave=[],alarm=false;
-const cv=document.getElementById('ecg'),cx=cv.getContext('2d');
-const $=id=>document.getElementById(id);
-const nice=b=>(b||'Bed 1').replace('_',' ');
-function switchBed(b){bed=b;$('bedTitle').textContent=nice(b);poll()}
+    function set(el, cls, txt) { el.className = cls; el.textContent = txt }
 
-function resize(){const w=Math.floor(cv.getBoundingClientRect().width)||800;if(w>50){cv.width=w;cv.height=230}draw()}
-addEventListener('resize',resize);
+    async function poll() {
+      try {
+        const r = await fetch('/api/state'); if (!r.ok) return;
+        const d = await r.json(), beds = Object.keys(d.beds || {}); if (!beds.length) return;
+        const sel = $('bedSelect');
+        if (beds.length > 1) { sel.style.display = ''; if (sel.options.length !== beds.length) sel.innerHTML = beds.map(k => `<option value="${k}">${nice(k)}</option>`).join('') }
+        if (!bed || !d.beds[bed]) bed = beds[0];
+        if (sel.value !== bed) sel.value = bed;
+        $('bedTitle').textContent = nice(bed);
+        const b = d.beds[bed]; if (!b) return;
 
-function draw(){
-  if(!wave.length)return;
-  const w=cv.width,h=cv.height,mid=h*.56;
-  cx.fillStyle='#0c1117';cx.fillRect(0,0,w,h);
-  cx.strokeStyle='rgba(255,255,255,.035)';cx.lineWidth=1;
-  for(let x=0;x<w;x+=36){cx.beginPath();cx.moveTo(x,0);cx.lineTo(x,h);cx.stroke()}
-  for(let y=0;y<h;y+=36){cx.beginPath();cx.moveTo(0,y);cx.lineTo(w,y);cx.stroke()}
-  cx.strokeStyle=alarm?'#f87171':'#34d399';cx.lineWidth=2.2;cx.lineJoin='round';
-  cx.shadowColor=alarm?'rgba(248,113,113,.5)':'rgba(52,211,153,.45)';cx.shadowBlur=8;
-  cx.beginPath();
-  const st=w/(wave.length-1);
-  wave.forEach((v,i)=>{const y=mid-v*(h*.3);i?cx.lineTo(i*st,y):cx.moveTo(0,y)});
-  cx.stroke();cx.shadowBlur=0;
-}
+        const hr = b.hr, sp = b.spo2;
+        $('hr').innerHTML = `${hr ?? '--'}<small>bpm</small>`;
+        $('sp').innerHTML = `${sp ?? '--'}<small>%</small>`;
 
-function set(el,cls,txt){el.className=cls;el.textContent=txt}
+        // heart rate / spo2 tags
+        if (hr > 100) set($('hrTag'), 'tag t-warn', 'Fast'); else if (hr < 60) set($('hrTag'), 'tag t-warn', 'Slow'); else set($('hrTag'), 'tag t-ok', 'Normal');
+        if (sp < 90) set($('spTag'), 'tag t-bad', 'Critical'); else if (sp < 95) set($('spTag'), 'tag t-warn', 'Low'); else set($('spTag'), 'tag t-ok', 'Normal');
 
-async function poll(){
-  try{
-    const r=await fetch('/api/state');if(!r.ok)return;
-    const d=await r.json(),beds=Object.keys(d.beds||{});if(!beds.length)return;
-    const sel=$('bedSelect');
-    if(beds.length>1){sel.style.display='';if(sel.options.length!==beds.length)sel.innerHTML=beds.map(k=>`<option value="${k}">${nice(k)}</option>`).join('')}
-    if(!bed||!d.beds[bed])bed=beds[0];
-    if(sel.value!==bed)sel.value=bed;
-    $('bedTitle').textContent=nice(bed);
-    const b=d.beds[bed];if(!b)return;
+        wave = b.ecg_wave || [];
+        let v = 0; if (wave.length) { const m = wave.reduce((a, c) => a + c, 0) / wave.length; v = wave.reduce((a, c) => a + (c - m) ** 2, 0) / wave.length }
+        const c = (b.chaos && b.chaos.vitals && b.chaos.vitals.ecg_condition) || (b.chaos && b.chaos.Agent_ECG && b.chaos.Agent_ECG.condition);
+        const arr = c === 'arrhythmia' || v > .2, art = !arr && c === 'malicious';
+        alarm = arr;
 
-    const hr=b.hr,sp=b.spo2;
-    $('hr').innerHTML=`${hr??'--'}<small>bpm</small>`;
-    $('sp').innerHTML=`${sp??'--'}<small>%</small>`;
+        set($('ecgTag'), 'tag ' + (arr ? 't-bad' : art ? 't-warn' : 't-ok'), arr ? 'Arrhythmia' : art ? 'Irregular signal' : 'Normal rhythm');
 
-    // heart rate / spo2 tags
-    if(hr>100)set($('hrTag'),'tag t-warn','Fast');else if(hr<60)set($('hrTag'),'tag t-warn','Slow');else set($('hrTag'),'tag t-ok','Normal');
-    if(sp<90)set($('spTag'),'tag t-bad','Critical');else if(sp<95)set($('spTag'),'tag t-warn','Low');else set($('spTag'),'tag t-ok','Normal');
+        let o, tagc, tagt, title, desc, col;
+        if (arr) { o = ['status s-bad', 'Critical']; tagc = 't-bad'; tagt = 'Needs attention'; title = 'Arrhythmia detected'; desc = 'Abnormal ventricular rhythm on the ECG. Please assess the patient immediately.'; col = '248,113,113' }
+        else if (sp < 90) { o = ['status s-bad', 'Low oxygen']; tagc = 't-bad'; tagt = 'Needs attention'; title = 'Low blood oxygen'; desc = 'Oxygen saturation is dangerously low. Check airway and consider supplemental oxygen.'; col = '248,113,113' }
+        else if (art) { o = ['status s-warn', 'Check leads']; tagc = 't-warn'; tagt = 'Check'; title = 'Unclear ECG signal'; desc = 'The ECG trace is erratic. Check that electrodes are attached properly.'; col = '251,191,36' }
+        else if (hr > 130 || hr < 45) { o = ['status s-warn', 'Warning']; tagc = 't-warn'; tagt = 'Warning'; title = hr > 130 ? 'Heart rate very high' : 'Heart rate very low'; desc = `Heart rate is ${hr} bpm, outside the safe range. Please assess the patient.`; col = '251,191,36' }
+        else { o = ['status s-ok', 'Stable']; tagc = 't-ok'; tagt = 'Healthy'; title = 'Patient is healthy'; desc = 'Heart rhythm, heart rate and oxygen level are all within normal limits.'; col = '' }
+        $('overall').className = o[0]; $('overall').textContent = o[1];
+        set($('condTag'), 'tag ' + tagc, tagt); $('condTitle').textContent = title; $('condDesc').textContent = desc;
+        const cc = $('condCard'); cc.style.background = col ? `rgba(${col},.08)` : ''; cc.style.borderColor = col ? `rgba(${col},.3)` : '';
+        draw();
+      } catch (e) { }
+    }
 
-    wave=b.ecg_wave||[];
-    let v=0;if(wave.length){const m=wave.reduce((a,c)=>a+c,0)/wave.length;v=wave.reduce((a,c)=>a+(c-m)**2,0)/wave.length}
-    const c=(b.chaos&&b.chaos.vitals&&b.chaos.vitals.ecg_condition)||(b.chaos&&b.chaos.Agent_ECG&&b.chaos.Agent_ECG.condition);
-    const arr=c==='arrhythmia'||v>.2, art=!arr&&c==='malicious';
-    alarm=arr;
-
-    set($('ecgTag'),'tag '+(arr?'t-bad':art?'t-warn':'t-ok'),arr?'Arrhythmia':art?'Irregular signal':'Normal rhythm');
-
-    let o,tagc,tagt,title,desc,col;
-    if(arr){o=['status s-bad','Critical'];tagc='t-bad';tagt='Needs attention';title='Arrhythmia detected';desc='Abnormal ventricular rhythm on the ECG. Please assess the patient immediately.';col='248,113,113'}
-    else if(sp<90){o=['status s-bad','Low oxygen'];tagc='t-bad';tagt='Needs attention';title='Low blood oxygen';desc='Oxygen saturation is dangerously low. Check airway and consider supplemental oxygen.';col='248,113,113'}
-    else if(art){o=['status s-warn','Check leads'];tagc='t-warn';tagt='Check';title='Unclear ECG signal';desc='The ECG trace is erratic. Check that electrodes are attached properly.';col='251,191,36'}
-    else if(hr>130||hr<45){o=['status s-warn','Warning'];tagc='t-warn';tagt='Warning';title=hr>130?'Heart rate very high':'Heart rate very low';desc=`Heart rate is ${hr} bpm, outside the safe range. Please assess the patient.`;col='251,191,36'}
-    else{o=['status s-ok','Stable'];tagc='t-ok';tagt='Healthy';title='Patient is healthy';desc='Heart rhythm, heart rate and oxygen level are all within normal limits.';col=''}
-    $('overall').className=o[0];$('overall').textContent=o[1];
-    set($('condTag'),'tag '+tagc,tagt);$('condTitle').textContent=title;$('condDesc').textContent=desc;
-    const cc=$('condCard');cc.style.background=col?`rgba(${col},.08)`:'';cc.style.borderColor=col?`rgba(${col},.3)`:'';
-    draw();
-  }catch(e){}
-}
-
-async function send(){
-  const hr=+$('tHr').value,sp=+$('tSp').value,ec=$('tEcg').value;
-  $('hrLbl').textContent=hr+' bpm';$('spLbl').textContent=sp+' %';
-  try{
-    const r=await fetch('/api/manipulate',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({patient_id:bed||'Bed_1',target_hr:hr,target_spo2:sp,ecg_condition:ec,delay_ms:10,drop_rate:0,malicious:ec==='malicious',overload_gpu:false,use_relay_b:false})});
-    if(r.ok){$('fb').classList.add('show');setTimeout(()=>$('fb').classList.remove('show'),1800)}
-  }catch(e){}
-}
-function preset(n){
-  const P={healthy:[75,98,'normal'],arrhythmia:[142,93,'arrhythmia'],tachy:[150,97,'normal'],hypoxia:[108,86,'normal']}[n];
-  $('tHr').value=P[0];$('tSp').value=P[1];$('tEcg').value=P[2];send();
-}
-resize();setInterval(poll,350);poll();
-</script>
+    async function send() {
+      const hr = +$('tHr').value, sp = +$('tSp').value, ec = $('tEcg').value;
+      $('hrLbl').textContent = hr + ' bpm'; $('spLbl').textContent = sp + ' %';
+      try {
+        const r = await fetch('/api/manipulate', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ patient_id: bed || 'Bed_1', target_hr: hr, target_spo2: sp, ecg_condition: ec, delay_ms: 10, drop_rate: 0, malicious: ec === 'malicious', overload_gpu: false, use_relay_b: false })
+        });
+        if (r.ok) { $('fb').classList.add('show'); setTimeout(() => $('fb').classList.remove('show'), 1800) }
+      } catch (e) { }
+    }
+    function preset(n) {
+      const P = { healthy: [75, 98, 'normal'], arrhythmia: [142, 93, 'arrhythmia'], tachy: [150, 97, 'normal'], hypoxia: [108, 86, 'normal'] }[n];
+      $('tHr').value = P[0]; $('tSp').value = P[1]; $('tEcg').value = P[2]; send();
+    }
+    resize(); setInterval(poll, 350); poll();
+  </script>
 </body>
+
 </html>
