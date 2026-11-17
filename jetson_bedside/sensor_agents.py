@@ -25,7 +25,18 @@ def default_bed_chaos():
         "Agent_ECG": {"delay_ms": 12, "drop_rate": 0.0, "malicious": False},
         "Agent_SpO2": {"delay_ms": 10, "drop_rate": 0.0, "malicious": False},
         "Agent_HR": {"delay_ms": 10, "drop_rate": 0.0, "malicious": False},
+        "Agent_CO2": {"delay_ms": 10, "drop_rate": 0.0, "malicious": False},
+        "Agent_IBP": {"delay_ms": 10, "drop_rate": 0.0, "malicious": False},
+        "Agent_NIBP": {"delay_ms": 15, "drop_rate": 0.0, "malicious": False},
         "Orin_Link": {"overload_gpu": False, "use_relay_b": False},
+        "vitals": {
+            "target_hr": 75,
+            "target_spo2": 98,
+            "target_co2": 38,
+            "target_sys": 120,
+            "target_dia": 80,
+            "ecg_condition": "normal",
+        },
     }
 
 
@@ -179,6 +190,9 @@ class SensorAgentThread(threading.Thread):
             vitals_cfg = bed_chaos.get("vitals", {})
             target_hr = vitals_cfg.get("target_hr") or bed_chaos.get("Agent_HR", {}).get("target_hr")
             target_spo2 = vitals_cfg.get("target_spo2") or bed_chaos.get("Agent_SpO2", {}).get("target_spo2")
+            target_co2 = vitals_cfg.get("target_co2") or bed_chaos.get("Agent_CO2", {}).get("target_co2")
+            target_sys = vitals_cfg.get("target_sys") or bed_chaos.get("Agent_IBP", {}).get("target_sys") or bed_chaos.get("Agent_NIBP", {}).get("target_sys")
+            target_dia = vitals_cfg.get("target_dia") or bed_chaos.get("Agent_IBP", {}).get("target_dia") or bed_chaos.get("Agent_NIBP", {}).get("target_dia")
             ecg_condition = vitals_cfg.get("ecg_condition") or bed_chaos.get("Agent_ECG", {}).get("condition", "normal")
 
             value = 0
@@ -202,6 +216,29 @@ class SensorAgentThread(threading.Thread):
                     value = int(np.clip(int(target_hr) + random.randint(-1, 1), 30, 240))
                 else:
                     value = random.randint(68, 88) + self.hr_offset
+            elif self.agent_id == "Agent_CO2":
+                if malicious:
+                    value = random.choice([0, 12, 138])
+                elif target_co2 is not None:
+                    value = int(np.clip(int(target_co2) + random.randint(-1, 1), 10, 90))
+                else:
+                    value = random.randint(36, 42)
+            elif self.agent_id == "Agent_IBP":
+                if malicious:
+                    value = {"sys": 0, "dia": 0, "map": 0, "formatted": "0/0 (0)"}
+                else:
+                    base_sys = int(target_sys if target_sys is not None else 120) + random.randint(-2, 2)
+                    base_dia = int(target_dia if target_dia is not None else 80) + random.randint(-1, 1)
+                    mean_map = int(round((base_sys + 2 * base_dia) / 3))
+                    value = {"sys": base_sys, "dia": base_dia, "map": mean_map, "formatted": f"{base_sys}/{base_dia} ({mean_map})"}
+            elif self.agent_id == "Agent_NIBP":
+                if malicious:
+                    value = {"sys": 290, "dia": 180, "map": 216, "formatted": "290/180"}
+                else:
+                    base_sys = int(target_sys if target_sys is not None else 120) + random.randint(-3, 3)
+                    base_dia = int(target_dia if target_dia is not None else 80) + random.randint(-2, 2)
+                    mean_map = int(round((base_sys + 2 * base_dia) / 3))
+                    value = {"sys": base_sys, "dia": base_dia, "map": mean_map, "formatted": f"{base_sys}/{base_dia}"}
 
             payload = {
                 "patient_id": self.patient_id,
@@ -261,7 +298,7 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    agent_names = ["Agent_ECG", "Agent_SpO2", "Agent_HR"]
+    agent_names = ["Agent_ECG", "Agent_SpO2", "Agent_HR", "Agent_CO2", "Agent_IBP", "Agent_NIBP"]
     threads = []
 
     print("=" * 64)

@@ -20,7 +20,7 @@ trust-aware-healthcare-project/
 ├── jetson_bedside/                        # Bedside Node (runs on NVIDIA Jetson Orin or simulated locally)
 │   ├── bedside_monitor.html               # Local Bedside Monitor UI (http://localhost:8080)
 │   ├── jetson_edge_brain.py               # Edge 1D-CNN inference, local alarm, and HTTP server (:8080)
-│   ├── sensor_agents.py                   # Bedside sensor streamers (Agent_ECG, Agent_SpO2, Agent_HR)
+│   ├── sensor_agents.py                   # Bedside sensor streamers (ECG, SpO2, HR, EtCO2, IBP, NIBP)
 │   ├── ecg_anomaly.onnx                   # Pre-built 1D-CNN ECG arrhythmia model
 │   ├── make_model.py                      # Script to regenerate ecg_anomaly.onnx
 │   ├── chaos.json                         # Local bedside vitals & fault configuration
@@ -116,7 +116,7 @@ streamlit run nurse_station/dashboard.py
 What this script does automatically:
 1. Creates a local Python virtual environment (`venv/`) and installs all packages from `requirements.txt` (`paho-mqtt`, `streamlit`, `pandas`, `numpy`, `onnxruntime`, `matplotlib`).
 2. Checks if an MQTT broker is listening on port `1883` and starts `mosquitto` if needed.
-3. Launches 3 simulated Bedside Jetson Nodes (`Bed_1`, `Bed_2`, `Bed_3`) streaming live 250 Hz ECG, SpO2, and HR telemetry.
+3. Launches 3 simulated Bedside Jetson Nodes (`Bed_1`, `Bed_2`, `Bed_3`) streaming live 250 Hz ECG, SpO2, HR, EtCO2, IBP, and NIBP telemetry.
 4. Starts the Local Bedside Monitor (`:8080`) and Central Nurse Station (`:8501`).
 
 ---
