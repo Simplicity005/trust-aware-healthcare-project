@@ -32,11 +32,14 @@ import streamlit as st
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_FILE = os.path.join(BASE_DIR, "ecg_anomaly.onnx")
 HTML_TEMPLATE_FILE = os.path.join(BASE_DIR, "dashboard.html")
-AGENT_IDS = ["Agent_ECG", "Agent_SpO2", "Agent_HR"]
+AGENT_IDS = ["Agent_ECG", "Agent_SpO2", "Agent_HR", "Agent_CO2", "Agent_IBP", "Agent_NIBP"]
 AGENT_LABELS = {
     "Agent_ECG": "ECG Sensor",
     "Agent_SpO2": "SpO2 Sensor",
     "Agent_HR": "Heart Rate Sensor",
+    "Agent_CO2": "EtCO2 Capnography",
+    "Agent_IBP": "Invasive Arterial BP",
+    "Agent_NIBP": "Non-Invasive Cuff BP",
 }
 HOSPITAL_DEPARTMENTS = [
     ("ICU", "Intensive Care Unit"),
@@ -102,6 +105,24 @@ class AgentTrustTracker:
         if self.agent_id == "Agent_HR":
             val = int(value or 0)
             return 1.0 if (40 <= val <= 190) else 0.0
+
+        if self.agent_id == "Agent_CO2":
+            val = int(value or 0)
+            return 1.0 if (15 <= val <= 75) else 0.0
+
+        if self.agent_id in ("Agent_IBP", "Agent_NIBP"):
+            if isinstance(value, dict):
+                sys_v = int(value.get("sys", 120))
+                dia_v = int(value.get("dia", 80))
+            elif isinstance(value, str) and "/" in value:
+                try:
+                    sys_v = int(value.split("/")[0])
+                    dia_v = int(value.split("/")[1].split()[0])
+                except Exception:
+                    sys_v, dia_v = 120, 80
+            else:
+                sys_v, dia_v = int(value or 120), 80
+            return 1.0 if (50 <= sys_v <= 250 and 25 <= dia_v <= 140 and sys_v > dia_v) else 0.0
 
         return 1.0
 
@@ -219,7 +240,14 @@ class PatientBedMonitor:
             "arrhythmia_prob": 0.02,
             "local_bed_alarm": False,
             "sensor_conflict": False,
-            "latest_vitals": {"hr": 75, "spo2": 98, "ecg_variance": 0.04},
+            "latest_vitals": {
+                "hr": 75,
+                "spo2": 98,
+                "co2": 38,
+                "ibp": {"sys": 120, "dia": 80, "map": 93, "formatted": "120/80 (93)"},
+                "nibp": {"sys": 120, "dia": 80, "map": 93, "formatted": "120/80"},
+                "ecg_variance": 0.04,
+            },
             "routing_path": "primary",
             "timestamp": time.time(),
         }
@@ -490,6 +518,9 @@ class MultiPatientTrustEngine:
                         "Agent_ECG": bed.agents["Agent_ECG"].trust_score,
                         "Agent_SpO2": bed.agents["Agent_SpO2"].trust_score,
                         "Agent_HR": bed.agents["Agent_HR"].trust_score,
+                        "Agent_CO2": bed.agents["Agent_CO2"].trust_score,
+                        "Agent_IBP": bed.agents["Agent_IBP"].trust_score,
+                        "Agent_NIBP": bed.agents["Agent_NIBP"].trust_score,
                     }
                 )
 
@@ -582,10 +613,19 @@ class MultiPatientTrustEngine:
                         bed.latest_ecg_wave = wave_list
                         hr_val = 72 + (sum(ord(c) for c in pid) % 7) + int(np.random.randint(-1, 2))
                         spo2_val = 98 + int(np.random.randint(0, 2))
+                        co2_val = 37 + (sum(ord(c) for c in pid) % 5) + int(np.random.randint(-1, 2))
+                        sys_val = 118 + (sum(ord(c) for c in pid) % 8) + int(np.random.randint(-2, 3))
+                        dia_val = 78 + (sum(ord(c) for c in pid) % 5) + int(np.random.randint(-1, 2))
+                        map_val = int(round((sys_val + 2 * dia_val) / 3))
+                        ibp_val = {"sys": sys_val, "dia": dia_val, "map": map_val, "formatted": f"{sys_val}/{dia_val} ({map_val})"}
+                        nibp_val = {"sys": sys_val, "dia": dia_val, "map": map_val, "formatted": f"{sys_val}/{dia_val}"}
                         var_val = float(np.var(ecg))
                         bed.edge_summary["latest_vitals"] = {
                             "hr": hr_val,
                             "spo2": spo2_val,
+                            "co2": co2_val,
+                            "ibp": ibp_val,
+                            "nibp": nibp_val,
                             "ecg_variance": round(var_val, 4),
                         }
                         bed.edge_summary["inf_ms"] = round(0.22 + float(np.random.uniform(0.01, 0.06)), 2)
@@ -596,6 +636,9 @@ class MultiPatientTrustEngine:
                         )
                         bed.agents["Agent_SpO2"].update(seq=step, sent_ts=now - 0.01, recv_ts=now, value=spo2_val)
                         bed.agents["Agent_HR"].update(seq=step, sent_ts=now - 0.01, recv_ts=now, value=hr_val)
+                        bed.agents["Agent_CO2"].update(seq=step, sent_ts=now - 0.01, recv_ts=now, value=co2_val)
+                        bed.agents["Agent_IBP"].update(seq=step, sent_ts=now - 0.01, recv_ts=now, value=ibp_val)
+                        bed.agents["Agent_NIBP"].update(seq=step, sent_ts=now - 0.01, recv_ts=now, value=nibp_val)
                         if step % 3 == 0:
                             bed.trust_history.append(
                                 {
@@ -603,6 +646,9 @@ class MultiPatientTrustEngine:
                                     "Agent_ECG": bed.agents["Agent_ECG"].trust_score,
                                     "Agent_SpO2": bed.agents["Agent_SpO2"].trust_score,
                                     "Agent_HR": bed.agents["Agent_HR"].trust_score,
+                                    "Agent_CO2": bed.agents["Agent_CO2"].trust_score,
+                                    "Agent_IBP": bed.agents["Agent_IBP"].trust_score,
+                                    "Agent_NIBP": bed.agents["Agent_NIBP"].trust_score,
                                 }
                             )
 
@@ -809,8 +855,11 @@ def svg_trust_chart(history, width=600, height=130):
         f'<line x1="0" y1="{y70:.1f}" x2="{width}" y2="{y70:.1f}" stroke="#22c55e" stroke-dasharray="4 4" stroke-width="1"/>'
         f'<line x1="0" y1="{y45:.1f}" x2="{width}" y2="{y45:.1f}" stroke="#f87171" stroke-dasharray="4 4" stroke-width="1"/>'
         f'<polyline fill="none" stroke="#34d399" stroke-width="2" points="{line_pts("Agent_ECG")}"/>'
-        f'<polyline fill="none" stroke="#3b82f6" stroke-width="2" points="{line_pts("Agent_SpO2")}"/>'
+        f'<polyline fill="none" stroke="#60a5fa" stroke-width="2" points="{line_pts("Agent_SpO2")}"/>'
         f'<polyline fill="none" stroke="#fbbf24" stroke-width="2" points="{line_pts("Agent_HR")}"/>'
+        f'<polyline fill="none" stroke="#f97316" stroke-width="2" points="{line_pts("Agent_CO2")}"/>'
+        f'<polyline fill="none" stroke="#ec4899" stroke-width="2" points="{line_pts("Agent_IBP")}"/>'
+        f'<polyline fill="none" stroke="#a855f7" stroke-width="2" points="{line_pts("Agent_NIBP")}"/>'
         f"</svg>"
     )
 
@@ -845,9 +894,26 @@ def ward_tile(pid, bed, is_selected, templates=None):
     hr_ag = bed["agents"]["Agent_HR"]
     sp_ag = bed["agents"]["Agent_SpO2"]
     ecg_ag = bed["agents"]["Agent_ECG"]
+    co2_ag = bed["agents"].get("Agent_CO2", {"status": "TRUSTED", "value": 38, "trust": 1.0})
+    ibp_ag = bed["agents"].get("Agent_IBP", {"status": "TRUSTED", "value": "120/80 (93)", "trust": 1.0})
+    nibp_ag = bed["agents"].get("Agent_NIBP", {"status": "TRUSTED", "value": "120/80", "trust": 1.0})
 
     hr_txt = "ISO" if hr_ag["status"] == "ISOLATED" else (str(hr_ag["value"]) if hr_ag["value"] is not None else "--")
     sp_txt = "ISO" if sp_ag["status"] == "ISOLATED" else (f"{sp_ag['value']}%" if sp_ag["value"] is not None else "--")
+    co2_txt = "ISO" if co2_ag["status"] == "ISOLATED" else (str(co2_ag["value"]) if co2_ag["value"] is not None else "--")
+
+    # Format Blood Pressure reading
+    if ibp_ag["status"] == "ISOLATED" and nibp_ag["status"] == "ISOLATED":
+        bp_txt = "ISO"
+    elif ibp_ag["status"] != "ISOLATED" and ibp_ag["value"] is not None:
+        v = ibp_ag["value"]
+        bp_txt = v.get("formatted", f"{v.get('sys', 120)}/{v.get('dia', 80)}") if isinstance(v, dict) else str(v)
+    elif nibp_ag["status"] != "ISOLATED" and nibp_ag["value"] is not None:
+        v = nibp_ag["value"]
+        bp_txt = v.get("formatted", f"{v.get('sys', 120)}/{v.get('dia', 80)}") if isinstance(v, dict) else str(v)
+    else:
+        bp_txt = "120/80"
+
     ecg_col = "#f87171" if (ecg_ag["status"] == "ISOLATED" or bed["edge"].get("local_bed_alarm")) else "#34d399"
     border_col = "#3b82f6" if is_selected else "#1f2228"
 
@@ -861,6 +927,8 @@ def ward_tile(pid, bed, is_selected, templates=None):
         label=label,
         hr_txt=hr_txt,
         sp_txt=sp_txt,
+        co2_txt=co2_txt,
+        bp_txt=bp_txt,
         compute_mode=bed["compute_mode"],
         ecg_svg=svg_ecg(bed["ecg_wave"], color=ecg_col, width=360, height=54),
         ecg_dot=dot_color(ecg_ag["status"]),
@@ -869,6 +937,12 @@ def ward_tile(pid, bed, is_selected, templates=None):
         spo2_trust=f"{sp_ag['trust']:.2f}",
         hr_dot=dot_color(hr_ag["status"]),
         hr_trust=f"{hr_ag['trust']:.2f}",
+        co2_dot=dot_color(co2_ag["status"]),
+        co2_trust=f"{co2_ag['trust']:.2f}",
+        ibp_dot=dot_color(ibp_ag["status"]),
+        ibp_trust=f"{ibp_ag['trust']:.2f}",
+        nibp_dot=dot_color(nibp_ag["status"]),
+        nibp_trust=f"{nibp_ag['trust']:.2f}",
     )
 
 
@@ -878,6 +952,17 @@ def detail_view(pid, bed, logs, templates=None):
     ecg_ag = bed["agents"]["Agent_ECG"]
     sp_ag = bed["agents"]["Agent_SpO2"]
     hr_ag = bed["agents"]["Agent_HR"]
+    co2_ag = bed["agents"].get(
+        "Agent_CO2", {"status": "TRUSTED", "value": 38, "trust": 1.0, "s_l": 1.0, "s_j": 1.0, "s_p": 1.0, "s_d": 1.0}
+    )
+    ibp_ag = bed["agents"].get(
+        "Agent_IBP",
+        {"status": "TRUSTED", "value": {"sys": 120, "dia": 80, "map": 93, "formatted": "120/80 (93)"}, "trust": 1.0, "s_l": 1.0, "s_j": 1.0, "s_p": 1.0, "s_d": 1.0},
+    )
+    nibp_ag = bed["agents"].get(
+        "Agent_NIBP",
+        {"status": "TRUSTED", "value": {"sys": 120, "dia": 80, "map": 93, "formatted": "120/80"}, "trust": 1.0, "s_l": 1.0, "s_j": 1.0, "s_p": 1.0, "s_d": 1.0},
+    )
     edge = bed["edge"]
 
     ecg_quarantined = ecg_ag["status"] == "ISOLATED"
@@ -899,8 +984,12 @@ def detail_view(pid, bed, logs, templates=None):
             reading = "Signal normal" if st_name != "ISOLATED" else "Signal excluded"
         else:
             v = ag["value"]
+            if isinstance(v, dict):
+                v_str = v.get("formatted", f"{v.get('sys', 120)}/{v.get('dia', 80)}")
+            else:
+                v_str = str(v) if v is not None else "--"
             reading = (
-                f"{v} {unit}".strip()
+                f"{v_str} {unit}".strip()
                 if (v is not None and st_name != "ISOLATED")
                 else ("Excluded" if st_name == "ISOLATED" else "--")
             )
@@ -922,9 +1011,12 @@ def detail_view(pid, bed, logs, templates=None):
         )
 
     sensor_tiles_html = (
-        build_sensor_tile("ECG sensor", ecg_ag, "")
+        build_sensor_tile("ECG lead II", ecg_ag, "")
         + build_sensor_tile("SpO2 sensor", sp_ag, "%")
         + build_sensor_tile("Heart rate sensor", hr_ag, "bpm")
+        + build_sensor_tile("EtCO2 capnography", co2_ag, "mmHg")
+        + build_sensor_tile("Invasive arterial BP", ibp_ag, "mmHg")
+        + build_sensor_tile("Non-invasive cuff BP", nibp_ag, "mmHg")
     )
 
     bed_logs = [e for e in logs if pid in e][:6]
@@ -1018,6 +1110,7 @@ def render_sidebar_room_directory(engine, all_snap, selected_bed, templates):
                 v = b["edge"].get("latest_vitals", {})
                 hr_v = v.get("hr", 75)
                 sp_v = v.get("spo2", 98)
+                co2_v = v.get("co2", 38)
                 rm_lbl = b.get("room_only", "Room 101")
 
                 col1, col2 = st.columns([3, 1])
@@ -1032,6 +1125,7 @@ def render_sidebar_room_directory(engine, all_snap, selected_bed, templates):
                             room_label=rm_lbl,
                             hr_v=hr_v,
                             sp_v=sp_v,
+                            co2_v=co2_v,
                         ),
                         unsafe_allow_html=True,
                     )

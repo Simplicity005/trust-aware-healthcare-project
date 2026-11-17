@@ -473,7 +473,7 @@
         </div>
       </section>
 
-      <section class="tile c6">
+      <section class="tile c4">
         <div class="head">
           <div class="lbl">Heart rate
             <span class="info" tabindex="0">i<span class="tip">Beats per minute. Normal resting adult range is
@@ -487,7 +487,7 @@
         </div>
       </section>
 
-      <section class="tile c6">
+      <section class="tile c4">
         <div class="head">
           <div class="lbl">Oxygen saturation
             <span class="info" tabindex="0">i<span class="tip">SpO2: percentage of oxygen carried in the blood.
@@ -498,6 +498,48 @@
         <div class="vital-body">
           <div class="big" id="sp" style="color:var(--green)">--<small>%</small></div>
           <div class="ref">Normal 95&ndash;100 %</div>
+        </div>
+      </section>
+
+      <section class="tile c4">
+        <div class="head">
+          <div class="lbl">End-Tidal CO2
+            <span class="info" tabindex="0">i<span class="tip">EtCO2 capnography. Normal physiological range is
+                35&ndash;45 mmHg. Indicates ventilation and perfusion.</span></span>
+          </div>
+          <span class="tag t-ok" id="co2Tag">Normal</span>
+        </div>
+        <div class="vital-body">
+          <div class="big" id="co2" style="color:var(--amber)">--<small>mmHg</small></div>
+          <div class="ref">Normal 35&ndash;45 mmHg</div>
+        </div>
+      </section>
+
+      <section class="tile c6">
+        <div class="head">
+          <div class="lbl">Invasive Blood Pressure (IBP)
+            <span class="info" tabindex="0">i<span class="tip">Continuous arterial line catheter. Displays
+                Systolic/Diastolic and Mean Arterial Pressure (MAP).</span></span>
+          </div>
+          <span class="tag t-ok" id="ibpTag">Normal</span>
+        </div>
+        <div class="vital-body">
+          <div class="big" id="ibp" style="color:#f472b6">--<small>mmHg</small></div>
+          <div class="ref">Arterial Catheter &middot; Mean (MAP): <b id="ibpMap" style="color:var(--text)">--</b> mmHg</div>
+        </div>
+      </section>
+
+      <section class="tile c6">
+        <div class="head">
+          <div class="lbl">Non-Invasive Blood Pressure (NIBP)
+            <span class="info" tabindex="0">i<span class="tip">Periodic pneumatic brachial arm cuff. Displays
+                Systolic / Diastolic pressure.</span></span>
+          </div>
+          <span class="tag t-ok" id="nibpTag">Normal</span>
+        </div>
+        <div class="vital-body">
+          <div class="big" id="nibp" style="color:#a78bfa">--<small>mmHg</small></div>
+          <div class="ref">Pneumatic Arm Cuff &middot; Target: 120/80 mmHg</div>
         </div>
       </section>
     </main>
@@ -522,6 +564,18 @@
             <input type="range" id="tSp" min="70" max="100" value="98" oninput="send()">
           </div>
           <div class="box">
+            <div class="row"><span>End-Tidal CO2</span><b id="co2Lbl">38 mmHg</b></div>
+            <input type="range" id="tCo2" min="15" max="75" value="38" oninput="send()">
+          </div>
+          <div class="box">
+            <div class="row"><span>Systolic BP</span><b id="sysLbl">120 mmHg</b></div>
+            <input type="range" id="tSys" min="60" max="220" value="120" oninput="send()">
+          </div>
+          <div class="box">
+            <div class="row"><span>Diastolic BP</span><b id="diaLbl">80 mmHg</b></div>
+            <input type="range" id="tDia" min="30" max="130" value="80" oninput="send()">
+          </div>
+          <div class="box">
             <div class="row"><span>Rhythm</span></div>
             <select class="full" id="tEcg" onchange="send()">
               <option value="normal">Normal sinus rhythm</option>
@@ -533,8 +587,10 @@
         <div class="btns">
           <button class="b-ok" onclick="preset('healthy')">Healthy</button>
           <button class="b-bad" onclick="preset('arrhythmia')">Arrhythmia</button>
-          <button class="b-warn" onclick="preset('tachy')">Tachycardia</button>
-          <button class="b-warn" onclick="preset('hypoxia')">Low oxygen</button>
+          <button class="b-warn" onclick="preset('hypoxia')">Hypoxia (Low O2)</button>
+          <button class="b-warn" onclick="preset('hypercapnia')">Hypercapnia (High CO2)</button>
+          <button class="b-bad" onclick="preset('hypotension')">Hypotensive Shock</button>
+          <button class="b-warn" onclick="preset('hypertension')">Hypertensive Crisis</button>
         </div>
       </div>
     </details>
@@ -578,13 +634,34 @@
         $('bedTitle').textContent = nice(bed);
         const b = d.beds[bed]; if (!b) return;
 
-        const hr = b.hr, sp = b.spo2;
+        const hr = b.hr, sp = b.spo2, co2 = b.co2;
+        const ibp = b.ibp || {}, nibp = b.nibp || {};
+        const ibpStr = typeof ibp === 'object' ? (ibp.formatted || `${ibp.sys || 120}/${ibp.dia || 80} (${ibp.map || 93})`) : String(ibp);
+        const ibpMap = typeof ibp === 'object' ? (ibp.map || Math.round(((ibp.sys || 120) + 2 * (ibp.dia || 80)) / 3)) : '--';
+        const nibpStr = typeof nibp === 'object' ? (nibp.formatted || `${nibp.sys || 120}/${nibp.dia || 80}`) : String(nibp);
+
         $('hr').innerHTML = `${hr ?? '--'}<small>bpm</small>`;
         $('sp').innerHTML = `${sp ?? '--'}<small>%</small>`;
+        $('co2').innerHTML = `${co2 ?? '--'}<small>mmHg</small>`;
+        $('ibp').innerHTML = `${ibpStr}<small>mmHg</small>`;
+        $('ibpMap').textContent = ibpMap;
+        $('nibp').innerHTML = `${nibpStr}<small>mmHg</small>`;
 
-        // heart rate / spo2 tags
+        // vital tags
         if (hr > 100) set($('hrTag'), 'tag t-warn', 'Fast'); else if (hr < 60) set($('hrTag'), 'tag t-warn', 'Slow'); else set($('hrTag'), 'tag t-ok', 'Normal');
         if (sp < 90) set($('spTag'), 'tag t-bad', 'Critical'); else if (sp < 95) set($('spTag'), 'tag t-warn', 'Low'); else set($('spTag'), 'tag t-ok', 'Normal');
+        if (co2 > 50) set($('co2Tag'), 'tag t-bad', 'High'); else if (co2 < 30) set($('co2Tag'), 'tag t-warn', 'Low'); else set($('co2Tag'), 'tag t-ok', 'Normal');
+
+        const sysVal = typeof ibp === 'object' ? (ibp.sys || 120) : 120;
+        const mapVal = typeof ibp === 'object' ? (ibp.map || 93) : 93;
+        if (mapVal < 65 || sysVal < 90) set($('ibpTag'), 'tag t-bad', 'Hypotensive');
+        else if (sysVal > 160) set($('ibpTag'), 'tag t-warn', 'Hypertensive');
+        else set($('ibpTag'), 'tag t-ok', 'Normotensive');
+
+        const nSys = typeof nibp === 'object' ? (nibp.sys || 120) : 120;
+        if (nSys < 90) set($('nibpTag'), 'tag t-warn', 'Low');
+        else if (nSys > 160) set($('nibpTag'), 'tag t-warn', 'High');
+        else set($('nibpTag'), 'tag t-ok', 'Normal');
 
         wave = b.ecg_wave || [];
         let v = 0; if (wave.length) { const m = wave.reduce((a, c) => a + c, 0) / wave.length; v = wave.reduce((a, c) => a + (c - m) ** 2, 0) / wave.length }
@@ -597,9 +674,11 @@
         let o, tagc, tagt, title, desc, col;
         if (arr) { o = ['status s-bad', 'Critical']; tagc = 't-bad'; tagt = 'Needs attention'; title = 'Arrhythmia detected'; desc = 'Abnormal ventricular rhythm on the ECG. Please assess the patient immediately.'; col = '248,113,113' }
         else if (sp < 90) { o = ['status s-bad', 'Low oxygen']; tagc = 't-bad'; tagt = 'Needs attention'; title = 'Low blood oxygen'; desc = 'Oxygen saturation is dangerously low. Check airway and consider supplemental oxygen.'; col = '248,113,113' }
+        else if (mapVal < 65) { o = ['status s-bad', 'Shock risk']; tagc = 't-bad'; tagt = 'Critical'; title = 'Hypotension / Shock'; desc = `Mean arterial pressure is dangerously low (${mapVal} mmHg). Check fluids/pressors.`; col = '248,113,113' }
+        else if (co2 > 52) { o = ['status s-warn', 'Hypercapnia']; tagc = 't-warn'; tagt = 'Warning'; title = 'High End-Tidal CO2'; desc = `EtCO2 is elevated (${co2} mmHg). Risk of respiratory depression/acidosis.`; col = '251,191,36' }
         else if (art) { o = ['status s-warn', 'Check leads']; tagc = 't-warn'; tagt = 'Check'; title = 'Unclear ECG signal'; desc = 'The ECG trace is erratic. Check that electrodes are attached properly.'; col = '251,191,36' }
         else if (hr > 130 || hr < 45) { o = ['status s-warn', 'Warning']; tagc = 't-warn'; tagt = 'Warning'; title = hr > 130 ? 'Heart rate very high' : 'Heart rate very low'; desc = `Heart rate is ${hr} bpm, outside the safe range. Please assess the patient.`; col = '251,191,36' }
-        else { o = ['status s-ok', 'Stable']; tagc = 't-ok'; tagt = 'Healthy'; title = 'Patient is healthy'; desc = 'Heart rhythm, heart rate and oxygen level are all within normal limits.'; col = '' }
+        else { o = ['status s-ok', 'Stable']; tagc = 't-ok'; tagt = 'Healthy'; title = 'Patient is healthy'; desc = 'Heart rhythm, oxygen level, EtCO2, and blood pressure are all within normal limits.'; col = '' }
         $('overall').className = o[0]; $('overall').textContent = o[1];
         set($('condTag'), 'tag ' + tagc, tagt); $('condTitle').textContent = title; $('condDesc').textContent = desc;
         const cc = $('condCard'); cc.style.background = col ? `rgba(${col},.08)` : ''; cc.style.borderColor = col ? `rgba(${col},.3)` : '';
@@ -608,19 +687,47 @@
     }
 
     async function send() {
-      const hr = +$('tHr').value, sp = +$('tSp').value, ec = $('tEcg').value;
-      $('hrLbl').textContent = hr + ' bpm'; $('spLbl').textContent = sp + ' %';
+      const hr = +$('tHr').value, sp = +$('tSp').value, co2 = +$('tCo2').value;
+      const sys = +$('tSys').value, dia = +$('tDia').value, ec = $('tEcg').value;
+      $('hrLbl').textContent = hr + ' bpm';
+      $('spLbl').textContent = sp + ' %';
+      $('co2Lbl').textContent = co2 + ' mmHg';
+      $('sysLbl').textContent = sys + ' mmHg';
+      $('diaLbl').textContent = dia + ' mmHg';
       try {
         const r = await fetch('/api/manipulate', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ patient_id: bed || 'Bed_1', target_hr: hr, target_spo2: sp, ecg_condition: ec, delay_ms: 10, drop_rate: 0, malicious: ec === 'malicious', overload_gpu: false, use_relay_b: false })
+          body: JSON.stringify({
+            patient_id: bed || 'Bed_1',
+            target_hr: hr,
+            target_spo2: sp,
+            target_co2: co2,
+            target_sys: sys,
+            target_dia: dia,
+            ecg_condition: ec,
+            delay_ms: 10,
+            drop_rate: 0,
+            malicious: ec === 'malicious',
+            overload_gpu: false,
+            use_relay_b: false
+          })
         });
         if (r.ok) { $('fb').classList.add('show'); setTimeout(() => $('fb').classList.remove('show'), 1800) }
       } catch (e) { }
     }
     function preset(n) {
-      const P = { healthy: [75, 98, 'normal'], arrhythmia: [142, 93, 'arrhythmia'], tachy: [150, 97, 'normal'], hypoxia: [108, 86, 'normal'] }[n];
-      $('tHr').value = P[0]; $('tSp').value = P[1]; $('tEcg').value = P[2]; send();
+      const P = {
+        healthy: [75, 98, 38, 120, 80, 'normal'],
+        arrhythmia: [142, 93, 36, 110, 70, 'arrhythmia'],
+        hypoxia: [108, 86, 48, 105, 65, 'normal'],
+        hypercapnia: [94, 91, 56, 130, 85, 'normal'],
+        hypotension: [124, 93, 28, 76, 46, 'normal'],
+        hypertension: [95, 98, 41, 185, 110, 'normal']
+      }[n];
+      if (!P) return;
+      $('tHr').value = P[0]; $('tSp').value = P[1]; $('tCo2').value = P[2];
+      $('tSys').value = P[3]; $('tDia').value = P[4]; $('tEcg').value = P[5];
+      send();
     }
     resize(); setInterval(poll, 350); poll();
   </script>

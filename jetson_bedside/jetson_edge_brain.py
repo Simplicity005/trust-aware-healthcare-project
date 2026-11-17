@@ -44,10 +44,16 @@ def default_bed_chaos():
         "Agent_ECG": {"delay_ms": 12, "drop_rate": 0.0, "malicious": False, "condition": "normal"},
         "Agent_SpO2": {"delay_ms": 10, "drop_rate": 0.0, "malicious": False, "target_spo2": 98},
         "Agent_HR": {"delay_ms": 10, "drop_rate": 0.0, "malicious": False, "target_hr": 75},
+        "Agent_CO2": {"delay_ms": 10, "drop_rate": 0.0, "malicious": False, "target_co2": 38},
+        "Agent_IBP": {"delay_ms": 10, "drop_rate": 0.0, "malicious": False, "target_sys": 120, "target_dia": 80},
+        "Agent_NIBP": {"delay_ms": 15, "drop_rate": 0.0, "malicious": False, "target_sys": 120, "target_dia": 80},
         "Orin_Link": {"overload_gpu": False, "use_relay_b": False},
         "vitals": {
             "target_hr": 75,
             "target_spo2": 98,
+            "target_co2": 38,
+            "target_sys": 120,
+            "target_dia": 80,
             "ecg_condition": "normal",
         },
     }
@@ -145,8 +151,14 @@ def make_bedside_handler(engines_dict, meta_info):
                         beds_payload[pid] = {
                             "hr": eng.latest_hr,
                             "spo2": eng.latest_spo2,
+                            "co2": eng.latest_co2,
+                            "ibp": eng.latest_ibp,
+                            "nibp": eng.latest_nibp,
                             "hr_valid": eng.hr_plausible,
                             "spo2_valid": eng.spo2_plausible,
+                            "co2_valid": eng.co2_plausible,
+                            "ibp_valid": eng.ibp_plausible,
+                            "nibp_valid": eng.nibp_plausible,
                             "anomaly_prob": round(eng.last_prob, 4),
                             "arrhythmia": eng.last_arrhythmia,
                             "inference_ms": round(eng.last_inf_ms, 2),
@@ -209,21 +221,33 @@ def make_bedside_handler(engines_dict, meta_info):
                 if "target_spo2" in data:
                     chaos["vitals"]["target_spo2"] = int(data["target_spo2"])
                     chaos.setdefault("Agent_SpO2", {})["target_spo2"] = int(data["target_spo2"])
+                if "target_co2" in data:
+                    chaos["vitals"]["target_co2"] = int(data["target_co2"])
+                    chaos.setdefault("Agent_CO2", {})["target_co2"] = int(data["target_co2"])
+                if "target_sys" in data:
+                    chaos["vitals"]["target_sys"] = int(data["target_sys"])
+                    chaos.setdefault("Agent_IBP", {})["target_sys"] = int(data["target_sys"])
+                    chaos.setdefault("Agent_NIBP", {})["target_sys"] = int(data["target_sys"])
+                if "target_dia" in data:
+                    chaos["vitals"]["target_dia"] = int(data["target_dia"])
+                    chaos.setdefault("Agent_IBP", {})["target_dia"] = int(data["target_dia"])
+                    chaos.setdefault("Agent_NIBP", {})["target_dia"] = int(data["target_dia"])
                 if "ecg_condition" in data:
                     chaos["vitals"]["ecg_condition"] = str(data["ecg_condition"])
                     chaos.setdefault("Agent_ECG", {})["condition"] = str(data["ecg_condition"])
 
+                all_agents = ["Agent_ECG", "Agent_SpO2", "Agent_HR", "Agent_CO2", "Agent_IBP", "Agent_NIBP"]
                 if "delay_ms" in data:
                     d_ms = float(data["delay_ms"])
-                    for aid in ["Agent_ECG", "Agent_SpO2", "Agent_HR"]:
+                    for aid in all_agents:
                         chaos.setdefault(aid, {})["delay_ms"] = d_ms
                 if "drop_rate" in data:
                     dr = float(data["drop_rate"])
-                    for aid in ["Agent_ECG", "Agent_SpO2", "Agent_HR"]:
+                    for aid in all_agents:
                         chaos.setdefault(aid, {})["drop_rate"] = dr
                 if "malicious" in data:
                     m = bool(data["malicious"])
-                    for aid in ["Agent_ECG", "Agent_SpO2", "Agent_HR"]:
+                    for aid in all_agents:
                         chaos.setdefault(aid, {})["malicious"] = m
                 if "overload_gpu" in data:
                     ov = bool(data["overload_gpu"])
@@ -263,9 +287,15 @@ class JetsonEdgeBrain:
 
         self.latest_hr = 75
         self.latest_spo2 = 98
+        self.latest_co2 = 38
+        self.latest_ibp = {"sys": 120, "dia": 80, "map": 93, "formatted": "120/80 (93)"}
+        self.latest_nibp = {"sys": 120, "dia": 80, "map": 93, "formatted": "120/80"}
         self.latest_ecg_var = 0.04
         self.hr_plausible = True
         self.spo2_plausible = True
+        self.co2_plausible = True
+        self.ibp_plausible = True
+        self.nibp_plausible = True
         self.latest_ecg_wave = []
         self.last_prob = 0.02
         self.last_arrhythmia = False
@@ -282,6 +312,9 @@ class JetsonEdgeBrain:
             "Agent_ECG": {"latency_ms": 12.0, "loss_pct": 0.0, "last_seq": None, "rx": 0, "lost": 0},
             "Agent_SpO2": {"latency_ms": 10.0, "loss_pct": 0.0, "last_seq": None, "rx": 0, "lost": 0},
             "Agent_HR": {"latency_ms": 10.0, "loss_pct": 0.0, "last_seq": None, "rx": 0, "lost": 0},
+            "Agent_CO2": {"latency_ms": 10.0, "loss_pct": 0.0, "last_seq": None, "rx": 0, "lost": 0},
+            "Agent_IBP": {"latency_ms": 10.0, "loss_pct": 0.0, "last_seq": None, "rx": 0, "lost": 0},
+            "Agent_NIBP": {"latency_ms": 15.0, "loss_pct": 0.0, "last_seq": None, "rx": 0, "lost": 0},
         }
         self.lock = threading.Lock()
         self.client = None
@@ -327,6 +360,9 @@ class JetsonEdgeBrain:
             with self.lock:
                 hr = self.latest_hr
                 spo2 = self.latest_spo2
+                co2 = self.latest_co2
+                ibp = self.latest_ibp
+                nibp = self.latest_nibp
                 ecg_var = self.latest_ecg_var
             announcement = {
                 "patient_id": self.patient_id,
@@ -335,7 +371,14 @@ class JetsonEdgeBrain:
                 "broker": f"{self.broker}:{self.port}",
                 "timestamp": time.time(),
                 "status": "ready",
-                "latest_vitals": {"hr": hr, "spo2": spo2, "ecg_variance": ecg_var},
+                "latest_vitals": {
+                    "hr": hr,
+                    "spo2": spo2,
+                    "co2": co2,
+                    "ibp": ibp,
+                    "nibp": nibp,
+                    "ecg_variance": ecg_var,
+                },
             }
             self.client.publish("hospital/discovery/announce", json.dumps(announcement), qos=1)
         except Exception:
@@ -429,6 +472,42 @@ class JetsonEdgeBrain:
                 self._check_plausibility()
                 return
 
+            if agent_id == "Agent_CO2":
+                co2_val = int(payload.get("value", 38))
+                with self.lock:
+                    self.latest_co2 = co2_val
+                    self.co2_plausible = 15 <= co2_val <= 75
+                self._check_plausibility()
+                return
+
+            if agent_id == "Agent_IBP":
+                val = payload.get("value")
+                if isinstance(val, dict):
+                    ibp_dict = val
+                else:
+                    ibp_dict = {"sys": 120, "dia": 80, "map": 93, "formatted": str(val or "120/80 (93)")}
+                sys_v = int(ibp_dict.get("sys", 120))
+                dia_v = int(ibp_dict.get("dia", 80))
+                with self.lock:
+                    self.latest_ibp = ibp_dict
+                    self.ibp_plausible = (50 <= sys_v <= 250) and (25 <= dia_v <= 140)
+                self._check_plausibility()
+                return
+
+            if agent_id == "Agent_NIBP":
+                val = payload.get("value")
+                if isinstance(val, dict):
+                    nibp_dict = val
+                else:
+                    nibp_dict = {"sys": 120, "dia": 80, "map": 93, "formatted": str(val or "120/80")}
+                sys_v = int(nibp_dict.get("sys", 120))
+                dia_v = int(nibp_dict.get("dia", 80))
+                with self.lock:
+                    self.latest_nibp = nibp_dict
+                    self.nibp_plausible = (50 <= sys_v <= 250) and (25 <= dia_v <= 140)
+                self._check_plausibility()
+                return
+
             if agent_id == "Agent_ECG":
                 ecg_wave = payload.get("ecg_wave", [])
                 if len(ecg_wave) != 250:
@@ -481,6 +560,8 @@ class JetsonEdgeBrain:
         with self.lock:
             hr = self.latest_hr
             spo2 = self.latest_spo2
+            co2 = self.latest_co2
+            ibp = self.latest_ibp
             arrhythmia = self.last_arrhythmia
 
         conflict = False
@@ -490,6 +571,13 @@ class JetsonEdgeBrain:
             conflict = True
         if spo2 <= 30 and hr > 60 and not arrhythmia:
             conflict = True
+        if co2 < 10 or co2 > 85:
+            conflict = True
+        if isinstance(ibp, dict):
+            s_v = int(ibp.get("sys", 120))
+            d_v = int(ibp.get("dia", 80))
+            if s_v <= d_v or s_v < 40 or s_v > 260:
+                conflict = True
 
         with self.lock:
             self.sensor_conflict = conflict
@@ -516,6 +604,9 @@ class JetsonEdgeBrain:
                     "latest_vitals": {
                         "hr": self.latest_hr,
                         "spo2": self.latest_spo2,
+                        "co2": self.latest_co2,
+                        "ibp": self.latest_ibp,
+                        "nibp": self.latest_nibp,
                         "ecg_variance": round(self.latest_ecg_var, 4),
                     },
                     "ecg_wave": self.latest_ecg_wave,
