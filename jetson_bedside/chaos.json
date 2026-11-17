@@ -1,158 +1,20 @@
 {
   "Bed_1": {
-    "Agent_ECG": {
-      "delay_ms": 12,
-      "drop_rate": 0.0,
-      "malicious": false,
-      "condition": "normal"
-    },
-    "Agent_SpO2": {
-      "delay_ms": 10,
-      "drop_rate": 0.0,
-      "malicious": false,
-      "target_spo2": 98
-    },
-    "Agent_HR": {
-      "delay_ms": 10,
-      "drop_rate": 0.0,
-      "malicious": false,
-      "target_hr": 75
-    },
-    "Agent_CO2": {
-      "delay_ms": 10,
-      "drop_rate": 0.0,
-      "malicious": false,
-      "target_co2": 38
-    },
-    "Agent_IBP": {
-      "delay_ms": 10,
-      "drop_rate": 0.0,
-      "malicious": false,
-      "target_sys": 120,
-      "target_dia": 80
-    },
-    "Agent_NIBP": {
-      "delay_ms": 15,
-      "drop_rate": 0.0,
-      "malicious": false,
-      "target_sys": 120,
-      "target_dia": 80
-    },
-    "Orin_Link": {
-      "overload_gpu": false,
-      "use_relay_b": false
-    },
-    "vitals": {
-      "target_hr": 75,
-      "target_spo2": 98,
-      "target_co2": 38,
-      "target_sys": 120,
-      "target_dia": 80,
-      "ecg_condition": "normal"
-    }
+    "Agent_ECG": {"delay_ms": 12, "drop_rate": 0.0, "malicious": false},
+    "Agent_SpO2": {"delay_ms": 10, "drop_rate": 0.0, "malicious": false},
+    "Agent_HR": {"delay_ms": 10, "drop_rate": 0.0, "malicious": false},
+    "Orin_Link": {"overload_gpu": false, "use_relay_b": false}
   },
   "Bed_2": {
-    "Agent_ECG": {
-      "delay_ms": 12.0,
-      "drop_rate": 0.0,
-      "malicious": false,
-      "condition": "normal"
-    },
-    "Agent_SpO2": {
-      "delay_ms": 10.0,
-      "drop_rate": 0.0,
-      "malicious": false,
-      "target_spo2": 98
-    },
-    "Agent_HR": {
-      "delay_ms": 10.0,
-      "drop_rate": 0.0,
-      "malicious": false,
-      "target_hr": 78
-    },
-    "Agent_CO2": {
-      "delay_ms": 10.0,
-      "drop_rate": 0.0,
-      "malicious": false,
-      "target_co2": 40
-    },
-    "Agent_IBP": {
-      "delay_ms": 10.0,
-      "drop_rate": 0.0,
-      "malicious": false,
-      "target_sys": 122,
-      "target_dia": 82
-    },
-    "Agent_NIBP": {
-      "delay_ms": 15.0,
-      "drop_rate": 0.0,
-      "malicious": false,
-      "target_sys": 122,
-      "target_dia": 82
-    },
-    "Orin_Link": {
-      "overload_gpu": false,
-      "use_relay_b": false
-    },
-    "vitals": {
-      "target_hr": 78,
-      "target_spo2": 98,
-      "target_co2": 40,
-      "target_sys": 122,
-      "target_dia": 82,
-      "ecg_condition": "normal"
-    }
+    "Agent_ECG": {"delay_ms": 14, "drop_rate": 0.0, "malicious": false},
+    "Agent_SpO2": {"delay_ms": 12, "drop_rate": 0.0, "malicious": false},
+    "Agent_HR": {"delay_ms": 11, "drop_rate": 0.0, "malicious": false},
+    "Orin_Link": {"overload_gpu": false, "use_relay_b": false}
   },
   "Bed_3": {
-    "Agent_ECG": {
-      "delay_ms": 8.0,
-      "drop_rate": 0.0,
-      "malicious": false,
-      "condition": "normal"
-    },
-    "Agent_SpO2": {
-      "delay_ms": 10.0,
-      "drop_rate": 0.0,
-      "malicious": false,
-      "target_spo2": 97
-    },
-    "Agent_HR": {
-      "delay_ms": 10.0,
-      "drop_rate": 0.0,
-      "malicious": false,
-      "target_hr": 72
-    },
-    "Agent_CO2": {
-      "delay_ms": 10.0,
-      "drop_rate": 0.0,
-      "malicious": false,
-      "target_co2": 37
-    },
-    "Agent_IBP": {
-      "delay_ms": 10.0,
-      "drop_rate": 0.0,
-      "malicious": false,
-      "target_sys": 118,
-      "target_dia": 78
-    },
-    "Agent_NIBP": {
-      "delay_ms": 15.0,
-      "drop_rate": 0.0,
-      "malicious": false,
-      "target_sys": 118,
-      "target_dia": 78
-    },
-    "Orin_Link": {
-      "overload_gpu": false,
-      "use_relay_b": false
-    },
-    "vitals": {
-      "target_hr": 72,
-      "target_spo2": 97,
-      "target_co2": 37,
-      "target_sys": 118,
-      "target_dia": 78,
-      "ecg_condition": "normal"
-    }
+    "Agent_ECG": {"delay_ms": 10, "drop_rate": 0.0, "malicious": false},
+    "Agent_SpO2": {"delay_ms": 10, "drop_rate": 0.0, "malicious": false},
+    "Agent_HR": {"delay_ms": 12, "drop_rate": 0.0, "malicious": false},
+    "Orin_Link": {"overload_gpu": false, "use_relay_b": false}
   }
 }
