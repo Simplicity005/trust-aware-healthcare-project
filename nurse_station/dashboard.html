@@ -92,9 +92,95 @@
     /* ---------- Bento ---------- */
     .ward-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
       gap: 14px;
       margin-bottom: 8px;
+    }
+
+    .patient-name {
+      font-size: 16px;
+      font-weight: 800;
+      color: #fff;
+      letter-spacing: -0.02em;
+    }
+
+    .patient-diagnosis {
+      font-size: 11px;
+      color: var(--muted);
+      margin: 4px 0 10px 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-weight: 500;
+    }
+
+    .ward-vitals-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 6px;
+      background: var(--card-2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 10px;
+      margin-bottom: 8px;
+    }
+
+    .vital-mini {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .vital-mini .lbl {
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--dim);
+    }
+
+    .vital-mini .val-sm {
+      font-size: 13.5px;
+      font-weight: 700;
+      font-family: var(--mono);
+      line-height: 1.2;
+      margin-top: 2px;
+    }
+
+    .inspect-btn {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--blue);
+      text-decoration: none;
+      padding: 5px 10px;
+      border-radius: 8px;
+      background: rgba(96, 165, 250, 0.09);
+      border: 1px solid rgba(96, 165, 250, 0.25);
+      transition: all 0.15s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .inspect-btn:hover {
+      background: rgba(96, 165, 250, 0.22);
+      border-color: var(--blue);
+      color: #fff;
+    }
+
+    .ward-rect-card {
+      transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+      cursor: pointer;
+    }
+
+    .ward-rect-card:hover {
+      border-color: rgba(96, 165, 250, 0.45) !important;
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    }
+
+    .ward-card-selected {
+      border-color: #3b82f6 !important;
+      box-shadow: 0 0 0 1px #3b82f6, 0 8px 24px rgba(59, 130, 246, 0.22) !important;
     }
 
     .bento {
@@ -440,39 +526,58 @@
      3. WARD OVERVIEW CARD (one per bed)
      ========================================================================== -->
   <template id="ward_tile">
-    <div class="tile" style="border-color:{{border_col}};">
-      <div class="row-between">
-        <div><span class="bed-id">{{pid}}</span> <span class="room-sub">&middot; {{room_short}}</span></div>
+    <a href="?bed={{pid}}&view=detail" target="_self" class="tile ward-rect-card {{selected_cls}}" style="border-color:{{border_col}}; text-decoration:none; color:inherit; display:flex;">
+      <div class="row-between" style="align-items:flex-start; margin-bottom:4px;">
+        <div>
+          <div class="patient-name">{{patient_name}}</div>
+          <div class="sub" style="margin-top:2px;">
+            <span class="bed-id" style="font-size:13px; color:var(--text); font-weight:700;">{{pid}}</span> &middot; <span class="room-sub">{{room_short}}</span>
+          </div>
+        </div>
         <span class="pill {{pill_cls}}">{{label}}</span>
       </div>
-      <div class="ward-vitals">
-        <div>
+
+      <div class="patient-diagnosis">{{diagnosis}}</div>
+
+      <div class="ward-vitals-grid">
+        <div class="vital-mini">
           <div class="lbl">Heart rate</div>
-          <div class="val-sm">{{hr_txt}} <span class="unit">bpm</span></div>
+          <div class="val-sm" style="color:var(--blue);">{{hr_txt}} <span class="unit">bpm</span></div>
         </div>
-        <div>
+        <div class="vital-mini">
           <div class="lbl">SpO2</div>
-          <div class="val-sm">{{sp_txt}}</div>
+          <div class="val-sm" style="color:var(--green);">{{sp_txt}}</div>
         </div>
-        <div>
+        <div class="vital-mini">
           <div class="lbl">EtCO2</div>
-          <div class="val-sm">{{co2_txt}} <span class="unit">mmHg</span></div>
+          <div class="val-sm" style="color:var(--amber);">{{co2_txt}} <span class="unit">mmHg</span></div>
         </div>
-        <div>
-          <div class="lbl">BP (IBP)</div>
-          <div class="val-sm">{{bp_txt}} <span class="unit">mmHg</span></div>
+        <div class="vital-mini">
+          <div class="lbl">Invasive BP</div>
+          <div class="val-sm" style="color:#f472b6;">{{ibp_txt}} <span class="unit">mmHg</span></div>
+        </div>
+        <div class="vital-mini">
+          <div class="lbl">Cuff NIBP</div>
+          <div class="val-sm" style="color:#a78bfa;">{{nibp_txt}} <span class="unit">mmHg</span></div>
         </div>
       </div>
-      <div style="margin:14px 0 12px 0;">{{ecg_svg}}</div>
-      <div class="trust-dots">
-        <span><i class="dot" style="background:{{ecg_dot}}"></i>ECG</span>
-        <span><i class="dot" style="background:{{spo2_dot}}"></i>SpO2</span>
-        <span><i class="dot" style="background:{{hr_dot}}"></i>HR</span>
-        <span><i class="dot" style="background:{{co2_dot}}"></i>CO2</span>
-        <span><i class="dot" style="background:{{ibp_dot}}"></i>IBP</span>
-        <span><i class="dot" style="background:{{nibp_dot}}"></i>NIBP</span>
+
+      <div style="margin:8px 0 10px 0;">{{ecg_svg}}</div>
+
+      <div class="row-between" style="border-top:1px solid rgba(255,255,255,0.06); padding-top:10px; margin-top:4px;">
+        <div class="trust-dots">
+          <span><i class="dot" style="background:{{ecg_dot}}"></i>ECG</span>
+          <span><i class="dot" style="background:{{spo2_dot}}"></i>SpO2</span>
+          <span><i class="dot" style="background:{{hr_dot}}"></i>HR</span>
+          <span><i class="dot" style="background:{{co2_dot}}"></i>CO2</span>
+          <span><i class="dot" style="background:{{ibp_dot}}"></i>IBP</span>
+          <span><i class="dot" style="background:{{nibp_dot}}"></i>NIBP</span>
+        </div>
+        <span class="inspect-btn">
+          View Bed Dashboard &rarr;
+        </span>
       </div>
-    </div>
+    </a>
   </template>
 
 
@@ -503,10 +608,23 @@
      ========================================================================== -->
   <template id="detail_view">
     <div class="bento">
+      <div class="tile span-12" style="background:var(--card-2); border-color:rgba(96,165,250,0.22); padding:16px 20px;">
+        <div class="row-between">
+          <div>
+            <div style="font-size:20px; font-weight:800; color:#fff;">{{patient_name}}</div>
+            <div class="meta" style="margin-top:2px;">{{pid}} &middot; {{room}} &middot; {{diagnosis}} &middot; Admitted: {{admitted_ts}}</div>
+          </div>
+          <div style="display:flex; gap:10px; align-items:center;">
+            <span class="pill pill-blue">Synced with Bedside Node</span>
+            <span class="pill {{pill_cls}}">{{label}}</span>
+          </div>
+        </div>
+      </div>
+
       <div class="tile span-8">
         <div class="row-between">
           <span class="lbl">ECG &middot; Lead II<span class="info">i<span class="tip">Live electrocardiogram trace for
-                this patient.</span></span></span>
+                this patient, synchronized from Bedside Jetson.</span></span></span>
           <span class="sub">{{pid}} &middot; {{room}}</span>
         </div>
         <div style="margin-top:14px;">{{ecg_svg}}</div>
@@ -571,9 +689,13 @@
   </template>
 
   <template id="sidebar_bed_row">
-    <strong>{{pid}}</strong> &nbsp; <span class="pill {{pill_cls}}">{{st_lbl}}</span><br>
-    <span style="font-size:11px;color:#8a96a6;">{{room_label}}</span><br>
-    <span style="font-size:12px;color:#aab4c2;font-family:'IBM Plex Mono',monospace;">HR {{hr_v}} &middot; SpO2 {{sp_v}}% &middot; CO2 {{co2_v}}</span>
+    <div style="font-weight:700; color:#fff; font-size:13px;">{{patient_name}}</div>
+    <div style="font-size:11px; color:#8a96a6; margin-bottom:2px;">
+      {{pid}} &middot; {{room_label}} &nbsp; <span class="pill {{pill_cls}}">{{st_lbl}}</span>
+    </div>
+    <div style="font-size:11.5px; color:#aab4c2; font-family:'IBM Plex Mono',monospace;">
+      HR {{hr_v}} &middot; SpO2 {{sp_v}}% &middot; CO2 {{co2_v}} &middot; BP {{bp_v}}
+    </div>
   </template>
 
   <template id="sidebar_unassigned_row">
