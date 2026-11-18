@@ -1292,29 +1292,22 @@ def render_sidebar_room_directory(engine, all_snap, selected_bed, templates):
                 rm_lbl = b.get("room_only", "Room 101")
                 p_name = b.get("patient_name", f"Patient {pid}")
 
-                col1, col2 = st.columns([3, 1])
-                with col1:
-                    st.markdown(
-                        render_template(
-                            templates,
-                            "sidebar_bed_row",
-                            pid=pid,
-                            patient_name=p_name,
-                            pill_cls=pill_cls,
-                            st_lbl=st_lbl,
-                            room_label=rm_lbl,
-                            hr_v=hr_v,
-                            sp_v=sp_v,
-                            co2_v=co2_v,
-                            bp_v=bp_v,
-                        ),
-                        unsafe_allow_html=True,
-                    )
-                with col2:
-                    if st.button("View", key=f"sel_btn_{pid}", use_container_width=True):
-                        st.session_state["selected_bed"] = pid
-                        st.session_state["view_mode"] = "detail"
-                        st.rerun()
+                st.markdown(
+                    render_template(
+                        templates,
+                        "sidebar_bed_row",
+                        pid=pid,
+                        patient_name=p_name,
+                        pill_cls=pill_cls,
+                        st_lbl=st_lbl,
+                        room_label=rm_lbl,
+                        hr_v=hr_v,
+                        sp_v=sp_v,
+                        co2_v=co2_v,
+                        bp_v=bp_v,
+                    ),
+                    unsafe_allow_html=True,
+                )
 
     unadded = all_snap["unadded_jetsons"]
     if unadded:
