@@ -1129,6 +1129,7 @@ def ward_tile(pid, bed, is_selected, templates=None):
         border_col=border_col,
         selected_cls=selected_cls,
         pid=pid,
+        dept=bed.get("department", "ICU"),
         patient_name=bed.get("patient_name", f"Patient {pid}"),
         diagnosis=bed.get("diagnosis", "Observation & Telemetry"),
         room_short=f"{bed.get('department', 'ICU')} · {bed.get('room_only', bed['room'])}",
@@ -1257,6 +1258,7 @@ def detail_view(pid, bed, logs, templates=None):
         "detail_view",
         emergency_banner_html=emergency_banner_html,
         pid=pid,
+        dept=bed.get("department", "ICU"),
         patient_name=bed.get("patient_name", f"Patient {pid}"),
         diagnosis=bed.get("diagnosis", "Observation & Telemetry"),
         admitted_ts=bed.get("admitted", "Nov 18, 08:00"),
@@ -1274,6 +1276,37 @@ def detail_view(pid, bed, logs, templates=None):
         trust_chart_svg=svg_trust_chart(bed["history"], width=720, height=130),
         log_rows_html=log_rows_html,
     )
+
+
+def set_view(view_mode=None, selected_bed=None, selected_dept=None):
+    """Central state and query parameter synchronizer for smooth navigation."""
+    if view_mode:
+        st.session_state["view_mode"] = view_mode
+        try:
+            st.query_params["view"] = view_mode
+            if view_mode == "ward" and "bed" in st.query_params:
+                del st.query_params["bed"]
+        except Exception:
+            pass
+
+    if selected_bed:
+        st.session_state["selected_bed"] = selected_bed
+        try:
+            st.query_params["bed"] = selected_bed
+        except Exception:
+            pass
+
+    if selected_dept:
+        st.session_state["selected_department"] = selected_dept
+        try:
+            st.query_params["dept"] = selected_dept
+        except Exception:
+            pass
+
+    try:
+        st.session_state["_last_seen_qp"] = dict(st.query_params)
+    except Exception:
+        pass
 
 
 def render_sidebar_room_directory(engine, all_snap, selected_bed, templates):
@@ -1363,11 +1396,12 @@ def render_sidebar_room_directory(engine, all_snap, selected_bed, templates):
 
     all_depts_list = ["All Departments"] + [code for code, _ in HOSPITAL_DEPARTMENTS]
     cur_dept = st.session_state.get("selected_department", "All Departments")
-    cur_dept_idx = all_depts_list.index(cur_dept) if cur_dept in all_depts_list else 0
-    selected_dept_filter = st.sidebar.selectbox("Filter Department", options=all_depts_list, index=cur_dept_idx, key="sidebar_dept_filter")
+    if cur_dept not in all_depts_list:
+        cur_dept = "All Departments"
+    cur_dept_idx = all_depts_list.index(cur_dept)
+    selected_dept_filter = st.sidebar.selectbox("Filter Department", options=all_depts_list, index=cur_dept_idx)
     if selected_dept_filter != cur_dept:
-        st.session_state["selected_department"] = selected_dept_filter
-        st.session_state["view_mode"] = "ward"
+        set_view(view_mode="ward", selected_dept=selected_dept_filter)
         st.rerun()
 
     for dept_code, dept_full in HOSPITAL_DEPARTMENTS:
@@ -1398,6 +1432,7 @@ def render_sidebar_room_directory(engine, all_snap, selected_bed, templates):
                         templates,
                         "sidebar_bed_row",
                         pid=pid,
+                        dept=b.get("department", "ICU"),
                         patient_name=p_name,
                         pill_cls=pill_cls,
                         st_lbl=st_lbl,
@@ -1431,7 +1466,7 @@ def render_sidebar_room_directory(engine, all_snap, selected_bed, templates):
             target_rm = dev.get("room", "Room 101")
             if st.sidebar.button(f"+ Admit {pid} ({target_dept})", key=f"side_admit_{pid}", use_container_width=True):
                 engine.admit_jetson(pid, department=target_dept, room_name=target_rm)
-                st.session_state["selected_bed"] = pid
+                set_view(view_mode="detail", selected_bed=pid, selected_dept=target_dept)
                 st.rerun()
 
     st.sidebar.markdown(render_template(templates, "sidebar_bedside_link"), unsafe_allow_html=True)
@@ -1484,7 +1519,7 @@ def render_admission_modal(engine, unadded_jetsons, added_bed_ids, templates):
             with col_act:
                 if st.button(f"+ Admit {pid}", key=f"admit_btn_{pid}", type="primary", use_container_width=True):
                     engine.admit_jetson(pid, department=assigned_dept)
-                    st.session_state["selected_bed"] = pid
+                    set_view(view_mode="detail", selected_bed=pid, selected_dept=assigned_dept)
                     st.session_state["show_add_bed"] = False
                     st.rerun()
     else:
@@ -1500,8 +1535,9 @@ def render_admission_modal(engine, unadded_jetsons, added_bed_ids, templates):
         with sim_col2:
             st.write("")
             if st.button(f"+ Simulate & Detect New Jetson Node ({sim_id})", key="btn_sim_jetson", use_container_width=True):
-                engine.admit_jetson(sim_id, department=sim_dept_full.split(" - ", 1)[0])
-                st.session_state["selected_bed"] = sim_id
+                sim_dept_target = sim_dept_full.split(" - ", 1)[0]
+                engine.admit_jetson(sim_id, department=sim_dept_target)
+                set_view(view_mode="detail", selected_bed=sim_id, selected_dept=sim_dept_target)
                 st.session_state["show_add_bed"] = False
                 st.rerun()
 
@@ -1525,13 +1561,18 @@ def main():
 
     # Handle query parameters from URL / clickable card links (?bed=Bed_1&view=detail&dept=ICU)
     try:
-        qp = st.query_params
-        if "bed" in qp and qp["bed"] in beds_snap:
-            st.session_state["selected_bed"] = qp["bed"]
-        if "view" in qp and qp["view"] in ("ward", "detail"):
-            st.session_state["view_mode"] = qp["view"]
-        if "dept" in qp and qp["dept"]:
-            st.session_state["selected_department"] = qp["dept"]
+        cur_qp = dict(st.query_params)
+        last_qp = st.session_state.get("_last_seen_qp", None)
+        if last_qp is None or cur_qp != last_qp:
+            if "bed" in cur_qp and cur_qp["bed"] in beds_snap:
+                st.session_state["selected_bed"] = cur_qp["bed"]
+            if "view" in cur_qp and cur_qp["view"] in ("ward", "detail"):
+                st.session_state["view_mode"] = cur_qp["view"]
+            if "dept" in cur_qp and cur_qp["dept"]:
+                st.session_state["selected_department"] = cur_qp["dept"]
+            elif "bed" in cur_qp and cur_qp["bed"] in beds_snap and "dept" not in cur_qp:
+                st.session_state["selected_department"] = beds_snap[cur_qp["bed"]].get("department", "ICU")
+            st.session_state["_last_seen_qp"] = dict(cur_qp)
     except Exception:
         pass
 
@@ -1556,6 +1597,8 @@ def main():
     if active_emergencies:
         popup_cards_html = []
         for emerg_pid, emerg_bed, reason in active_emergencies:
+            if view_mode == "detail" and emerg_pid == selected_bed:
+                continue
             v = emerg_bed["edge"].get("latest_vitals", {})
             hr_v = v.get("hr", "--")
             sp_v = v.get("spo2", "--")
@@ -1571,6 +1614,7 @@ def main():
                 templates,
                 "emergency_popup_card",
                 pid=emerg_pid,
+                dept=emerg_bed.get("department", "ICU"),
                 room=emerg_bed.get("room", f"Room {emerg_pid}"),
                 patient_name=emerg_bed.get("patient_name", f"Patient {emerg_pid}"),
                 diagnosis=emerg_bed.get("diagnosis", "Critical Telemetry"),
@@ -1582,10 +1626,11 @@ def main():
             )
             popup_cards_html.append(card_html)
 
-        st.markdown(
-            f'<div class="emergency-toast-container">{"".join(popup_cards_html)}</div>',
-            unsafe_allow_html=True,
-        )
+        if popup_cards_html:
+            st.markdown(
+                f'<div class="emergency-toast-container">{"".join(popup_cards_html)}</div>',
+                unsafe_allow_html=True,
+            )
 
     render_sidebar_room_directory(engine, all_snap, selected_bed, templates)
 
@@ -1634,8 +1679,7 @@ def main():
             type="primary" if is_sel else "secondary",
             use_container_width=True,
         ):
-            st.session_state["selected_department"] = "All Departments"
-            st.session_state["view_mode"] = "ward"
+            set_view(view_mode="ward", selected_dept="All Departments")
             st.rerun()
 
     for i, (code, full_name) in enumerate(HOSPITAL_DEPARTMENTS):
@@ -1648,15 +1692,14 @@ def main():
                 type="primary" if is_sel else "secondary",
                 use_container_width=True,
             ):
-                st.session_state["selected_department"] = code
-                st.session_state["view_mode"] = "ward"
+                set_view(view_mode="ward", selected_dept=code)
                 st.rerun()
 
     # VIEW 1: DEDICATED BED DASHBOARD (when clicked on a rectangular card or inspect)
     if view_mode == "detail":
         cur_bed_data = beds_snap.get(selected_bed)
         if not cur_bed_data:
-            st.session_state["view_mode"] = "ward"
+            set_view(view_mode="ward")
             st.rerun()
 
         bed_dept = cur_bed_data.get("department", "ICU")
@@ -1665,9 +1708,10 @@ def main():
 
         nav_c1, nav_c2 = st.columns([4, 8])
         with nav_c1:
-            if st.button(f"← Back to {bed_dept} Rooms", key="btn_back_to_ward", use_container_width=False):
-                st.session_state["view_mode"] = "ward"
-                st.session_state["selected_department"] = bed_dept
+            back_dept = selected_dept if selected_dept in ([code for code, _ in HOSPITAL_DEPARTMENTS] + ["All Departments"]) else bed_dept
+            back_lbl = "← Back to All Rooms" if back_dept == "All Departments" else f"← Back to {back_dept} Rooms"
+            if st.button(back_lbl, key="btn_back_to_ward", use_container_width=False):
+                set_view(view_mode="ward", selected_dept=back_dept)
                 st.rerun()
         with nav_c2:
             bed_keys = list(beds_snap.keys())
@@ -1684,10 +1728,10 @@ def main():
                     index=cur_idx,
                     format_func=format_bed_label,
                     label_visibility="collapsed",
-                    key="bed_detail_switcher",
                 )
                 if switched_bed != selected_bed:
-                    st.session_state["selected_bed"] = switched_bed
+                    target_dept = beds_snap.get(switched_bed, {}).get("department", "ICU")
+                    set_view(view_mode="detail", selected_bed=switched_bed, selected_dept=target_dept)
                     st.rerun()
 
         st.markdown(
@@ -1713,8 +1757,7 @@ def main():
             if st.button(f"+ Admit / Assign New Bed to {selected_dept}", key=f"btn_admit_to_{selected_dept}"):
                 sim_id = f"Bed_{len(added_bed_ids) + 1}"
                 engine.admit_jetson(sim_id, department=selected_dept)
-                st.session_state["selected_bed"] = sim_id
-                st.session_state["view_mode"] = "detail"
+                set_view(view_mode="detail", selected_bed=sim_id, selected_dept=selected_dept)
                 st.rerun()
         else:
             card_items = list(category_beds.items())
@@ -1728,8 +1771,7 @@ def main():
                         st.markdown(ward_tile(pid, b, pid == selected_bed, templates=templates), unsafe_allow_html=True)
                         p_name = b.get("patient_name", f"Patient {pid}")
                         if st.button(f"Open {p_name}'s Bed Dashboard →", key=f"open_dash_btn_{pid}", use_container_width=True):
-                            st.session_state["selected_bed"] = pid
-                            st.session_state["view_mode"] = "detail"
+                            set_view(view_mode="detail", selected_bed=pid, selected_dept=b.get("department", "ICU"))
                             st.rerun()
                 st.write("")
 

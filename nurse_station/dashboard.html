@@ -706,7 +706,7 @@
      1.5 EMERGENCY BLINKING POP-UP CARD
      ========================================================================== -->
   <template id="emergency_popup_card">
-    <a href="?bed={{pid}}&view=detail" target="_self" class="emergency-popup">
+    <a href="?bed={{pid}}&view=detail&dept={{dept}}" target="_self" class="emergency-popup">
       <div class="row-between" style="align-items:center; margin-bottom:6px;">
         <span class="emergency-badge">
           <span class="emergency-pulse-dot"></span>
@@ -752,7 +752,7 @@
      3. WARD OVERVIEW CARD (one per bed)
      ========================================================================== -->
   <template id="ward_tile">
-    <a href="?bed={{pid}}&view=detail" target="_self" class="tile ward-rect-card {{selected_cls}}" style="border-color:{{border_col}}; text-decoration:none; color:inherit; display:flex;">
+    <a href="?bed={{pid}}&view=detail&dept={{dept}}" target="_self" class="tile ward-rect-card {{selected_cls}}" style="border-color:{{border_col}}; text-decoration:none; color:inherit; display:flex;">
       <div class="row-between" style="align-items:flex-start; margin-bottom:4px;">
         <div>
           <div class="patient-name">{{patient_name}}</div>
@@ -929,7 +929,7 @@
       <div style="font-size:11px; color:#aab4c2; font-family:'IBM Plex Mono',monospace; margin:6px 0 8px 0; line-height:1.35;">
         HR {{hr_v}} &middot; SpO2 {{sp_v}}% &middot; CO2 {{co2_v}} &middot; BP {{bp_v}}
       </div>
-      <a href="?bed={{pid}}&view=detail" target="_self" style="display:block; text-align:center; padding:6px 10px; font-size:11px; font-weight:700; color:#60a5fa; background:rgba(96,165,250,0.1); border:1px solid rgba(96,165,250,0.28); border-radius:7px; text-decoration:none;">
+      <a href="?bed={{pid}}&view=detail&dept={{dept}}" target="_self" style="display:block; text-align:center; padding:6px 10px; font-size:11px; font-weight:700; color:#60a5fa; background:rgba(96,165,250,0.1); border:1px solid rgba(96,165,250,0.28); border-radius:7px; text-decoration:none;">
         Open Bed Dashboard &rarr;
       </a>
     </div>
