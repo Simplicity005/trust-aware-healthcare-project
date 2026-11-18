@@ -1467,24 +1467,94 @@ def render_sidebar_room_directory(engine, all_snap, selected_bed, templates):
             if st.sidebar.button(f"+ Admit {pid} ({target_dept})", key=f"side_admit_{pid}", use_container_width=True):
                 engine.admit_jetson(pid, department=target_dept, room_name=target_rm)
                 set_view(view_mode="detail", selected_bed=pid, selected_dept=target_dept)
+                st.session_state["show_add_bed"] = False
+                st.session_state["detecting_bedside"] = False
                 st.rerun()
+    elif st.session_state.get("detecting_bedside", False):
+        st.sidebar.markdown(
+            '<div style="font-size:11px; color:#38bdf8; display:flex; align-items:center; gap:6px; margin:8px 0; padding:6px 10px; background:rgba(56,189,248,0.08); border-radius:8px; border:1px solid rgba(56,189,248,0.2);">'
+            '<span class="detecting-pulse-dot" style="width:6px; height:6px;"></span>'
+            'Detecting bedside units...</div>',
+            unsafe_allow_html=True,
+        )
 
     st.sidebar.markdown(render_template(templates, "sidebar_bedside_link"), unsafe_allow_html=True)
 
 
+SCAN_TIMEOUT_SECONDS = 150  # 2.5 minutes (2-3 min detection window)
+
+
 def render_admission_modal(engine, unadded_jetsons, added_bed_ids, templates):
-    st.markdown(render_template(templates, "admission_banner"), unsafe_allow_html=True)
+    # Ensure detection is started when panel is opened
+    if "detecting_bedside" not in st.session_state:
+        st.session_state["detecting_bedside"] = True
+        st.session_state["detect_start_time"] = time.time()
+        st.session_state["last_probe_time"] = time.time()
+        engine.probe_network_for_jetsons()
+
+    is_detecting = st.session_state.get("detecting_bedside", False)
+    start_time = st.session_state.get("detect_start_time", time.time())
+    now = time.time()
+    elapsed = now - start_time
+    remaining = max(0, int(SCAN_TIMEOUT_SECONDS - elapsed))
+
+    # Auto-stop after 2.5 minutes
+    if is_detecting and remaining <= 0:
+        st.session_state["detecting_bedside"] = False
+        is_detecting = False
+
+    # Send periodic MQTT probe ping every 4 seconds while actively detecting
+    if is_detecting:
+        last_probe = st.session_state.get("last_probe_time", 0.0)
+        if (now - last_probe) >= 4.0:
+            engine.probe_network_for_jetsons()
+            st.session_state["last_probe_time"] = now
+
+    rem_mins = remaining // 60
+    rem_secs = remaining % 60
+
+    if is_detecting:
+        timer_text = f"{rem_mins:02d}:{rem_secs:02d} remaining"
+        status_badge_html = '<span class="detecting-badge"><span class="detecting-pulse-dot"></span>DETECTING DEVICES</span>'
+        status_message = "Actively probing local network on MQTT port 1883 for new bedside units ready to pair."
+        progress_bar_html = '<div class="scan-progress-track"><div class="scan-progress-bar"></div></div>'
+    else:
+        timer_text = "Scan Window Ended"
+        status_badge_html = '<span class="pill pill-muted" style="font-size:10.5px; padding:3px 10px;">DETECTION STOPPED</span>'
+        status_message = "Detection stopped after 2.5 minutes. If your bedside is not listed below, make sure it is ready to pair and restart detection."
+        progress_bar_html = ""
+
+    st.markdown(
+        render_template(
+            templates,
+            "admission_banner",
+            status_badge_html=status_badge_html,
+            timer_text=timer_text,
+            status_message=status_message,
+            progress_bar_html=progress_bar_html,
+        ),
+        unsafe_allow_html=True,
+    )
 
     c1, c2, c3 = st.columns([2, 1, 1])
     with c1:
         st.markdown(f"**Discovered Nodes Ready to Pair:** `{len(unadded_jetsons)}` unassigned device(s) online.")
     with c2:
-        if st.button("Rescan Network / Probe", key="rescan_modal_btn", use_container_width=True):
-            engine.probe_network_for_jetsons()
-            st.rerun()
+        if is_detecting:
+            if st.button("Stop Detection", key="btn_stop_detection", use_container_width=True):
+                st.session_state["detecting_bedside"] = False
+                st.rerun()
+        else:
+            if st.button("Restart Detection (2.5m)", key="btn_restart_detection", type="primary", use_container_width=True):
+                st.session_state["detecting_bedside"] = True
+                st.session_state["detect_start_time"] = time.time()
+                st.session_state["last_probe_time"] = time.time()
+                engine.probe_network_for_jetsons()
+                st.rerun()
     with c3:
         if st.button("Close Panel", key="close_admission_btn", use_container_width=True):
             st.session_state["show_add_bed"] = False
+            st.session_state["detecting_bedside"] = False
             st.rerun()
 
     if unadded_jetsons:
@@ -1496,13 +1566,16 @@ def render_admission_modal(engine, unadded_jetsons, added_bed_ids, templates):
             vitals = dev.get("latest_vitals", {})
             hr = vitals.get("hr", 75)
             spo2 = vitals.get("spo2", 98)
+            co2 = vitals.get("co2", 38)
+            ibp = vitals.get("ibp", {})
+            bp_txt = ibp.get("formatted", "120/80") if isinstance(ibp, dict) else str(ibp)
 
             col_dev, col_room, col_act = st.columns([4, 4, 3], gap="medium")
             with col_dev:
                 st.markdown(
                     f"**Hardware Node:** `{pid}`  \n"
                     f"Model: `{model}` | AI Engine: `{provider}`  \n"
-                    f"Vitals Snapshot: **HR {hr} bpm** | **SpO2 {spo2}%**"
+                    f"Vitals Snapshot: **HR {hr} bpm** | **SpO2 {spo2}%** | **CO2 {co2}** | **BP {bp_txt}**"
                 )
             with col_room:
                 dept_opts = [f"{code} - {name}" for code, name in HOSPITAL_DEPARTMENTS]
@@ -1521,7 +1594,20 @@ def render_admission_modal(engine, unadded_jetsons, added_bed_ids, templates):
                     engine.admit_jetson(pid, department=assigned_dept)
                     set_view(view_mode="detail", selected_bed=pid, selected_dept=assigned_dept)
                     st.session_state["show_add_bed"] = False
+                    st.session_state["detecting_bedside"] = False
                     st.rerun()
+
+        st.markdown(
+            '<div class="pairing-guidance-card" style="border-left-color:#38bdf8;">'
+            '<div class="pairing-guidance-title" style="color:#38bdf8;">'
+            'Don\'t see the specific bedside you want to add?'
+            '</div>'
+            '<div style="color:#94a3b8; font-size:12px; margin-top:4px; line-height:1.5;">'
+            'Make sure the desired bedside monitor is powered on, running <code>start_bedside.bat</code>, and connected to this local network. Network discovery probes are being broadcast continuously.'
+            '</div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
     else:
         st.markdown(render_template(templates, "admission_empty"), unsafe_allow_html=True)
         sim_id = f"Bed_{len(added_bed_ids) + 1}"
@@ -1539,6 +1625,7 @@ def render_admission_modal(engine, unadded_jetsons, added_bed_ids, templates):
                 engine.admit_jetson(sim_id, department=sim_dept_target)
                 set_view(view_mode="detail", selected_bed=sim_id, selected_dept=sim_dept_target)
                 st.session_state["show_add_bed"] = False
+                st.session_state["detecting_bedside"] = False
                 st.rerun()
 
 
@@ -1658,9 +1745,22 @@ def main():
             add_lbl = "- Close Panel" if st.session_state["show_add_bed"] else f"+ Add New Bed{add_bed_badge}"
             if st.button(add_lbl, key="toggle_add_bed", use_container_width=True):
                 st.session_state["show_add_bed"] = not st.session_state["show_add_bed"]
+                if st.session_state["show_add_bed"]:
+                    st.session_state["detecting_bedside"] = True
+                    st.session_state["detect_start_time"] = time.time()
+                    st.session_state["last_probe_time"] = time.time()
+                    engine.probe_network_for_jetsons()
+                else:
+                    st.session_state["detecting_bedside"] = False
                 st.rerun()
         with btn_c2:
-            if st.button("Rescan LAN", key="top_rescan_btn", use_container_width=True):
+            is_scanning = st.session_state.get("detecting_bedside", False)
+            rescan_lbl = "Scanning..." if is_scanning else "Rescan LAN"
+            if st.button(rescan_lbl, key="top_rescan_btn", use_container_width=True):
+                st.session_state["show_add_bed"] = True
+                st.session_state["detecting_bedside"] = True
+                st.session_state["detect_start_time"] = time.time()
+                st.session_state["last_probe_time"] = time.time()
                 engine.probe_network_for_jetsons()
                 st.rerun()
 
@@ -1754,10 +1854,12 @@ def main():
 
         if not category_beds:
             st.info(f"No active patient beds currently assigned to {selected_dept}.")
-            if st.button(f"+ Admit / Assign New Bed to {selected_dept}", key=f"btn_admit_to_{selected_dept}"):
-                sim_id = f"Bed_{len(added_bed_ids) + 1}"
-                engine.admit_jetson(sim_id, department=selected_dept)
-                set_view(view_mode="detail", selected_bed=sim_id, selected_dept=selected_dept)
+            if st.button(f"+ Detect & Admit New Bed to {selected_dept}", key=f"btn_admit_to_{selected_dept}"):
+                st.session_state["show_add_bed"] = True
+                st.session_state["detecting_bedside"] = True
+                st.session_state["detect_start_time"] = time.time()
+                st.session_state["last_probe_time"] = time.time()
+                engine.probe_network_for_jetsons()
                 st.rerun()
         else:
             card_items = list(category_beds.items())

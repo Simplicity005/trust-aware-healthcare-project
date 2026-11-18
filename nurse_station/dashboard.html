@@ -697,6 +697,95 @@
       justify-content: space-between;
       align-items: center;
     }
+
+    /* ---------- Bedside Detection & Scanner Animation ---------- */
+    @keyframes scan-radar-pulse {
+      0% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.75);
+      }
+      70% {
+        transform: scale(1.1);
+        box-shadow: 0 0 0 10px rgba(56, 189, 248, 0);
+      }
+      100% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 rgba(56, 189, 248, 0);
+      }
+    }
+
+    @keyframes scan-line-sweep {
+      0% {
+        left: -35%;
+      }
+      100% {
+        left: 100%;
+      }
+    }
+
+    .detecting-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 11px;
+      font-weight: 700;
+      color: #38bdf8;
+      background: rgba(56, 189, 248, 0.12);
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      border-radius: 999px;
+      padding: 3px 12px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .detecting-pulse-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #38bdf8;
+      animation: scan-radar-pulse 1.4s infinite ease-out;
+      display: inline-block;
+    }
+
+    .scan-progress-track {
+      position: relative;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 999px;
+      overflow: hidden;
+      margin: 12px 0 6px 0;
+    }
+
+    .scan-progress-bar {
+      position: absolute;
+      top: 0;
+      height: 100%;
+      width: 45%;
+      background: linear-gradient(90deg, transparent, #38bdf8, transparent);
+      animation: scan-line-sweep 1.6s infinite linear;
+      border-radius: 999px;
+    }
+
+    .pairing-guidance-card {
+      background: rgba(30, 41, 59, 0.55);
+      border: 1px solid rgba(251, 191, 36, 0.3);
+      border-left: 4px solid #f59e0b;
+      border-radius: 12px;
+      padding: 14px 18px;
+      margin-top: 14px;
+      font-size: 12.5px;
+      line-height: 1.5;
+    }
+
+    .pairing-guidance-title {
+      font-weight: 700;
+      color: #fbbf24;
+      font-size: 13px;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
   </style>
 </head>
 
@@ -955,17 +1044,41 @@
      7. BED ADMISSION
      ========================================================================== -->
   <template id="admission_banner">
-    <div
-      style="background:#111720;border:1px solid rgba(96,165,250,0.35);border-radius:18px;padding:16px 20px;margin-bottom:18px;">
-      <span style="font-size:16px;font-weight:700;color:#f8fafc;">Add a bed</span>
-      <div style="font-size:13px;color:#8a96a6;margin-top:2px;">Detected bedside units ready to be assigned to a patient
-        bed.</div>
+    <div style="background:#111720; border:1px solid rgba(56,189,248,0.35); border-radius:18px; padding:18px 22px; margin-bottom:18px;">
+      <div class="row-between" style="align-items:center; margin-bottom:4px;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span style="font-size:16px; font-weight:800; color:#f8fafc; letter-spacing:-0.01em;">Bedside Hardware Discovery & Admission</span>
+          {{status_badge_html}}
+        </div>
+        <div style="font-size:12px; font-family:'IBM Plex Mono',monospace; color:#94a3b8; font-weight:600;">
+          {{timer_text}}
+        </div>
+      </div>
+      <div style="font-size:12.5px; color:#94a3b8; margin-top:2px;">
+        {{status_message}}
+      </div>
+      {{progress_bar_html}}
     </div>
   </template>
 
   <template id="admission_empty">
-    <div style="padding:14px 16px;background:#111720;border-radius:12px;font-size:13px;color:#8a96a6;margin:12px 0;">
-      No new bedside units detected. Power one on and rescan.
+    <div style="padding:16px 20px; background:#111720; border:1px solid rgba(255,255,255,0.08); border-radius:14px; margin:14px 0;">
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+        <span class="pill pill-amber" style="font-size:11px; padding:3px 9px;">NO UNASSIGNED DEVICES FOUND</span>
+        <span style="font-size:12.5px; color:#e2e8f0; font-weight:600;">No new bedside monitors detected yet.</span>
+      </div>
+      <div class="pairing-guidance-card">
+        <div class="pairing-guidance-title">
+          Bedside not appearing? Make sure the bedside monitor is ready to pair:
+        </div>
+        <div style="color:#cbd5e1; font-size:12px; margin-top:6px; line-height:1.65;">
+          <ul style="margin:4px 0 0 16px; padding:0;">
+            <li><strong>Power on the bedside:</strong> Run <code style="background:rgba(0,0,0,0.4); padding:2px 6px; border-radius:4px; color:#38bdf8;">start_bedside.bat</code> or <code style="background:rgba(0,0,0,0.4); padding:2px 6px; border-radius:4px; color:#38bdf8;">python jetson_bedside\jetson_edge_brain.py</code> on the bedside laptop/hardware.</li>
+            <li><strong>Verify Wi-Fi / Local Network:</strong> Confirm both laptops are connected to the same Wi-Fi or LAN subnet.</li>
+            <li><strong>Check Discovery Beacon:</strong> The bedside unit will automatically announce <code style="background:rgba(0,0,0,0.4); padding:2px 6px; border-radius:4px; color:#34d399;">status: ready</code> on MQTT topic <code style="background:rgba(0,0,0,0.4); padding:2px 6px; border-radius:4px; color:#e2e8f0;">hospital/discovery/announce</code> upon boot and when probed.</li>
+          </ul>
+        </div>
+      </div>
     </div>
   </template>
 
