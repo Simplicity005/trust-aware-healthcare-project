@@ -241,6 +241,139 @@
       box-shadow: 0 0 0 1px #3b82f6, 0 8px 24px rgba(59, 130, 246, 0.22) !important;
     }
 
+    /* ---------- Blinking Red Emergency Alert Pop-up ---------- */
+    @keyframes emergency-pulse {
+      0%, 100% {
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.95), 0 12px 36px rgba(0, 0, 0, 0.8);
+        border-color: #ef4444;
+        background-color: rgba(69, 10, 10, 0.96);
+      }
+      50% {
+        box-shadow: 0 0 0 16px rgba(239, 68, 68, 0), 0 16px 45px rgba(239, 68, 68, 0.6);
+        border-color: #fca5a5;
+        background-color: rgba(153, 27, 27, 0.98);
+      }
+    }
+
+    @keyframes emergency-badge-flash {
+      0%, 100% {
+        background-color: #ef4444;
+        color: #ffffff;
+      }
+      50% {
+        background-color: #7f1d1d;
+        color: #fecaca;
+      }
+    }
+
+    @keyframes emergency-text-flash {
+      0%, 100% {
+        opacity: 1;
+        color: #fee2e2;
+      }
+      50% {
+        opacity: 0.45;
+        color: #fca5a5;
+      }
+    }
+
+    @keyframes emergency-dot-blink {
+      0%, 100% {
+        transform: scale(1);
+        opacity: 1;
+      }
+      50% {
+        transform: scale(1.4);
+        opacity: 0.35;
+      }
+    }
+
+    .emergency-toast-container {
+      position: fixed;
+      top: 24px;
+      right: 28px;
+      z-index: 999999;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      max-width: 440px;
+      width: calc(100vw - 56px);
+      pointer-events: auto;
+    }
+
+    .emergency-popup {
+      display: block;
+      text-decoration: none !important;
+      color: #ffffff !important;
+      border: 2px solid #ef4444;
+      border-radius: 16px;
+      padding: 16px 18px;
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      animation: emergency-pulse 1.0s infinite ease-in-out;
+      cursor: pointer;
+      transition: transform 0.15s ease, filter 0.15s ease;
+      box-sizing: border-box;
+    }
+
+    .emergency-popup:hover {
+      transform: scale(1.02);
+      filter: brightness(1.1);
+    }
+
+    .emergency-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      animation: emergency-badge-flash 0.8s infinite;
+    }
+
+    .emergency-pulse-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #fff;
+      display: inline-block;
+      animation: emergency-dot-blink 0.8s infinite;
+    }
+
+    .emergency-reason {
+      font-size: 13px;
+      font-weight: 800;
+      margin: 8px 0 6px 0;
+      animation: emergency-text-flash 1.0s infinite;
+      letter-spacing: -0.01em;
+    }
+
+    .emergency-action-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      width: 100%;
+      padding: 9px 12px;
+      margin-top: 10px;
+      background: #ef4444;
+      color: #ffffff !important;
+      font-weight: 800;
+      font-size: 12px;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      text-decoration: none !important;
+      letter-spacing: 0.02em;
+      transition: background 0.15s ease;
+    }
+
+    .emergency-popup:hover .emergency-action-btn {
+      background: #dc2626;
+    }
+
     .bento {
       display: grid;
       grid-template-columns: repeat(12, 1fr);
@@ -570,6 +703,41 @@
 <body>
 
   <!-- ==========================================================================
+     1.5 EMERGENCY BLINKING POP-UP CARD
+     ========================================================================== -->
+  <template id="emergency_popup_card">
+    <a href="?bed={{pid}}&view=detail" target="_self" class="emergency-popup">
+      <div class="row-between" style="align-items:center; margin-bottom:6px;">
+        <span class="emergency-badge">
+          <span class="emergency-pulse-dot"></span>
+          CRITICAL EMERGENCY ALERT
+        </span>
+        <span style="font-size:12px; font-weight:700; color:#fee2e2; font-family:'IBM Plex Mono',monospace;">
+          {{room}}
+        </span>
+      </div>
+
+      <div style="margin:8px 0 6px 0;">
+        <div style="font-size:16px; font-weight:800; color:#ffffff; line-height:1.25;">{{patient_name}}</div>
+        <div style="font-size:11.5px; color:#fecaca; margin-top:2px;">
+          <span style="font-weight:700; color:#fff;">{{pid}}</span> &middot; {{diagnosis}}
+        </div>
+      </div>
+
+      <div class="emergency-reason">{{reason}}</div>
+
+      <div style="font-size:11.5px; color:#fee2e2; font-family:'IBM Plex Mono',monospace; background:rgba(0,0,0,0.35); padding:6px 10px; border-radius:8px; border:1px solid rgba(239,68,68,0.4); margin-bottom:8px;">
+        HR {{hr_v}} bpm &middot; SpO2 {{sp_v}}% &middot; EtCO2 {{co2_v}} &middot; BP {{bp_v}}
+      </div>
+
+      <div class="emergency-action-btn">
+        RESPOND TO EMERGENCY &mdash; OPEN {{pid}} DASHBOARD &rarr;
+      </div>
+    </a>
+  </template>
+
+
+  <!-- ==========================================================================
      2. TOPBAR
      ========================================================================== -->
   <template id="topbar">
@@ -666,6 +834,7 @@
      ========================================================================== -->
   <template id="detail_view">
     <div class="bento">
+      {{emergency_banner_html}}
       <div class="tile span-12" style="background:var(--card-2); border-color:rgba(96,165,250,0.22); padding:16px 20px;">
         <div class="row-between">
           <div>

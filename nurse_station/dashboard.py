@@ -1032,6 +1032,52 @@ def status_pill_info(bed):
     return "STABLE", "pill-green"
 
 
+def detect_bed_emergency(pid, bed):
+    """
+    Evaluates whether a patient bed is in an acute clinical emergency requiring immediate nurse alert:
+    1. Bedside local_bed_alarm is active (Ventricular Arrhythmia / Cardiorespiratory emergency)
+    2. Bedside arrhythmia risk >= 70%
+    3. Critical life-threatening vital breaches:
+       - Critical Hypoxia (SpO2 <= 85%)
+       - Extreme Tachycardia (HR >= 160) or Severe Bradycardia (HR <= 40)
+       - Hypotensive Shock (Sys BP <= 75 mmHg) or Hypertensive Crisis (Sys BP >= 200 mmHg)
+       - Severe Hypercapnic Failure (EtCO2 >= 60 mmHg)
+    """
+    if not bed.get("online", False):
+        return False, ""
+
+    edge = bed.get("edge", {})
+    vitals = edge.get("latest_vitals", {})
+    hr = vitals.get("hr", 75)
+    spo2 = vitals.get("spo2", 98)
+    co2 = vitals.get("co2", 38)
+    ibp = vitals.get("ibp", {})
+    sys_bp = ibp.get("sys", 120) if isinstance(ibp, dict) else 120
+
+    is_alarm = bool(edge.get("local_bed_alarm", False))
+    prob = edge.get("arrhythmia_prob", 0.0)
+
+    reasons = []
+    if is_alarm or prob >= 0.70:
+        reasons.append(f"Ventricular Arrhythmia ({prob*100:.1f}% risk)")
+    if spo2 <= 85:
+        reasons.append(f"Critical Hypoxia (SpO2 {spo2}%)")
+    if hr >= 160:
+        reasons.append(f"Extreme Tachycardia (HR {hr} bpm)")
+    elif hr <= 40:
+        reasons.append(f"Severe Bradycardia (HR {hr} bpm)")
+    if sys_bp <= 75:
+        reasons.append(f"Hypotensive Shock (Sys {sys_bp} mmHg)")
+    elif sys_bp >= 200:
+        reasons.append(f"Hypertensive Crisis (Sys {sys_bp} mmHg)")
+    if co2 >= 60:
+        reasons.append(f"Severe Hypercapnia (EtCO2 {co2} mmHg)")
+
+    if reasons:
+        return True, " &middot; ".join(reasons)
+    return False, ""
+
+
 def dot_color(status):
     if status == "TRUSTED":
         return "#34d399"
@@ -1190,9 +1236,26 @@ def detail_view(pid, bed, logs, templates=None):
         log_rows_html = '<div class="sub" style="padding:6px 0;">No anomaly alerts or quarantine events for this patient bed.</div>'
 
     label, pill_cls = status_pill_info(bed)
+    is_emerg, emerg_reason = detect_bed_emergency(pid, bed)
+    if is_emerg:
+        emergency_banner_html = (
+            f'<div class="tile span-12" style="background:rgba(127,29,29,0.96); border:2px solid #ef4444; '
+            f'animation:emergency-pulse 1.0s infinite ease-in-out; padding:14px 20px; margin-bottom:4px;">'
+            f'<div class="row-between" style="align-items:center;">'
+            f'<div style="display:flex; align-items:center; gap:10px;">'
+            f'<span class="emergency-badge"><span class="emergency-pulse-dot"></span>ACTIVE CLINICAL EMERGENCY</span>'
+            f'<span style="font-size:15px; font-weight:800; color:#fee2e2;">{emerg_reason}</span>'
+            f'</div>'
+            f'<span style="font-size:12px; font-weight:700; color:#fca5a5; font-family:\'IBM Plex Mono\',monospace;">MONITORING PRIORITY: CRITICAL</span>'
+            f'</div></div>'
+        )
+    else:
+        emergency_banner_html = ""
+
     return render_template(
         templates,
         "detail_view",
+        emergency_banner_html=emergency_banner_html,
         pid=pid,
         patient_name=bed.get("patient_name", f"Patient {pid}"),
         diagnosis=bed.get("diagnosis", "Observation & Telemetry"),
@@ -1250,6 +1313,44 @@ def render_sidebar_room_directory(engine, all_snap, selected_bed, templates):
         if st.button("Test Failover / Switch Role", key="btn_ha_toggle", use_container_width=True):
             engine.trigger_failover_test()
             st.rerun()
+
+    with st.sidebar.expander("Emergency Alert Simulator", expanded=False):
+        st.caption("Trigger or clear emergency alarm on any bed to test instant blinking red alerts:")
+        sim_bed = st.selectbox("Select Target Bed", options=list(all_snap["beds"].keys()), key="emerg_sim_bed")
+        c_trig, c_clr = st.columns(2)
+        with c_trig:
+            if st.button("Trigger Alarm", key="btn_trig_alarm", type="primary", use_container_width=True):
+                if os.path.exists(CHAOS_FILE):
+                    try:
+                        with open(CHAOS_FILE, "r", encoding="utf-8") as f:
+                            cfg = json.load(f)
+                        if sim_bed not in cfg:
+                            cfg[sim_bed] = {"vitals": {}, "Agent_ECG": {}, "Agent_HR": {}, "Agent_SpO2": {}}
+                        cfg[sim_bed].setdefault("vitals", {})["ecg_condition"] = "arrhythmia"
+                        cfg[sim_bed]["vitals"]["target_hr"] = 165
+                        cfg[sim_bed]["vitals"]["target_spo2"] = 82
+                        cfg[sim_bed].setdefault("Agent_ECG", {})["condition"] = "arrhythmia"
+                        with open(CHAOS_FILE, "w", encoding="utf-8") as f:
+                            json.dump(cfg, f, indent=2)
+                    except Exception:
+                        pass
+                st.rerun()
+        with c_clr:
+            if st.button("Clear Alarm", key="btn_clr_alarm", use_container_width=True):
+                if os.path.exists(CHAOS_FILE):
+                    try:
+                        with open(CHAOS_FILE, "r", encoding="utf-8") as f:
+                            cfg = json.load(f)
+                        if sim_bed in cfg:
+                            cfg[sim_bed].setdefault("vitals", {})["ecg_condition"] = "normal"
+                            cfg[sim_bed]["vitals"]["target_hr"] = 75
+                            cfg[sim_bed]["vitals"]["target_spo2"] = 98
+                            cfg[sim_bed].setdefault("Agent_ECG", {})["condition"] = "normal"
+                            with open(CHAOS_FILE, "w", encoding="utf-8") as f:
+                                json.dump(cfg, f, indent=2)
+                    except Exception:
+                        pass
+                st.rerun()
 
     st.sidebar.markdown('<div class="sec-label">Hospital Departments</div>', unsafe_allow_html=True)
 
@@ -1444,6 +1545,47 @@ def main():
     selected_bed = st.session_state["selected_bed"]
     selected_dept = st.session_state["selected_department"]
     view_mode = st.session_state["view_mode"]
+
+    # Check for active emergency in any admitted patient room
+    active_emergencies = []
+    for pid, b in beds_snap.items():
+        is_emerg, reason = detect_bed_emergency(pid, b)
+        if is_emerg:
+            active_emergencies.append((pid, b, reason))
+
+    if active_emergencies:
+        popup_cards_html = []
+        for emerg_pid, emerg_bed, reason in active_emergencies:
+            v = emerg_bed["edge"].get("latest_vitals", {})
+            hr_v = v.get("hr", "--")
+            sp_v = v.get("spo2", "--")
+            co2_v = v.get("co2", "--")
+            ibp_v = emerg_bed["agents"].get("Agent_IBP", {}).get("value", {})
+            bp_v = (
+                ibp_v.get("formatted", f"{ibp_v.get('sys', '--')}/{ibp_v.get('dia', '--')}")
+                if isinstance(ibp_v, dict)
+                else str(ibp_v)
+            )
+
+            card_html = render_template(
+                templates,
+                "emergency_popup_card",
+                pid=emerg_pid,
+                room=emerg_bed.get("room", f"Room {emerg_pid}"),
+                patient_name=emerg_bed.get("patient_name", f"Patient {emerg_pid}"),
+                diagnosis=emerg_bed.get("diagnosis", "Critical Telemetry"),
+                reason=reason,
+                hr_v=hr_v,
+                sp_v=sp_v,
+                co2_v=co2_v,
+                bp_v=bp_v,
+            )
+            popup_cards_html.append(card_html)
+
+        st.markdown(
+            f'<div class="emergency-toast-container">{"".join(popup_cards_html)}</div>',
+            unsafe_allow_html=True,
+        )
 
     render_sidebar_room_directory(engine, all_snap, selected_bed, templates)
 
