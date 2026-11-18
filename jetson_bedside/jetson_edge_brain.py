@@ -18,6 +18,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import numpy as np
 import paho.mqtt.client as mqtt
+from trust_evaluator import AgentTrustTracker
 
 try:
     import onnxruntime as ort
@@ -29,6 +30,22 @@ CHAOS_FILE = os.path.join(BASE_DIR, "chaos.json")
 DEFAULT_MODEL = os.path.join(BASE_DIR, "ecg_anomaly.onnx")
 BEDSIDE_HTML_FILE = os.path.join(BASE_DIR, "bedside_monitor.html")
 CHAOS_LOCK = threading.Lock()
+SENSOR_AGENT_IDS = (
+    "Agent_ECG",
+    "Agent_SpO2",
+    "Agent_HR",
+    "Agent_Respiration",
+    "Agent_EtCO2",
+    "Agent_IBP",
+    "Agent_NIBP",
+)
+SENSOR_WAVE_KEYS = {
+    "Agent_ECG": "ecg_wave",
+    "Agent_SpO2": "pleth_wave",
+    "Agent_Respiration": "respiration_wave",
+    "Agent_EtCO2": "etco2_wave",
+    "Agent_IBP": "ibp_wave",
+}
 
 
 def load_bedside_html():
@@ -45,6 +62,8 @@ def default_bed_chaos():
         "Agent_SpO2": {"delay_ms": 10, "drop_rate": 0.0, "malicious": False, "target_spo2": 98},
         "Agent_HR": {"delay_ms": 10, "drop_rate": 0.0, "malicious": False, "target_hr": 75},
         "Agent_CO2": {"delay_ms": 10, "drop_rate": 0.0, "malicious": False, "target_co2": 38},
+        "Agent_Respiration": {"delay_ms": 10, "drop_rate": 0.0, "malicious": False},
+        "Agent_EtCO2": {"delay_ms": 10, "drop_rate": 0.0, "malicious": False},
         "Agent_IBP": {"delay_ms": 10, "drop_rate": 0.0, "malicious": False, "target_sys": 120, "target_dia": 80},
         "Agent_NIBP": {"delay_ms": 15, "drop_rate": 0.0, "malicious": False, "target_sys": 120, "target_dia": 80},
         "Orin_Link": {"overload_gpu": False, "use_relay_b": False},
@@ -54,6 +73,8 @@ def default_bed_chaos():
             "target_co2": 38,
             "target_sys": 120,
             "target_dia": 80,
+            "target_respiration": 16,
+            "target_etco2": 38,
             "ecg_condition": "normal",
         },
     }
@@ -154,6 +175,8 @@ def make_bedside_handler(engines_dict, meta_info):
                             "co2": eng.latest_co2,
                             "ibp": eng.latest_ibp,
                             "nibp": eng.latest_nibp,
+                            "respiration_rate": eng.latest_sensors["Agent_Respiration"]["value"],
+                            "etco2_mmhg": eng.latest_sensors["Agent_EtCO2"]["value"],
                             "hr_valid": eng.hr_plausible,
                             "spo2_valid": eng.spo2_plausible,
                             "co2_valid": eng.co2_plausible,
@@ -166,6 +189,7 @@ def make_bedside_handler(engines_dict, meta_info):
                             "relay_b": eng.last_relay_b,
                             "packets": eng.packets_processed,
                             "ecg_wave": eng.latest_ecg_wave[-250:] if eng.latest_ecg_wave else [],
+                            "sensors": eng.get_sensor_snapshot(),
                             "sensor_links": eng.sensor_links,
                             "chaos": read_patient_chaos(pid),
                         }
@@ -224,6 +248,8 @@ def make_bedside_handler(engines_dict, meta_info):
                 if "target_co2" in data:
                     chaos["vitals"]["target_co2"] = int(data["target_co2"])
                     chaos.setdefault("Agent_CO2", {})["target_co2"] = int(data["target_co2"])
+                    chaos["vitals"]["target_etco2"] = int(data["target_co2"])
+                    chaos.setdefault("Agent_EtCO2", {})["target_etco2"] = int(data["target_co2"])
                 if "target_sys" in data:
                     chaos["vitals"]["target_sys"] = int(data["target_sys"])
                     chaos.setdefault("Agent_IBP", {})["target_sys"] = int(data["target_sys"])
@@ -236,7 +262,7 @@ def make_bedside_handler(engines_dict, meta_info):
                     chaos["vitals"]["ecg_condition"] = str(data["ecg_condition"])
                     chaos.setdefault("Agent_ECG", {})["condition"] = str(data["ecg_condition"])
 
-                all_agents = ["Agent_ECG", "Agent_SpO2", "Agent_HR", "Agent_CO2", "Agent_IBP", "Agent_NIBP"]
+                all_agents = (*SENSOR_AGENT_IDS, "Agent_CO2")
                 if "delay_ms" in data:
                     d_ms = float(data["delay_ms"])
                     for aid in all_agents:
@@ -285,17 +311,17 @@ class JetsonEdgeBrain:
         self.active_provider = active_provider
         self.input_name = self.session.get_inputs()[0].name if self.session else "ecg_input"
 
-        self.latest_hr = 75
-        self.latest_spo2 = 98
-        self.latest_co2 = 38
-        self.latest_ibp = {"sys": 120, "dia": 80, "map": 93, "formatted": "120/80 (93)"}
-        self.latest_nibp = {"sys": 120, "dia": 80, "map": 93, "formatted": "120/80"}
+        self.latest_hr = None
+        self.latest_spo2 = None
+        self.latest_co2 = None
+        self.latest_ibp = None
+        self.latest_nibp = None
         self.latest_ecg_var = 0.04
-        self.hr_plausible = True
-        self.spo2_plausible = True
-        self.co2_plausible = True
-        self.ibp_plausible = True
-        self.nibp_plausible = True
+        self.hr_plausible = False
+        self.spo2_plausible = False
+        self.co2_plausible = False
+        self.ibp_plausible = False
+        self.nibp_plausible = False
         self.latest_ecg_wave = []
         self.last_prob = 0.02
         self.last_arrhythmia = False
@@ -309,13 +335,22 @@ class JetsonEdgeBrain:
         self.stop_event = threading.Event()
 
         self.sensor_links = {
-            "Agent_ECG": {"latency_ms": 12.0, "loss_pct": 0.0, "last_seq": None, "rx": 0, "lost": 0},
-            "Agent_SpO2": {"latency_ms": 10.0, "loss_pct": 0.0, "last_seq": None, "rx": 0, "lost": 0},
-            "Agent_HR": {"latency_ms": 10.0, "loss_pct": 0.0, "last_seq": None, "rx": 0, "lost": 0},
-            "Agent_CO2": {"latency_ms": 10.0, "loss_pct": 0.0, "last_seq": None, "rx": 0, "lost": 0},
-            "Agent_IBP": {"latency_ms": 10.0, "loss_pct": 0.0, "last_seq": None, "rx": 0, "lost": 0},
-            "Agent_NIBP": {"latency_ms": 15.0, "loss_pct": 0.0, "last_seq": None, "rx": 0, "lost": 0},
+            agent_id: {
+                "latency_ms": 10.0,
+                "loss_pct": 0.0,
+                "last_seq": None,
+                "last_rx_time": None,
+                "rx": 0,
+                "lost": 0,
+            }
+            for agent_id in SENSOR_AGENT_IDS
         }
+        self.trust_trackers = {agent_id: AgentTrustTracker(agent_id) for agent_id in SENSOR_AGENT_IDS}
+        self.latest_sensors = {
+            agent_id: {"value": None, "reading": {}, "waveform": [], "seq": None, "sent_ts": None, "valid": False}
+            for agent_id in SENSOR_AGENT_IDS
+        }
+        self.sensor_links["Agent_CO2"] = self.sensor_links["Agent_EtCO2"]
         self.lock = threading.Lock()
         self.client = None
 
@@ -398,9 +433,30 @@ class JetsonEdgeBrain:
             if gap > 0:
                 info["lost"] += gap
         info["last_seq"] = seq
+        info["last_rx_time"] = now
         info["rx"] += 1
         total = max(1, info["rx"] + info["lost"])
         info["loss_pct"] = round((info["lost"] / total) * 100.0, 1)
+
+    def get_sensor_snapshot(self):
+        snapshot = {}
+        for agent_id, sensor in self.latest_sensors.items():
+            tracker = self.trust_trackers[agent_id]
+            reliability = tracker.evaluate_status()
+            connected = reliability != "DISCONNECTED"
+            valid = bool(tracker.validity_window and tracker.validity_window[-1] > 0)
+            quality_score = min(tracker.s_l, tracker.s_j, tracker.s_p, tracker.s_d) if connected and valid else 0.0
+            signal_quality = round(float(np.clip(quality_score, 0.0, 1.0)) * 100)
+            snapshot[agent_id] = {
+                **sensor,
+                "trust_score": round(tracker.trust_score * 100, 1),
+                "signal_quality": signal_quality,
+                "connection_status": "CONNECTED" if connected else "DISCONNECTED",
+                "reliability_level": reliability,
+                "sensor_health": "HEALTHY" if connected and valid else "DEGRADED" if connected else "DISCONNECTED",
+                "age_ms": round((time.time() - tracker.last_rx_time) * 1000) if tracker.last_rx_time else None,
+            }
+        return snapshot
 
     def _run_inference(self, ecg_wave, overload_gpu=False):
         t0 = time.perf_counter()
@@ -452,59 +508,89 @@ class JetsonEdgeBrain:
                 update_chaos_file(payload)
                 return
 
-            agent_id = payload.get("agent_id", "")
+            topic_agent_id = payload.get("agent_id", "")
+            agent_id = "Agent_EtCO2" if topic_agent_id == "Agent_CO2" else topic_agent_id
+            if agent_id not in self.trust_trackers:
+                return
+            valid_topics = {f"hospital/{self.patient_id}/sensors/{agent_id}"}
+            if agent_id == "Agent_EtCO2":
+                valid_topics.add(f"hospital/{self.patient_id}/sensors/Agent_CO2")
+            if topic not in valid_topics:
+                return
+            payload = {**payload, "agent_id": agent_id}
+
+            wave_key = SENSOR_WAVE_KEYS.get(agent_id)
+            waveform = payload.get(wave_key, []) if wave_key else []
+            if not isinstance(waveform, list):
+                waveform = []
+            reading = payload.get("reading", {})
+            if not isinstance(reading, dict):
+                reading = {}
+            if agent_id in {"Agent_IBP", "Agent_NIBP"} and not reading:
+                pressure = payload.get("value", {})
+                if isinstance(pressure, dict):
+                    reading = {
+                        "systolic": pressure.get("systolic", pressure.get("sys")),
+                        "diastolic": pressure.get("diastolic", pressure.get("dia")),
+                        "map": pressure.get("map"),
+                    }
+            payload["reading"] = reading
             with self.lock:
                 self._track_link(agent_id, payload, now)
+                tracker = self.trust_trackers[agent_id]
+                tracker.update(payload=payload, recv_ts=now, cross_sensor_conflict=self.sensor_conflict)
+                self.latest_sensors[agent_id] = {
+                    "value": payload.get("value"),
+                    "reading": reading,
+                    "waveform": waveform,
+                    "seq": payload.get("seq"),
+                    "sent_ts": payload.get("sent_ts"),
+                    "valid": bool(tracker.validity_window and tracker.validity_window[-1] > 0),
+                }
 
-            if agent_id == "Agent_HR":
-                hr_val = int(payload.get("value", 75))
-                with self.lock:
+                if agent_id == "Agent_HR":
+                    hr_val = int(payload.get("value", 75))
                     self.latest_hr = hr_val
                     self.hr_plausible = 35 <= hr_val <= 210
-                self._check_plausibility()
-                return
-
-            if agent_id == "Agent_SpO2":
-                spo2_val = int(payload.get("value", 98))
-                with self.lock:
+                elif agent_id == "Agent_SpO2":
+                    spo2_val = int(payload.get("value", 98))
                     self.latest_spo2 = spo2_val
                     self.spo2_plausible = 65 <= spo2_val <= 100
+                elif agent_id == "Agent_EtCO2":
+                    co2_value = reading.get("etco2_mmhg", payload.get("value", 38))
+                    if isinstance(co2_value, dict):
+                        co2_value = co2_value.get("value", co2_value.get("etco2_mmhg", 38))
+                    self.latest_co2 = int(co2_value)
+                    self.co2_plausible = 15 <= self.latest_co2 <= 75
+                elif agent_id in {"Agent_IBP", "Agent_NIBP"}:
+                    pressure = reading or payload.get("value", {})
+                    if not isinstance(pressure, dict):
+                        pressure = {}
+                    systolic = int(pressure.get("systolic", pressure.get("sys", 0)))
+                    diastolic = int(pressure.get("diastolic", pressure.get("dia", 0)))
+                    mean = int(pressure.get("map", round((systolic + 2 * diastolic) / 3)))
+                    normalized = {"systolic": systolic, "diastolic": diastolic, "map": mean}
+                    legacy = {
+                        "sys": systolic,
+                        "dia": diastolic,
+                        "map": mean,
+                        "formatted": pressure.get("formatted", f"{systolic}/{diastolic} ({mean})"),
+                    }
+                    pressure_valid = 40 <= diastolic < systolic <= 250 and diastolic <= mean <= systolic
+                    if agent_id == "Agent_IBP":
+                        self.latest_ibp = legacy
+                        self.ibp_plausible = pressure_valid
+                        self.latest_sensors[agent_id]["reading"] = normalized
+                    else:
+                        self.latest_nibp = legacy
+                        self.nibp_plausible = pressure_valid
+                        self.latest_sensors[agent_id]["reading"] = normalized
+
+            if agent_id in {"Agent_HR", "Agent_SpO2"}:
                 self._check_plausibility()
                 return
 
-            if agent_id == "Agent_CO2":
-                co2_val = int(payload.get("value", 38))
-                with self.lock:
-                    self.latest_co2 = co2_val
-                    self.co2_plausible = 15 <= co2_val <= 75
-                self._check_plausibility()
-                return
-
-            if agent_id == "Agent_IBP":
-                val = payload.get("value")
-                if isinstance(val, dict):
-                    ibp_dict = val
-                else:
-                    ibp_dict = {"sys": 120, "dia": 80, "map": 93, "formatted": str(val or "120/80 (93)")}
-                sys_v = int(ibp_dict.get("sys", 120))
-                dia_v = int(ibp_dict.get("dia", 80))
-                with self.lock:
-                    self.latest_ibp = ibp_dict
-                    self.ibp_plausible = (50 <= sys_v <= 250) and (25 <= dia_v <= 140)
-                self._check_plausibility()
-                return
-
-            if agent_id == "Agent_NIBP":
-                val = payload.get("value")
-                if isinstance(val, dict):
-                    nibp_dict = val
-                else:
-                    nibp_dict = {"sys": 120, "dia": 80, "map": 93, "formatted": str(val or "120/80")}
-                sys_v = int(nibp_dict.get("sys", 120))
-                dia_v = int(nibp_dict.get("dia", 80))
-                with self.lock:
-                    self.latest_nibp = nibp_dict
-                    self.nibp_plausible = (50 <= sys_v <= 250) and (25 <= dia_v <= 140)
+            if agent_id in {"Agent_Respiration", "Agent_EtCO2", "Agent_IBP", "Agent_NIBP"}:
                 self._check_plausibility()
                 return
 
@@ -565,13 +651,16 @@ class JetsonEdgeBrain:
             arrhythmia = self.last_arrhythmia
 
         conflict = False
-        if not arrhythmia and spo2 >= 95 and (hr <= 0 or hr >= 240):
+        if hr is not None and spo2 is not None:
+            if not arrhythmia and spo2 >= 95 and (hr <= 0 or hr >= 240):
+                conflict = True
+            if spo2 <= 30 and hr > 60 and not arrhythmia:
+                conflict = True
+        if spo2 is not None and (spo2 < 50 or spo2 > 105):
             conflict = True
-        if spo2 < 50 or spo2 > 105 or hr < 30 or hr > 280:
+        if hr is not None and (hr < 30 or hr > 280):
             conflict = True
-        if spo2 <= 30 and hr > 60 and not arrhythmia:
-            conflict = True
-        if co2 < 10 or co2 > 85:
+        if co2 is not None and (co2 < 10 or co2 > 85):
             conflict = True
         if isinstance(ibp, dict):
             s_v = int(ibp.get("sys", 120))
@@ -607,8 +696,11 @@ class JetsonEdgeBrain:
                         "co2": self.latest_co2,
                         "ibp": self.latest_ibp,
                         "nibp": self.latest_nibp,
+                        "respiration_rate": self.latest_sensors["Agent_Respiration"]["value"],
+                        "etco2_mmhg": self.latest_sensors["Agent_EtCO2"]["value"],
                         "ecg_variance": round(self.latest_ecg_var, 4),
                     },
+                    "sensors": self.get_sensor_snapshot(),
                     "ecg_wave": self.latest_ecg_wave,
                     "routing_path": "relay_b" if self.last_relay_b else "primary",
                     "timestamp": time.time(),

@@ -446,7 +446,7 @@
       min-height: 0;
       margin: 0;
       display: grid;
-      grid-template-rows: 44px minmax(360px, 1fr) auto auto;
+      grid-template-rows: 44px minmax(0, 1fr) minmax(150px, auto) auto;
       background: #020403;
     }
 
@@ -550,7 +550,7 @@
 
     .trust-title, .trust-row {
       display: grid;
-      grid-template-columns: minmax(90px, 1.2fr) 58px minmax(90px, 1fr) 92px 96px;
+      grid-template-columns: minmax(82px, 1.1fr) 58px minmax(76px, 1fr) 86px 86px 76px;
       gap: 8px;
       align-items: center;
     }
@@ -585,6 +585,7 @@
       .grid > section:nth-child(6) { grid-column: 1; grid-row: 7; }
       .grid > section:nth-child(5) { grid-column: 1; grid-row: 8; }
       .trust-title, .trust-row { grid-template-columns: minmax(72px, 1fr) 48px minmax(60px, 1fr) 65px 72px; gap: 4px; }
+      .trust-title, .trust-row { grid-template-columns: minmax(60px, 1fr) 42px minmax(48px, .9fr) 62px 64px 56px; gap: 3px; }
     }
   </style>
 </head>
@@ -609,10 +610,10 @@
           <span class="tag t-ok" id="ecgTag">Normal rhythm</span>
         </div>
         <div class="trace-row" style="--trace-color:#45e985"><span class="trace-label">ECG LEAD II <small>LIVE SIGNAL · 1 mV</small></span><canvas id="ecg" width="800" height="230"></canvas></div>
-        <div class="trace-row" style="--trace-color:#f0dc36"><span class="trace-label">SpO2 PLETH <small>DERIVED FROM LIVE SpO2</small></span><canvas id="pleth" aria-label="SpO2 pleth waveform"></canvas></div>
-        <div class="trace-row" style="--trace-color:#35d5eb"><span class="trace-label">RESPIRATION <small>DEMO · RATE NOT STREAMED</small></span><canvas id="respWave" aria-label="Respiration waveform"></canvas></div>
-        <div class="trace-row" style="--trace-color:#f29a42"><span class="trace-label">EtCO2 CAPNOGRAPHY <small>DERIVED FROM LIVE EtCO2</small></span><canvas id="co2Wave" aria-label="EtCO2 waveform"></canvas></div>
-        <div class="trace-row" style="--trace-color:#f17acb"><span class="trace-label">IBP ARTERIAL <small>DERIVED FROM LIVE IBP</small></span><canvas id="ibpWave" aria-label="IBP waveform"></canvas></div>
+        <div class="trace-row" style="--trace-color:#f0dc36"><span class="trace-label">SpO2 PLETH <small>LIVE MQTT · PLETH</small></span><canvas id="pleth" aria-label="SpO2 pleth waveform"></canvas></div>
+        <div class="trace-row" style="--trace-color:#35d5eb"><span class="trace-label">RESPIRATION <small>LIVE MQTT · RESPIRATION</small></span><canvas id="respWave" aria-label="Respiration waveform"></canvas></div>
+        <div class="trace-row" style="--trace-color:#f29a42"><span class="trace-label">EtCO2 CAPNOGRAPHY <small>LIVE MQTT · CAPNOGRAM</small></span><canvas id="co2Wave" aria-label="EtCO2 waveform"></canvas></div>
+        <div class="trace-row" style="--trace-color:#f17acb"><span class="trace-label">IBP ARTERIAL <small>LIVE MQTT · PRESSURE</small></span><canvas id="ibpWave" aria-label="IBP waveform"></canvas></div>
       </section>
 
       <section class="tile c4">
@@ -703,8 +704,8 @@
       </section>
 
       <section class="tile c4">
-        <div class="head"><div class="lbl">Respiration rate</div><span class="tag t-warn">Unavailable</span></div>
-        <div class="vital-body"><div class="big" style="color:#35d5eb">--<small>br/min</small></div><div class="ref">Respiration agent not streamed</div></div>
+        <div class="head"><div class="lbl">Respiration rate</div><span class="tag t-ok" id="respTag">Waiting</span></div>
+        <div class="vital-body"><div class="big" id="resp" style="color:#35d5eb">--<small>br/min</small></div><div class="ref">Respiratory sensor · breaths/min</div></div>
       </section>
 
       <section class="tile c4">
@@ -714,9 +715,9 @@
     </main>
 
     <section class="trust-panel" aria-label="Live sensor trust">
-      <div class="trust-title"><span>SENSOR</span><span>TRUST</span><span>SIGNAL QUALITY</span><span>CONNECTION</span><span>RELIABILITY</span></div>
+      <div class="trust-title"><span>SENSOR</span><span>TRUST</span><span>SIGNAL</span><span>CONNECTION</span><span>RELIABILITY</span><span>HEALTH</span></div>
       <div id="trustRows"></div>
-      <div class="trust-note">Scores use live link telemetry and the project's weighted trust formula. Missing signal streams are shown unavailable.</div>
+      <div class="trust-note">Trust, signal quality, connectivity and health are evaluated by the bedside edge brain.</div>
     </section>
 
     <details>
@@ -758,6 +759,18 @@
               <option value="malicious">Irregular signal</option>
             </select>
           </div>
+          <div class="box">
+            <div class="row"><span>Sensor packet drop</span><b id="dropLbl">0%</b></div>
+            <input type="range" id="tDrop" min="0" max="0.9" step="0.05" value="0" oninput="send()">
+          </div>
+          <div class="box">
+            <div class="row"><span>Network delay</span><b id="delayLbl">10 ms</b></div>
+            <input type="range" id="tDelay" min="0" max="500" step="5" value="10" oninput="send()">
+          </div>
+          <div class="box">
+            <div class="row"><span>Edge processing</span></div>
+            <label><input type="checkbox" id="tOverload" onchange="send()"> Overload Jetson GPU</label>
+          </div>
         </div>
         <div class="btns">
           <button class="b-ok" onclick="preset('healthy')">Healthy</button>
@@ -776,14 +789,15 @@
     const cv = document.getElementById('ecg'), cx = cv.getContext('2d');
     const $ = id => document.getElementById(id);
     const nice = b => (b || 'Bed 1').replace('_', ' ');
+    const traceBuffers = {};
+    const connectionHistory = {};
     const traceDefs = [
-      { id: 'ecg', color: '#45e985', kind: 'ecg' },
-      { id: 'pleth', color: '#f0dc36', kind: 'pleth' },
-      { id: 'respWave', color: '#35d5eb', kind: 'resp' },
-      { id: 'co2Wave', color: '#f29a42', kind: 'co2' },
-      { id: 'ibpWave', color: '#f17acb', kind: 'ibp' }
+      { id: 'ecg', color: '#45e985', kind: 'ecg', agent: 'Agent_ECG' },
+      { id: 'pleth', color: '#f0dc36', kind: 'pleth', agent: 'Agent_SpO2' },
+      { id: 'respWave', color: '#35d5eb', kind: 'resp', agent: 'Agent_Respiration' },
+      { id: 'co2Wave', color: '#f29a42', kind: 'co2', agent: 'Agent_EtCO2' },
+      { id: 'ibpWave', color: '#f17acb', kind: 'ibp', agent: 'Agent_IBP' }
     ];
-    const trustHistory = {};
     function switchBed(b) { bed = b; $('bedTitle').textContent = nice(b); poll() }
 
     function resize() {
@@ -815,27 +829,39 @@
 
     function sampleFor(kind, phase, index, count) {
       const cycle = ((phase % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
-      if (kind === 'pleth') return (0.25 + (Number(currentBed.spo2 || 98) / 100) * 0.38) * Math.pow(Math.max(0, Math.sin(cycle - 0.45)), 3) - 0.12;
-      if (kind === 'resp') return Math.sin(cycle * 0.5) * 0.36;
-      if (kind === 'co2') {
-        const beat = cycle / (Math.PI * 2);
-        const scale = Math.max(0.35, Math.min(1, Number(currentBed.co2 || 38) / 40));
-        if (beat < 0.08) return -0.22 + beat * 2.75;
-        if (beat < 0.22) return 0;
-        if (beat < 0.66) return 0.31 * scale;
-        if (beat < 0.76) return (0.31 - (beat - 0.66) * 5.3) * scale;
-        return -0.22;
-      }
+      const samples = traceBuffers[`${bed}:${traceDefs.find(trace => trace.kind === kind)?.agent}`]?.samples;
+      if (!samples?.length) return 0;
+      const sample = Number(samples[Math.min(samples.length - 1, Math.floor(index / Math.max(1, count) * samples.length))]);
+      if (kind === 'co2') return sample / Math.max(1, Number(currentBed.co2 || 38)) * 0.75;
       if (kind === 'ibp') {
         const pressure = currentBed.ibp || {};
-        const spread = Math.max(0.25, Math.min(0.75, ((pressure.sys || 120) - (pressure.dia || 80)) / 80));
-        return Math.exp(-Math.pow((cycle - 0.82) / 0.15, 2)) * spread + Math.sin(cycle * 2) * 0.04 - 0.1;
+        const systolic = Number(pressure.sys ?? 120);
+        const diastolic = Number(pressure.dia ?? 80);
+        return (sample - diastolic) / Math.max(1, systolic - diastolic) * 0.75 - 0.2;
       }
-      if (wave.length > 1) {
-        const shift = Math.floor(performance.now() / 42) % wave.length;
-        return Number(wave[(index + shift) % wave.length]) || 0;
+      return sample;
+    }
+
+    function appendWaveforms(bedId, state) {
+      for (const trace of traceDefs) {
+        const sensor = state.sensors?.[trace.agent];
+        if (!Array.isArray(sensor?.waveform) || sensor.waveform.length < 2) continue;
+        const key = `${bedId}:${trace.agent}`;
+        const history = traceBuffers[key] || { samples: [], seq: null, timestamp: null };
+        if (history.seq === sensor.seq) continue;
+        const timestamp = Number(sensor.sent_ts);
+        let start = 0;
+        if (Number.isFinite(timestamp) && Number.isFinite(history.timestamp) && timestamp > history.timestamp) {
+          const elapsed = timestamp - history.timestamp;
+          if (elapsed < 1) start = Math.max(0, Math.min(sensor.waveform.length, Math.round((1 - elapsed) * sensor.waveform.length)));
+          else history.samples = [];
+        }
+        history.samples.push(...sensor.waveform.slice(start).map(Number));
+        if (history.samples.length > 1250) history.samples.splice(0, history.samples.length - 1250);
+        history.seq = sensor.seq;
+        history.timestamp = Number.isFinite(timestamp) ? timestamp : history.timestamp;
+        traceBuffers[key] = history;
       }
-      return 0;
     }
 
     function draw() {
@@ -851,7 +877,9 @@
         ctx.lineJoin = 'round';
         ctx.shadowColor = ctx.strokeStyle; ctx.shadowBlur = 2 * ratio;
         ctx.beginPath();
-        const count = trace.kind === 'ecg' && wave.length > 1 ? wave.length : Math.ceil(width / (2 * ratio));
+        const samples = traceBuffers[`${bed}:${trace.agent}`]?.samples || [];
+        if (!samples.length) return;
+        const count = Math.ceil(width / (2 * ratio));
         const bpm = Number(currentBed.hr || 75);
         const period = trace.kind === 'resp' ? 3.75 : (trace.kind === 'co2' ? 3.75 : 60 / Math.max(35, bpm));
         for (let index = 0; index < count; index++) {
@@ -869,73 +897,23 @@
 
     function set(el, cls, txt) { el.className = cls; el.textContent = txt }
 
-    function sensorDataValid(agent, b) {
-      if (agent === 'Agent_ECG') {
-        const values = b.ecg_wave || [];
-        if (values.length !== 250) return false;
-        const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
-        const deviation = Math.sqrt(values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length);
-        const differences = values.slice(1).map((value, index) => value - values[index]);
-        const diffMean = differences.reduce((sum, value) => sum + value, 0) / differences.length;
-        const diffDeviation = Math.sqrt(differences.reduce((sum, value) => sum + (value - diffMean) ** 2, 0) / differences.length);
-        return Math.max(...values.map(Math.abs)) <= 2.2 && deviation <= 0.65 && deviation >= 0.03 && diffDeviation <= 0.35;
-      }
-      if (agent === 'Agent_SpO2') return Number(b.spo2) >= 70 && Number(b.spo2) <= 100;
-      if (agent === 'Agent_HR') return Number(b.hr) >= 40 && Number(b.hr) <= 190;
-      if (agent === 'Agent_CO2') return Number(b.co2) >= 15 && Number(b.co2) <= 75;
-      const pressure = agent === 'Agent_IBP' ? b.ibp : b.nibp;
-      return !!pressure && pressure.sys >= 50 && pressure.sys <= 250 && pressure.dia >= 25 && pressure.dia <= 140 && pressure.sys > pressure.dia;
-    }
-
     function renderTrust(b) {
       const definitions = [
         ['ECG', 'Agent_ECG'], ['SpO2', 'Agent_SpO2'], ['Heart Rate', 'Agent_HR'],
-        ['EtCO2', 'Agent_CO2'], ['IBP', 'Agent_IBP'], ['NIBP', 'Agent_NIBP']
+        ['Respiration', 'Agent_Respiration'], ['EtCO2', 'Agent_EtCO2'], ['IBP', 'Agent_IBP'], ['NIBP', 'Agent_NIBP']
       ];
-      const now = Date.now();
       $('trustRows').innerHTML = definitions.map(([name, agent]) => {
-        const link = (b.sensor_links || {})[agent];
-        if (!link || link.last_seq === null) {
-          return `<div class="trust-row offline"><span>${name}</span><span class="trust-score">--%</span><span>NO RECENT DATA</span><span>OFFLINE</span><span>ISOLATED</span></div>`;
-        }
-        const state = trustHistory[agent] || { score: 1, lastSeq: null, lastUpdate: 0, latencies: [], delivery: [], validity: [] };
-        const seq = Number(link.last_seq);
-        if (state.lastSeq !== seq) {
-          if (state.lastSeq !== null && seq > state.lastSeq) {
-            const missed = Math.min(30, Math.max(0, seq - state.lastSeq - 1));
-            for (let index = 0; index < missed; index++) state.delivery.push(0);
-          }
-          state.delivery.push(1);
-          state.delivery = state.delivery.slice(-30);
-          const latency = Math.max(0.5, Number(link.latency_ms || 0));
-          state.latencies.push(latency);
-          state.latencies = state.latencies.slice(-25);
-          const valid = sensorDataValid(agent, b);
-          state.validity.push(valid ? 1 : 0);
-          state.validity = state.validity.slice(-15);
-          const averageLatency = state.latencies.reduce((sum, value) => sum + value, 0) / state.latencies.length;
-          const jitter = state.latencies.length < 2 ? 0 : Math.sqrt(state.latencies.reduce((sum, value) => sum + (value - averageLatency) ** 2, 0) / state.latencies.length);
-          const scoreLatency = Math.exp(-Math.max(0, averageLatency - 25) / 160);
-          const scoreJitter = Math.exp(-jitter / 60);
-          const scoreDelivery = state.delivery.reduce((sum, value) => sum + value, 0) / state.delivery.length;
-          const averageValidity = state.validity.reduce((sum, value) => sum + value, 0) / state.validity.length;
-          const scoreData = valid ? averageValidity : 0.25 * averageValidity;
-          let rawTrust = 0.25 * scoreLatency + 0.20 * scoreJitter + 0.25 * scoreDelivery + 0.30 * scoreData;
-          if (!valid) rawTrust = Math.min(rawTrust, 0.32);
-          state.score = Math.max(0, Math.min(1, 0.35 * rawTrust + 0.65 * state.score));
-          state.lastSeq = seq;
-          state.lastUpdate = now;
-          state.valid = valid;
-        }
-        trustHistory[agent] = state;
-        const age = now - state.lastUpdate;
-        const connected = age <= 2200;
-        const score = age <= 2000 ? state.score : state.score * Math.exp(-(age - 2000) / 3000);
-        const reliability = !connected ? 'ISOLATED' : score < 0.45 ? 'ISOLATED' : score < 0.70 ? 'SUSPICIOUS' : 'TRUSTED';
-        const quality = !state.valid ? 'POOR / INVALID' : score < 0.45 ? 'POOR' : score < 0.70 ? 'FAIR' : 'GOOD';
-        const status = !connected ? 'STALE' : age > 1200 ? 'DELAYED' : 'CONNECTED';
-        const css = !connected ? 'offline' : score < 0.45 ? 'low' : score < 0.70 ? 'medium' : 'high';
-        return `<div class="trust-row ${css}"><span>${name}</span><span class="trust-score">${Math.round(score * 100)}%</span><span>${quality}</span><span>${status}</span><span>${reliability}</span></div>`;
+        const sensor = b.sensors?.[agent] || {};
+        const link = sensor.connection_status === 'CONNECTED';
+        const score = Number(sensor.trust_score || 0);
+        const quality = Number(sensor.signal_quality || 0);
+        const reliability = sensor.reliability_level || 'DISCONNECTED';
+        const health = sensor.sensor_health || 'DISCONNECTED';
+        const previous = connectionHistory[`${bed}:${agent}`];
+        const recovered = link && previous === 'DISCONNECTED';
+        connectionHistory[`${bed}:${agent}`] = link ? 'CONNECTED' : 'DISCONNECTED';
+        const css = !link ? 'offline' : score < 45 ? 'low' : score < 70 ? 'medium' : 'high';
+        return `<div class="trust-row ${css}"><span>${name}</span><span class="trust-score">${score.toFixed(0)}%</span><span>${sensor.valid ? `${quality}% ${quality >= 70 ? 'GOOD' : quality >= 45 ? 'FAIR' : 'POOR'}` : `${quality}% INVALID`}</span><span>${recovered ? 'RECOVERED' : link ? 'CONNECTED' : 'DISCONNECTED'}</span><span>${reliability}</span><span>${health}</span></div>`;
       }).join('');
     }
 
@@ -950,16 +928,29 @@
         $('bedTitle').textContent = nice(bed);
         const b = d.beds[bed]; if (!b) return;
         currentBed = b;
+        appendWaveforms(bed, b);
 
-        const hr = b.hr, sp = b.spo2, co2 = b.co2;
+        const sensors = b.sensors || {};
+        const hr = b.hr, sp = b.spo2;
+        const resp = sensors.Agent_Respiration?.value;
+        const co2 = sensors.Agent_EtCO2?.value ?? b.co2;
         const ibp = b.ibp || {}, nibp = b.nibp || {};
-        const ibpStr = typeof ibp === 'object' ? (ibp.formatted || `${ibp.sys || 120}/${ibp.dia || 80} (${ibp.map || 93})`) : String(ibp);
-        const ibpMap = typeof ibp === 'object' ? (ibp.map || Math.round(((ibp.sys || 120) + 2 * (ibp.dia || 80)) / 3)) : '--';
-        const nibpStr = typeof nibp === 'object' ? (nibp.formatted || `${nibp.sys || 120}/${nibp.dia || 80}`) : String(nibp);
+        const ibpReading = sensors.Agent_IBP?.reading || {};
+        const nibpReading = sensors.Agent_NIBP?.reading || {};
+        const ibpSys = ibpReading.systolic ?? ibp.sys;
+        const ibpDia = ibpReading.diastolic ?? ibp.dia;
+        const ibpMapValue = ibpReading.map ?? ibp.map;
+        const nibpSys = nibpReading.systolic ?? nibp.sys;
+        const nibpDia = nibpReading.diastolic ?? nibp.dia;
+        const nibpMapValue = nibpReading.map ?? nibp.map;
+        const ibpStr = ibpSys !== undefined && ibpDia !== undefined ? `${ibpSys}/${ibpDia}` : '--/--';
+        const ibpMap = ibpMapValue ?? '--';
+        const nibpStr = nibpSys !== undefined && nibpDia !== undefined ? `${nibpSys}/${nibpDia} (${nibpMapValue ?? '--'})` : '--/--';
 
         $('hr').innerHTML = `${hr ?? '--'}<small>bpm</small>`;
         $('sp').innerHTML = `${sp ?? '--'}<small>%</small>`;
         $('co2').innerHTML = `${co2 ?? '--'}<small>mmHg</small>`;
+        $('resp').innerHTML = `${resp ?? '--'}<small>br/min</small>`;
         $('ibp').innerHTML = `${ibpStr}<small>mmHg</small>`;
         $('ibpMap').textContent = ibpMap;
         $('nibp').innerHTML = `${nibpStr}<small>mmHg</small>`;
@@ -968,14 +959,15 @@
         if (hr > 100) set($('hrTag'), 'tag t-warn', 'Fast'); else if (hr < 60) set($('hrTag'), 'tag t-warn', 'Slow'); else set($('hrTag'), 'tag t-ok', 'Normal');
         if (sp < 90) set($('spTag'), 'tag t-bad', 'Critical'); else if (sp < 95) set($('spTag'), 'tag t-warn', 'Low'); else set($('spTag'), 'tag t-ok', 'Normal');
         if (co2 > 50) set($('co2Tag'), 'tag t-bad', 'High'); else if (co2 < 30) set($('co2Tag'), 'tag t-warn', 'Low'); else set($('co2Tag'), 'tag t-ok', 'Normal');
+        if (resp !== null && resp !== undefined) set($('respTag'), 'tag t-ok', `${resp} br/min`); else set($('respTag'), 'tag t-warn', 'Unavailable');
 
-        const sysVal = typeof ibp === 'object' ? (ibp.sys || 120) : 120;
-        const mapVal = typeof ibp === 'object' ? (ibp.map || 93) : 93;
+        const sysVal = Number(ibpSys || 0);
+        const mapVal = Number(ibpMapValue || 0);
         if (mapVal < 65 || sysVal < 90) set($('ibpTag'), 'tag t-bad', 'Hypotensive');
         else if (sysVal > 160) set($('ibpTag'), 'tag t-warn', 'Hypertensive');
         else set($('ibpTag'), 'tag t-ok', 'Normotensive');
 
-        const nSys = typeof nibp === 'object' ? (nibp.sys || 120) : 120;
+        const nSys = Number(nibpSys || 0);
         if (nSys < 90) set($('nibpTag'), 'tag t-warn', 'Low');
         else if (nSys > 160) set($('nibpTag'), 'tag t-warn', 'High');
         else set($('nibpTag'), 'tag t-ok', 'Normal');
@@ -983,7 +975,7 @@
         wave = b.ecg_wave || [];
         let v = 0; if (wave.length) { const m = wave.reduce((a, c) => a + c, 0) / wave.length; v = wave.reduce((a, c) => a + (c - m) ** 2, 0) / wave.length }
         const c = (b.chaos && b.chaos.vitals && b.chaos.vitals.ecg_condition) || (b.chaos && b.chaos.Agent_ECG && b.chaos.Agent_ECG.condition);
-        const arr = c === 'arrhythmia' || v > .2, art = !arr && c === 'malicious';
+        const arr = Boolean(b.arrhythmia) || c === 'arrhythmia' || v > .2, art = !arr && c === 'malicious';
         alarm = arr;
 
         set($('ecgTag'), 'tag ' + (arr ? 't-bad' : art ? 't-warn' : 't-ok'), arr ? 'Arrhythmia' : art ? 'Irregular signal' : 'Normal rhythm');
@@ -1006,11 +998,14 @@
     async function send() {
       const hr = +$('tHr').value, sp = +$('tSp').value, co2 = +$('tCo2').value;
       const sys = +$('tSys').value, dia = +$('tDia').value, ec = $('tEcg').value;
+      const drop = +$('tDrop').value, delay = +$('tDelay').value, overload = $('tOverload').checked;
       $('hrLbl').textContent = hr + ' bpm';
       $('spLbl').textContent = sp + ' %';
       $('co2Lbl').textContent = co2 + ' mmHg';
       $('sysLbl').textContent = sys + ' mmHg';
       $('diaLbl').textContent = dia + ' mmHg';
+      $('dropLbl').textContent = Math.round(drop * 100) + '%';
+      $('delayLbl').textContent = delay + ' ms';
       try {
         const r = await fetch('/api/manipulate', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1022,11 +1017,11 @@
             target_sys: sys,
             target_dia: dia,
             ecg_condition: ec,
-            delay_ms: 10,
-            drop_rate: 0,
+            delay_ms: delay,
+            drop_rate: drop,
             malicious: ec === 'malicious',
-            overload_gpu: false,
-            use_relay_b: false
+            overload_gpu: overload,
+            use_relay_b: overload
           })
         });
         if (r.ok) { $('fb').classList.add('show'); setTimeout(() => $('fb').classList.remove('show'), 1800) }
@@ -1044,6 +1039,11 @@
       if (!P) return;
       $('tHr').value = P[0]; $('tSp').value = P[1]; $('tCo2').value = P[2];
       $('tSys').value = P[3]; $('tDia').value = P[4]; $('tEcg').value = P[5];
+      if (n === 'healthy') { $('tDrop').value = 0; $('tDelay').value = 10; $('tOverload').checked = false; }
+      if (n === 'arrhythmia') $('tDrop').value = 0;
+      if (n === 'hypoxia') $('tSp').value = P[1];
+      if (n === 'hypercapnia') $('tCo2').value = P[2];
+      if (n === 'hypotension' || n === 'hypertension') { $('tSys').value = P[3]; $('tDia').value = P[4]; }
       send();
     }
     resize(); requestAnimationFrame(animate); setInterval(poll, 350); poll();

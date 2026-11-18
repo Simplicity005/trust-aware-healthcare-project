@@ -4,7 +4,7 @@ This folder contains **everything that runs at the patient's bed** on an **NVIDI
 
 1. `requirements.txt` — Lightweight Jetson dependencies (`paho-mqtt`, `numpy`, `onnxruntime`).
 2. `ecg_anomaly.onnx` — Pre-built 1D-CNN ECG Arrhythmia detector model (ready to use without needing PyTorch).
-3. `sensor_agents.py` — Streams live patient vitals (`Agent_ECG`, `Agent_SpO2`, `Agent_HR`) every `0.4s` for `--patient-id <Bed_ID>`.
+3. `sensor_agents.py` — Streams live ECG, SpO2, heart rate, respiration, EtCO2, IBP, and NIBP data to per-agent MQTT topics for `--patient-id <Bed_ID>`.
 4. `jetson_edge_brain.py` — Runs the `<5 ms` 1D-CNN ECG Arrhythmia AI model (`TensorRT / CUDA / CPU`), triggers instant bedside alarms, checks cross-sensor physiological plausibility, and streams verified summaries to the Nurse Station Laptop.
 5. `start_bedside.sh` — One-command launcher that automatically sets up `venv`, installs `requirements.txt`, and launches the bedside node.
 
