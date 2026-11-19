@@ -2,13 +2,13 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Badge } from "./bed-panel";
 import { formatReading, type Device, type Snapshot } from "./telemetry";
 
-export type Action = (operation: string, data: Record<string, string | boolean | null>) => Promise<{ patient_id?: string }>;
+export type Action = (operation: string, data: Record<string, string | number | boolean | Record<string, boolean> | null>) => Promise<{ patient_id?: string }>;
 
 function AssignmentForm({ device, departments, busy, onSubmit }: {
-  device?: Device;
+  device: Device;
   departments: Snapshot["departments"];
   busy: boolean;
-  onSubmit: (device: Device | undefined, department: string, room: string | null) => void;
+  onSubmit: (device: Device, department: string, room: string | null) => void;
 }) {
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -18,7 +18,7 @@ function AssignmentForm({ device, departments, busy, onSubmit }: {
 
   return (
     <form className="assignment" onSubmit={submit}>
-      {device ? <div className="device-info">
+      <div className="device-info">
         <div className="card-heading"><h3>{device.patient_id}</h3>
           <Badge tone={device.online ? "green" : "muted"}>{device.online ? "Online" : "Last seen " + device.seconds_since_seen + "s ago"}</Badge>
         </div>
@@ -27,17 +27,17 @@ function AssignmentForm({ device, departments, busy, onSubmit }: {
           HR {formatReading(device.latest_vitals?.hr)} · SpO₂ {formatReading(device.latest_vitals?.spo2)} ·
           {" "}EtCO₂ {formatReading(device.latest_vitals?.co2)} · BP {formatReading(device.latest_vitals?.ibp)}
         </p>
-      </div> : <div className="device-info"><h3>Simulated Jetson</h3><p>Start a simulated bedside feed for this ward.</p></div>}
+      </div>
       <label>Department
-        <select name="department" defaultValue={device?.department || departments[0]?.[0]} required>
+        <select name="department" defaultValue={device.department || departments[0]?.[0]} required>
           {departments.map(([code, name]) => <option key={code} value={code}>{name}</option>)}
         </select>
       </label>
       <label>Room <span className="secondary">(optional)</span>
-        <input name="room" placeholder={device?.room || "Auto-assigned"} maxLength={60} />
+        <input name="room" placeholder={device.room || "Auto-assigned"} maxLength={60} />
       </label>
       <button className="button button-primary" disabled={busy} type="submit">
-        {device ? "Admit bed" : "Simulate new bed"}
+        Admit bed
       </button>
     </form>
   );
@@ -48,7 +48,7 @@ export default function Admission({ snapshot, scanDeadline, onScan, onClose, onA
   scanDeadline: number | null;
   onScan: (active: boolean) => void;
   onClose: () => void;
-  onAdmit: (device: Device | undefined, department: string, room: string | null) => void;
+  onAdmit: (device: Device, department: string, room: string | null) => void;
   busy: boolean;
   probe: () => Promise<{ patient_id?: string }>;
 }) {
@@ -98,7 +98,6 @@ export default function Admission({ snapshot, scanDeadline, onScan, onClose, onA
       <p className="secondary">{count ? `${count} unassigned ${count === 1 ? "device" : "devices"} found.` : "No unassigned devices found."} Confirm the bedside is running and connected to the same MQTT broker.</p>
       {snapshot.unadded_jetsons.map((device) => <AssignmentForm key={device.patient_id} device={device}
         departments={snapshot.departments} busy={busy} onSubmit={onAdmit} />)}
-      <AssignmentForm departments={snapshot.departments} busy={busy} onSubmit={onAdmit} />
     </section>
   );
 }

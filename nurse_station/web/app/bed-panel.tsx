@@ -1,48 +1,202 @@
+"use client";
+
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { type Bed, bedStatus, formatReading, sensors, wardURL } from "./telemetry";
 
 export function Badge({ children, tone = "muted" }: { children: ReactNode; tone?: string }) {
   return <span className={`badge ${tone}`}><span className="status-dot" />{children}</span>;
 }
 
-function Waveform({ bed }: { bed: Bed }) {
-  const signal = bed.ecg_wave;
-  const extent = Math.max(1, ...signal.map(Math.abs));
-  const points = signal.map((sample, index) => {
-    const x = index * 600 / Math.max(1, signal.length - 1);
-    return `${x.toFixed(1)},${(56 - sample * 46 / extent).toFixed(1)}`;
-  }).join(" ");
-  const red = bed.agents.Agent_ECG.status === "ISOLATED" || bed.edge.local_bed_alarm;
-  return (
-    <div className={`wave-grid ${red ? "wave-alert" : ""}`}>
-      <svg aria-label="Latest ECG waveform" role="img" viewBox="0 0 600 112" preserveAspectRatio="none">
-        <polyline points={points} fill="none" stroke="currentColor" strokeWidth="1.6" vectorEffect="non-scaling-stroke" />
-      </svg>
-    </div>
-  );
+type RingBuffer = {
+  rate: number;
+  end: number;
+  samples: Float32Array;
+  stamps: Float64Array;
+};
+
+const SWEEP_SECONDS = 6;
+const PLAYBACK_DELAY = 0.8;
+const ECG_MIN = -1.35;
+const ECG_MAX = 1.55;
+
+function interpolateSample(buffer: RingBuffer, time: number) {
+  const index = time * buffer.rate;
+  const sample = Math.floor(index);
+  const len = buffer.samples.length;
+  const slot = ((sample % len) + len) % len;
+  const next = (slot + 1) % len;
+  if (buffer.stamps[slot] !== sample) return NaN;
+  if (buffer.stamps[next] !== sample + 1) return index - sample < 0.5 ? buffer.samples[slot] : NaN;
+  const value = buffer.samples[slot];
+  return value + (buffer.samples[next] - value) * (index - sample);
 }
 
-function TrustHistory({ bed }: { bed: Bed }) {
-  const history = bed.history;
+function drawGrid(ctx: CanvasRenderingContext2D, width: number, height: number, seconds: number) {
+  ctx.fillStyle = "#030604";
+  ctx.fillRect(0, 0, width, height);
+  ctx.lineWidth = 1;
+  for (let step = 0; step <= seconds * 5; step++) {
+    const x = (step * width) / (seconds * 5);
+    ctx.strokeStyle = step % 5 === 0 ? "#19251e" : "#0d1510";
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, height);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = "#152019";
+  for (let row = 1; row < 5; row++) {
+    const y = (row * height) / 5;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(width, y);
+    ctx.stroke();
+  }
+}
+
+export function Waveform({ bed }: { bed: Bed }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const bufferRef = useRef<RingBuffer | null>(null);
+  const clockRef = useRef<{ offset?: number; sweepOrigin?: number }>({});
+  const red = bed.agents.Agent_ECG.status === "ISOLATED" || Boolean(bed.edge.local_bed_alarm);
+  const redRef = useRef(red);
+  redRef.current = red;
+
+  useEffect(() => {
+    const wave = bed.ecg_wave;
+    if (!Array.isArray(wave) || !wave.length) return;
+    const rate = Number.isInteger(bed.ecg_rate) && (bed.ecg_rate ?? 0) > 0 ? (bed.ecg_rate as number) : 250;
+    const timestamp = Number.isFinite(bed.ecg_end_ts) && (bed.ecg_end_ts ?? 0) > 0
+      ? (bed.ecg_end_ts as number)
+      : Date.now() / 1000;
+
+    const nowSec = performance.now() / 1000;
+    const offset = timestamp - nowSec;
+    const clock = clockRef.current;
+    if (clock.offset === undefined || Math.abs(offset - clock.offset) > 2) {
+      clock.offset = offset;
+      clock.sweepOrigin = Math.floor(timestamp - PLAYBACK_DELAY);
+    } else {
+      clock.offset += Math.max(-0.015, Math.min(0.015, (offset - clock.offset) * 0.15));
+    }
+
+    let buffer = bufferRef.current;
+    if (!buffer || buffer.rate !== rate) {
+      const capacity = (SWEEP_SECONDS + 3) * rate;
+      buffer = {
+        rate,
+        end: 0,
+        samples: new Float32Array(capacity),
+        stamps: new Float64Array(capacity),
+      };
+      bufferRef.current = buffer;
+    }
+
+    const len = buffer.samples.length;
+    const end = Math.round(timestamp * rate);
+    const first = end - wave.length + 1;
+
+    if (buffer.end === 0) {
+      // Seed the 6-second history window on first load so the trace is immediately full.
+      const historyStart = end - (SWEEP_SECONDS + 1) * rate + 1;
+      for (let sample = historyStart; sample < first; sample++) {
+        const slot = ((sample % len) + len) % len;
+        const srcIndex = ((sample - first) % wave.length + wave.length) % wave.length;
+        const value = wave[srcIndex];
+        buffer.samples[slot] = Number.isFinite(value) ? value : NaN;
+        buffer.stamps[slot] = sample;
+      }
+    }
+
+    for (let sample = Math.max(first, buffer.end + 1); sample <= end; sample++) {
+      const slot = ((sample % len) + len) % len;
+      const value = wave[sample - first];
+      buffer.samples[slot] = Number.isFinite(value) ? value : NaN;
+      buffer.stamps[slot] = sample;
+    }
+    buffer.end = Math.max(buffer.end, end);
+  }, [bed.ecg_wave, bed.ecg_end_ts, bed.ecg_rate]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const { target, contentRect } of entries) {
+        const ratio = window.devicePixelRatio || 1;
+        (target as HTMLCanvasElement).width = Math.max(1, Math.round(contentRect.width * ratio));
+        (target as HTMLCanvasElement).height = Math.max(1, Math.round(contentRect.height * ratio));
+      }
+    });
+    resizeObserver.observe(canvas);
+
+    let frameId = 0;
+    const render = (now: number) => {
+      const ratio = window.devicePixelRatio || 1;
+      const width = canvas.width / ratio;
+      const height = canvas.height / ratio;
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      drawGrid(ctx, width, height, SWEEP_SECONDS);
+
+      const buffer = bufferRef.current;
+      const { offset, sweepOrigin } = clockRef.current;
+      if (buffer && offset !== undefined && sweepOrigin !== undefined) {
+        const time = now / 1000 + offset - PLAYBACK_DELAY;
+        const sweptSeconds = (((time - sweepOrigin) % SWEEP_SECONDS) + SWEEP_SECONDS) % SWEEP_SECONDS;
+        const start = time - sweptSeconds;
+        const head = (sweptSeconds / SWEEP_SECONDS) * width;
+        const gap = 14;
+
+        ctx.strokeStyle = redRef.current ? "#ff5d5d" : "#45e985";
+        ctx.lineWidth = 1.7;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.beginPath();
+        let drawing = false;
+        for (let x = 0; x <= width; x += 0.75) {
+          const ahead = x > head ? x - head : x + width - head;
+          if (ahead < gap) {
+            drawing = false;
+            continue;
+          }
+          const sampleTime = start + (x / width) * SWEEP_SECONDS - (x > head ? SWEEP_SECONDS : 0);
+          const value = interpolateSample(buffer, sampleTime);
+          if (!Number.isFinite(value)) {
+            drawing = false;
+            continue;
+          }
+          const y = height * (0.91 - (0.76 * (value - ECG_MIN)) / (ECG_MAX - ECG_MIN));
+          if (drawing) ctx.lineTo(x, y);
+          else ctx.moveTo(x, y);
+          drawing = true;
+        }
+        ctx.stroke();
+
+        const leading = interpolateSample(buffer, time);
+        if (Number.isFinite(leading)) {
+          const y = height * (0.91 - (0.76 * (leading - ECG_MIN)) / (ECG_MAX - ECG_MIN));
+          ctx.fillStyle = ctx.strokeStyle;
+          ctx.beginPath();
+          ctx.arc(head, y, 1.7, 0, 2 * Math.PI);
+          ctx.fill();
+        }
+      }
+      frameId = window.requestAnimationFrame(render);
+    };
+
+    frameId = window.requestAnimationFrame(render);
+    return () => {
+      resizeObserver.disconnect();
+      window.cancelAnimationFrame(frameId);
+    };
+  }, []);
+
   return (
-    <section className="panel chart-panel">
-      <div className="section-heading"><h2>Sensor trust history</h2><span className="secondary">Latest {history.length} samples</span></div>
-      {history.length > 1 ? <>
-        <div className="history-chart">
-          <div className="axis-labels"><span>1.0</span><span>0.5</span><span>0.0</span></div>
-          <svg role="img" aria-label="Recent trust scores for all six sensors" viewBox="0 0 600 104" preserveAspectRatio="none">
-            {[2, 52, 102].map((y) => <line key={y} x1="0" x2="600" y1={y} y2={y} stroke="#293a4c" />)}
-            {sensors.map((sensor) => <polyline key={sensor.id}
-              points={history.map((sample, index) => `${600 * index / (history.length - 1)},${102 - 100 * sample[sensor.id]}`).join(" ")}
-              stroke={sensor.color} vectorEffect="non-scaling-stroke" fill="none" strokeWidth="1.6" />)}
-          </svg>
-        </div>
-        <div className="history-legend secondary">{sensors.map((sensor) => <span key={sensor.id}>
-          <i style={{ background: sensor.color }} />{sensor.short}
-        </span>)}</div>
-      </> : <p className="empty">Waiting for trust samples…</p>}
-    </section>
+    <div className={`wave-grid ${red ? "wave-alert" : ""}`}>
+      <canvas ref={canvasRef} aria-label="Live bedside ECG waveform" />
+    </div>
   );
 }
 
@@ -62,7 +216,7 @@ export function BedCard({ bed, department }: { bed: Bed; department: string }) {
   const status = bedStatus(bed);
   const vitals = sensors.slice(1);
   return (
-    <article className="panel bed-card">
+    <Link className="panel bed-card" href={wardURL(department, bed.patient_id)} prefetch={false}>
       <div className="card-heading">
         <div>
           <p className="room-label">{bed.department} · {bed.room_only}</p>
@@ -75,27 +229,22 @@ export function BedCard({ bed, department }: { bed: Bed; department: string }) {
       <dl className="vital-grid">
         {vitals.map((sensor) => {
           const agent = bed.agents[sensor.id];
-          return <div key={sensor.id}>
-            <dt>{sensor.short}</dt>
-            <dd className={agent.status === "ISOLATED" ? "red-text" : ""}>
-              {agent.status === "ISOLATED" ? "Isolated" : formatReading(agent.value)}
-            </dd>
-          </div>;
-        })}
-      </dl>
-      <dl className="trust-strip" aria-label="Sensor trust scores">
-        {sensors.map((sensor) => {
-          const agent = bed.agents[sensor.id];
+          const pct = Math.round(agent.trust * 100);
           const tone = agent.status === "ISOLATED" ? "red" : agent.status === "SUSPICIOUS" ? "amber" : "green";
-          return <div key={sensor.id} title={agent.status}><dt>{sensor.short}</dt>
-            <dd><span className={`status-dot ${tone}`} />{agent.trust.toFixed(2)}</dd></div>;
+          return (
+            <div key={sensor.id}>
+              <dt>
+                <span>{sensor.short}</span>
+                <small className={`vital-trust ${tone}`} title={`${sensor.label} trust: ${pct}%`}>{pct}%</small>
+              </dt>
+              <dd className={agent.status === "ISOLATED" ? "red-text" : ""}>
+                {agent.status === "ISOLATED" ? "Isolated" : formatReading(agent.value)}
+              </dd>
+            </div>
+          );
         })}
       </dl>
-      <div className="card-footer">
-        <span className="secondary">{bed.compute_mode}</span>
-        <Link className="button button-small" href={wardURL(department, bed.patient_id)} prefetch={false}>Open bed</Link>
-      </div>
-    </article>
+    </Link>
   );
 }
 
@@ -107,8 +256,12 @@ export function BedPanel({ bed, onRelease, releasing, logs }: {
 }) {
   const status = bedStatus(bed);
   const ecg = bed.agents.Agent_ECG;
+  const ecgPct = Math.round(ecg.trust * 100);
+  const ecgTone = ecg.status === "ISOLATED" ? "red" : ecg.status === "SUSPICIOUS" ? "amber" : "green";
   const rhythm = ecg.status === "ISOLATED" ? "Signal unreliable" :
     bed.edge.local_bed_alarm ? "Ventricular arrhythmia" : "Normal sinus rhythm";
+  const vitals = sensors.slice(1);
+
   return (
     <div className="bed-detail">
       {bed.emergency.length > 0 && <div className="emergency-detail" role="alert">
@@ -123,50 +276,35 @@ export function BedPanel({ bed, onRelease, releasing, logs }: {
         </div>
         <Badge tone={status.tone}>{status.label}</Badge>
       </section>
-      <div className="detail-grid">
-        <section className="panel chart-panel">
-          <div className="section-heading"><h2>ECG lead II</h2><span className="secondary">{rhythm}</span></div>
-          <Waveform bed={bed} />
-          <div className="chart-footer"><span>Arrhythmia risk <strong>{((bed.edge.arrhythmia_prob ?? 0) * 100).toFixed(1)}%</strong></span></div>
-        </section>
-        <section className="panel routing">
-          <div className="section-heading"><h2>Compute &amp; routing</h2></div>
-          <dl>
-            <div><dt>Compute</dt><dd>{bed.compute_mode}</dd></div>
-            {bed.edge.exec_provider && <div><dt>Provider</dt><dd>{bed.edge.exec_provider}</dd></div>}
-            <div><dt>Edge inference</dt><dd>{(bed.edge.inf_ms ?? 0).toFixed(2)} ms</dd></div>
-            {bed.gateway_cpu_inf_ms > 0 && <div><dt>Gateway fallback</dt><dd>{bed.gateway_cpu_inf_ms.toFixed(2)} ms</dd></div>}
-            <div><dt>Alert path</dt><dd>{bed.alert_route}</dd></div>
-          </dl>
-        </section>
-      </div>
-      <section>
-        <div className="section-heading standalone-heading"><h2>Sensor trust</h2></div>
-        <div className="sensor-grid">
-          {sensors.map((sensor) => {
+      <section className="panel chart-panel">
+        <div className="section-heading">
+          <h2>ECG lead II <small className={`vital-trust ${ecgTone}`}>{ecgPct}%</small></h2>
+          <span className="secondary">{rhythm}</span>
+        </div>
+        <Waveform bed={bed} />
+      </section>
+      <section className="panel detail-vitals-panel">
+        <dl className="vital-grid detail-vital-grid">
+          {vitals.map((sensor) => {
             const agent = bed.agents[sensor.id];
+            const pct = Math.round(agent.trust * 100);
             const tone = agent.status === "ISOLATED" ? "red" : agent.status === "SUSPICIOUS" ? "amber" : "green";
             const reading = formatReading(agent.value);
-            return <article className="panel sensor-card" key={sensor.id}>
-              <div className="card-heading"><h3>{sensor.label}</h3><Badge tone={tone}>{agent.status.toLowerCase()}</Badge></div>
-              <div className="sensor-reading">
-                {agent.status === "ISOLATED" ? "Signal excluded" : sensor.id === "Agent_ECG" ? "Signal available" : reading}
-                {agent.status !== "ISOLATED" && reading !== "—" && sensor.unit && <small>{sensor.unit}</small>}
-                <strong>{agent.trust.toFixed(2)}</strong>
+            return (
+              <div key={sensor.id}>
+                <dt>
+                  <span>{sensor.short}</span>
+                  <small className={`vital-trust ${tone}`}>{pct}%</small>
+                </dt>
+                <dd className={agent.status === "ISOLATED" ? "red-text" : ""}>
+                  {agent.status === "ISOLATED" ? "Isolated" : reading}
+                  {agent.status !== "ISOLATED" && reading !== "—" && sensor.unit && <small className="vital-unit"> {sensor.unit}</small>}
+                </dd>
               </div>
-              <progress className={tone} aria-label={`${sensor.label} trust score`} value={agent.trust} max={1} />
-              <dl className="sensor-components">
-                <div><dt>Latency</dt><dd>{agent.s_l.toFixed(2)}</dd></div>
-                <div><dt>Jitter</dt><dd>{agent.s_j.toFixed(2)}</dd></div>
-                <div><dt>Delivery</dt><dd>{agent.s_p.toFixed(2)}</dd></div>
-                <div><dt>Validity</dt><dd>{agent.s_d.toFixed(2)}</dd></div>
-              </dl>
-              <p className="secondary">{agent.packets_received} received · {agent.packets_missed} missed</p>
-            </article>;
+            );
           })}
-        </div>
+        </dl>
       </section>
-      <TrustHistory bed={bed} />
       <EventLog title="Bed activity" entries={logs} />
       <div className="detail-actions">
         <button type="button" className="button danger" onClick={onRelease} disabled={releasing}>Release bed</button>

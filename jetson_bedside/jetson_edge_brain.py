@@ -30,13 +30,24 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CHAOS_FILE = os.path.join(BASE_DIR, "chaos.json")
 DEFAULT_MODEL = os.path.join(BASE_DIR, "ecg_anomaly.onnx")
 BEDSIDE_HTML_FILE = os.path.join(BASE_DIR, "bedside_monitor.html")
+BEDSIDE_SIM_HTML_FILE = os.path.join(BASE_DIR, "bedside_simulation.html")
 CHAOS_LOCK = threading.Lock()
+
+
 def load_bedside_html():
     """Reads bedside_monitor.html from disk so HTML/CSS edits take effect on refresh."""
     if os.path.exists(BEDSIDE_HTML_FILE):
         with open(BEDSIDE_HTML_FILE, "r", encoding="utf-8") as f:
             return f.read()
     return "<!DOCTYPE html><html><body><h3>bedside_monitor.html not found</h3></body></html>"
+
+
+def load_bedside_sim_html():
+    """Reads bedside_simulation.html from disk so HTML/CSS edits take effect on refresh."""
+    if os.path.exists(BEDSIDE_SIM_HTML_FILE):
+        with open(BEDSIDE_SIM_HTML_FILE, "r", encoding="utf-8") as f:
+            return f.read()
+    return "<!DOCTYPE html><html><body><h3>bedside_simulation.html not found</h3></body></html>"
 
 
 def default_bed_chaos():
@@ -191,6 +202,14 @@ def make_bedside_handler(engines_dict, meta_info):
                 if "bed=" in self.path:
                     bed_id = self.path.split("bed=", 1)[1].split("&")[0]
                 self._send_json(read_patient_chaos(bed_id))
+            elif self.path.split("?", 1)[0] in ("/bedside_simulation.html", "/bedside_simulation", "/simulation"):
+                body = load_bedside_sim_html().encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
             else:
                 body = load_bedside_html().encode("utf-8")
                 self.send_response(200)
@@ -221,6 +240,12 @@ def make_bedside_handler(engines_dict, meta_info):
                 self._send_json({"ok": True, "chaos": chaos_cfg})
             elif self.path.startswith("/api/manipulate") or self.path.startswith("/api/vitals"):
                 pid = data.get("patient_id") or next(iter(engines_dict.keys()), "Bed_1")
+                if data.get("reset"):
+                    clean = default_bed_chaos()
+                    write_patient_chaos(pid, clean)
+                    self._send_json({"ok": True, "chaos": clean})
+                    return
+
                 chaos = read_patient_chaos(pid)
                 if "vitals" not in chaos:
                     chaos["vitals"] = {}
@@ -236,6 +261,8 @@ def make_bedside_handler(engines_dict, meta_info):
                     chaos.setdefault("Agent_CO2", {})["target_co2"] = int(data["target_co2"])
                     chaos["vitals"]["target_etco2"] = int(data["target_co2"])
                     chaos.setdefault("Agent_EtCO2", {})["target_etco2"] = int(data["target_co2"])
+                if "target_respiration" in data:
+                    chaos["vitals"]["target_respiration"] = int(data["target_respiration"])
                 if "target_sys" in data:
                     chaos["vitals"]["target_sys"] = int(data["target_sys"])
                     chaos.setdefault("Agent_IBP", {})["target_sys"] = int(data["target_sys"])
@@ -261,6 +288,14 @@ def make_bedside_handler(engines_dict, meta_info):
                     m = bool(data["malicious"])
                     for aid in all_agents:
                         chaos.setdefault(aid, {})["malicious"] = m
+                if "sensor_faults" in data and isinstance(data["sensor_faults"], dict):
+                    for aid, is_mal in data["sensor_faults"].items():
+                        if aid in all_agents:
+                            chaos.setdefault(aid, {})["malicious"] = bool(is_mal)
+                            if aid == "Agent_EtCO2":
+                                chaos.setdefault("Agent_CO2", {})["malicious"] = bool(is_mal)
+                            elif aid == "Agent_CO2":
+                                chaos.setdefault("Agent_EtCO2", {})["malicious"] = bool(is_mal)
                 if "overload_gpu" in data:
                     ov = bool(data["overload_gpu"])
                     chaos.setdefault("Orin_Link", {})["overload_gpu"] = ov

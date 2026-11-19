@@ -8,7 +8,7 @@ import { Badge, BedCard, BedPanel, EventLog } from "./bed-panel";
 import RoomDirectory from "./room-directory";
 import { formatReading, type Bed, type Device, type Snapshot, wardURL } from "./telemetry";
 
-const requestAction: Action = async (operation, data) => {
+export const requestAction: Action = async (operation, data) => {
   const response = await fetch(`/api/${operation}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -23,7 +23,7 @@ const requestAction: Action = async (operation, data) => {
 };
 const probe = () => requestAction("probe", {});
 
-function useTelemetry() {
+export function useTelemetry() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [connection, setConnection] = useState<"connecting" | "live" | "reconnecting">("connecting");
 
@@ -52,17 +52,12 @@ function useTelemetry() {
   return { snapshot, connection };
 }
 
-function Directory({ snapshot, beds, selected, live, openAdmission, runAction, busy }: {
+function Directory({ snapshot, selected, live, openAdmission }: {
   snapshot: Snapshot;
-  beds: Bed[];
   selected?: Bed;
   live: boolean;
   openAdmission: () => void;
-  runAction: (operation: string, data: Record<string, string | boolean>) => void;
-  busy: boolean;
 }) {
-  const [alarmBed, setAlarmBed] = useState("");
-  const alarmTarget = beds.find((bed) => bed.patient_id === alarmBed)?.patient_id || beds[0]?.patient_id || "";
   const { ha } = snapshot;
 
   return <>
@@ -80,35 +75,6 @@ function Directory({ snapshot, beds, selected, live, openAdmission, runAction, b
       {snapshot.unadded_jetsons.length > 0 && <button className="button sidebar-button" onClick={openAdmission}>
         Unassigned devices ({snapshot.unadded_jetsons.length})
       </button>}
-    </div>
-    <div className="station-tools">
-      <h2>Station controls</h2>
-      <details>
-        <summary>High availability</summary>
-        <div className="tool-content">
-          {ha.failover_triggered && <p className="secondary">This station has been promoted to primary.</p>}
-          {Object.values(ha.peers).map((peer) => <div className="secondary" key={peer.station_id}>
-            <a href={`//${typeof window !== "undefined" ? window.location.hostname : "localhost"}:${peer.port}`}>{peer.station_id.replaceAll("_", " ")}</a> · {peer.role}
-          </div>)}
-          {!Object.keys(ha.peers).length && <p className="secondary">No peer stations detected.</p>}
-          <button className="button sidebar-button" disabled={busy} onClick={() => runAction("failover", {})}>Test failover / switch role</button>
-        </div>
-      </details>
-      <details>
-        <summary>Emergency simulator</summary>
-        <div className="tool-content">
-          <label>Target bed
-            <select value={alarmTarget} disabled={!beds.length} onChange={(event) => setAlarmBed(event.target.value)}>
-              {!beds.length && <option value="">No active beds</option>}
-              {beds.map((bed) => <option key={bed.patient_id} value={bed.patient_id}>{bed.patient_id} · {bed.room_only}</option>)}
-            </select>
-          </label>
-          <button className="button danger sidebar-button" disabled={busy || !alarmTarget}
-            onClick={() => runAction("alarm", { patient_id: alarmTarget, active: true })}>Trigger alarm</button>
-          <button className="button sidebar-button" disabled={busy || !alarmTarget}
-            onClick={() => runAction("alarm", { patient_id: alarmTarget, active: false })}>Clear alarm</button>
-        </div>
-      </details>
     </div>
   </>;
 }
@@ -156,10 +122,9 @@ export default function Dashboard() {
     }
   }
 
-  function admit(device: Device | undefined, assignedDepartment: string, room: string | null) {
-    const assignment = { department: assignedDepartment, room };
-    const data = device ? { ...assignment, patient_id: device.patient_id } : assignment;
-    void runAction(device ? "admit" : "simulate", data, ({ patient_id }) => {
+  function admit(device: Device, assignedDepartment: string, room: string | null) {
+    const data = { department: assignedDepartment, room, patient_id: device.patient_id };
+    void runAction("admit", data, ({ patient_id }) => {
       if (patient_id) window.history.pushState(null, "", wardURL(assignedDepartment, patient_id));
       closeAdmission();
     });
@@ -180,8 +145,8 @@ export default function Dashboard() {
           <span className="brand-icon" aria-hidden="true">+</span>
           <span>Nurse Station<small>Trust-Aware Healthcare</small></span>
         </Link>
-        {snapshot && <Directory snapshot={snapshot} beds={allBeds} selected={selected} live={connection === "live"}
-          openAdmission={openAdmission} runAction={runAction} busy={busy} />}
+        {snapshot && <Directory snapshot={snapshot} selected={selected} live={connection === "live"}
+          openAdmission={openAdmission} />}
       </aside>
       <main id="content" className="main">
         <header className="topbar">
@@ -191,6 +156,9 @@ export default function Dashboard() {
           </div>
           <div className="header-actions">
             <span role="status"><Badge tone={connection === "live" ? "green" : "amber"}>{connectionLabel}</Badge></span>
+            <Link className="button" href={selected ? `/simulation?bed=${encodeURIComponent(selected.patient_id)}` : "/simulation"} target="_blank" rel="noopener noreferrer">
+              Open simulation tab
+            </Link>
             <button className="button" disabled={!snapshot} onClick={openAdmission}>{scanDeadline ? "Rescan now" : "Rescan LAN"}</button>
             <button className="button button-primary" disabled={!snapshot} onClick={admission ? closeAdmission : openAdmission}>
               {admission ? "Close admission" : `+ Add new bed${snapshot?.unadded_jetsons.length ? ` (${snapshot.unadded_jetsons.length})` : ""}`}

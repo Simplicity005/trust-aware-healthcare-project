@@ -1,5 +1,5 @@
 const readOperations = new Set(["events", "snapshot"]);
-const writeOperations = new Set(["probe", "admit", "simulate", "release", "alarm", "failover"]);
+const writeOperations = new Set(["probe", "admit", "simulate", "release", "alarm", "failover", "manipulate"]);
 
 type Context = { params: Promise<{ operation: string }> };
 

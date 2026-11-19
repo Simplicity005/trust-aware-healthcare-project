@@ -12,6 +12,7 @@ Features:
 """
 
 import os
+import sys
 import time
 import json
 import random
@@ -25,6 +26,11 @@ except ImportError:
 import paho.mqtt.client as mqtt
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BEDSIDE_DIR = os.path.join(os.path.dirname(BASE_DIR), "jetson_bedside")
+if BEDSIDE_DIR not in sys.path:
+    sys.path.insert(0, BEDSIDE_DIR)
+from patient_simulation import PatientSimulation, SAMPLE_RATE, WINDOW_SAMPLES
+
 MODEL_FILE = os.path.join(BASE_DIR, "ecg_anomaly.onnx")
 AGENT_IDS = ["Agent_ECG", "Agent_SpO2", "Agent_HR", "Agent_CO2", "Agent_IBP", "Agent_NIBP"]
 AGENT_LABELS = {
@@ -259,6 +265,7 @@ class PatientBedMonitor:
         self.patient_id = patient_id
         self.last_seen_ts = time.time()
         self.last_mqtt_ts = 0.0
+        self.simulation = PatientSimulation(patient_id)
         self.agents = {aid: AgentTrustTracker(aid) for aid in AGENT_IDS}
         self.edge_summary = {
             "patient_id": patient_id,
@@ -278,7 +285,10 @@ class PatientBedMonitor:
             "routing_path": "primary",
             "timestamp": time.time(),
         }
-        self.latest_ecg_wave = self._default_ecg_wave()
+        initial_frame = self.simulation.sample({})
+        self.latest_ecg_wave = initial_frame.waveforms.get("Agent_ECG") or self._default_ecg_wave()
+        self.latest_ecg_end_ts = initial_frame.end_ts
+        self.latest_ecg_rate = SAMPLE_RATE
         self.gateway_cpu_inf_ms = 0.0
         self.active_routing = "Primary Direct Link"
         self.offload_active = False
@@ -530,8 +540,18 @@ class MultiPatientTrustEngine:
                         bed.last_seen_ts = recv_ts
                         bed.last_mqtt_ts = recv_ts
                         bed.edge_summary = payload
-                        if payload.get("ecg_wave") and len(payload["ecg_wave"]) == 250:
-                            bed.latest_ecg_wave = payload["ecg_wave"]
+                        ecg_sensor = (payload.get("sensors") or {}).get("Agent_ECG") or {}
+                        summary_wave = ecg_sensor.get("waveform") or payload.get("ecg_wave")
+                        summary_ts = float(
+                            ecg_sensor.get("waveform_end_ts")
+                            or ecg_sensor.get("sent_ts")
+                            or payload.get("timestamp")
+                            or recv_ts
+                        )
+                        if isinstance(summary_wave, list) and len(summary_wave) == 250 and summary_ts >= bed.latest_ecg_end_ts:
+                            bed.latest_ecg_wave = summary_wave
+                            bed.latest_ecg_end_ts = summary_ts
+                            bed.latest_ecg_rate = int(ecg_sensor.get("sample_rate_hz") or SAMPLE_RATE)
                         if payload.get("routing_path") == "relay_b":
                             bed.active_routing = "Relay Path B (Rerouted)"
                             bed.offload_active = True
@@ -582,6 +602,10 @@ class MultiPatientTrustEngine:
                 ecg_wave = payload.get("ecg_wave", [])
                 if ecg_wave and len(ecg_wave) == 250:
                     bed.latest_ecg_wave = ecg_wave
+                    bed.latest_ecg_end_ts = float(
+                        payload.get("waveform_end_ts") or payload.get("sent_ts") or recv_ts
+                    )
+                    bed.latest_ecg_rate = int(payload.get("sample_rate_hz") or SAMPLE_RATE)
                     if bed.offload_active and self.cpu_session is not None:
                         t0 = time.perf_counter()
                         wave_np = np.array(ecg_wave, dtype=np.float32).reshape(1, 1, 250)
@@ -691,31 +715,15 @@ class MultiPatientTrustEngine:
                     # Otherwise, synchronize from chaos.json (bedside simulator state)
                     bed_cfg = chaos_data.get(pid, {})
                     vitals_cfg = bed_cfg.get("vitals", {})
-
-                    target_hr = int(vitals_cfg.get("target_hr") or bed_cfg.get("Agent_HR", {}).get("target_hr", 75))
-                    target_spo2 = int(vitals_cfg.get("target_spo2") or bed_cfg.get("Agent_SpO2", {}).get("target_spo2", 98))
-                    target_co2 = int(vitals_cfg.get("target_co2") or bed_cfg.get("Agent_CO2", {}).get("target_co2", 38))
-                    target_sys = int(vitals_cfg.get("target_sys") or bed_cfg.get("Agent_IBP", {}).get("target_sys", 120))
-                    target_dia = int(vitals_cfg.get("target_dia") or bed_cfg.get("Agent_IBP", {}).get("target_dia", 80))
                     ecg_condition = vitals_cfg.get("ecg_condition") or bed_cfg.get("Agent_ECG", {}).get("condition", "normal")
 
                     orin_cfg = bed_cfg.get("Orin_Link", {})
                     use_relay_b = orin_cfg.get("use_relay_b", False)
                     overload_gpu = orin_cfg.get("overload_gpu", False)
 
-                    # Determine rhythm and arrhythmia waveform
+                    frame = bed.simulation.sample(bed_cfg)
                     is_arrhythmia = (ecg_condition == "arrhythmia")
-                    phase = ((sum(ord(c) for c in pid) % 5) - 2) * 0.01
-                    t = np.linspace(0, 1, 250)
-
                     if is_arrhythmia:
-                        ecg = (
-                            0.20 * np.sin(2 * np.pi * 3.5 * t)
-                            + 1.45 * np.exp(-((t - 0.38) ** 2) / (2 * 0.045 ** 2))
-                            - 0.85 * np.exp(-((t - 0.50) ** 2) / (2 * 0.035 ** 2))
-                            + 0.40 * np.sin(2 * np.pi * 7.0 * t)
-                            + np.random.normal(0, 0.04, 250)
-                        )
                         arrhythmia_prob = 0.98
                         local_bed_alarm = True
                         if now - last_logged_alarm.get(pid, 0) > 10.0:
@@ -727,40 +735,38 @@ class MultiPatientTrustEngine:
                             self.global_alert_log.appendleft(entry)
                             last_logged_alarm[pid] = now
                     else:
-                        ecg = (
-                            0.15 * np.exp(-((t - (0.20 + phase)) ** 2) / (2 * 0.025 ** 2))
-                            - 0.15 * np.exp(-((t - (0.35 + phase)) ** 2) / (2 * 0.010 ** 2))
-                            + 1.25 * np.exp(-((t - (0.40 + phase)) ** 2) / (2 * 0.012 ** 2))
-                            - 0.25 * np.exp(-((t - (0.45 + phase)) ** 2) / (2 * 0.012 ** 2))
-                            + 0.30 * np.exp(-((t - (0.65 + phase)) ** 2) / (2 * 0.040 ** 2))
-                            + np.random.normal(0, 0.015, 250)
-                        )
                         arrhythmia_prob = 0.02
                         local_bed_alarm = False
 
                     # Sensor Byzantine spoofing from chaos.json
-                    ecg_mal = bed_cfg.get("Agent_ECG", {}).get("malicious", False)
+                    ecg_mal = bed_cfg.get("Agent_ECG", {}).get("malicious", False) or (ecg_condition == "malicious")
                     sp_mal = bed_cfg.get("Agent_SpO2", {}).get("malicious", False)
                     hr_mal = bed_cfg.get("Agent_HR", {}).get("malicious", False)
-                    co2_mal = bed_cfg.get("Agent_CO2", {}).get("malicious", False)
+                    co2_mal = bed_cfg.get("Agent_CO2", {}).get("malicious", False) or bed_cfg.get("Agent_EtCO2", {}).get("malicious", False)
                     ibp_mal = bed_cfg.get("Agent_IBP", {}).get("malicious", False)
                     nibp_mal = bed_cfg.get("Agent_NIBP", {}).get("malicious", False)
 
                     if ecg_mal:
-                        wave_list = [round(float(np.random.uniform(-3.5, 3.5)), 4) for _ in range(250)]
+                        times = frame.end_ts + np.arange(1 - WINDOW_SAMPLES, 1) / SAMPLE_RATE
+                        noise = 2.1 * np.sin(2 * np.pi * 27 * times) + 1.65 * np.sin(2 * np.pi * 43 * times)
+                        wave_list = np.round(noise, 4).tolist()
                     else:
-                        wave_list = np.round(ecg, 4).tolist()
+                        wave_list = frame.waveforms["Agent_ECG"]
                     bed.latest_ecg_wave = wave_list
+                    bed.latest_ecg_end_ts = frame.end_ts
+                    bed.latest_ecg_rate = SAMPLE_RATE
 
-                    hr_val = 240 if hr_mal else max(35, min(220, target_hr + int(np.random.randint(-1, 2))))
-                    spo2_val = 42 if sp_mal else max(60, min(100, target_spo2 + int(np.random.randint(0, 2) if target_spo2 < 100 else 0)))
-                    co2_val = 95 if co2_mal else max(10, min(80, target_co2 + int(np.random.randint(-1, 2))))
-                    sys_val = 310 if ibp_mal else max(40, min(240, target_sys + int(np.random.randint(-2, 3))))
-                    dia_val = 20 if ibp_mal else max(25, min(140, target_dia + int(np.random.randint(-1, 2))))
+                    hr_val = 240 if hr_mal else int(frame.readings["Agent_HR"])
+                    spo2_val = 42 if sp_mal else int(frame.readings["Agent_SpO2"])
+                    co2_val = 95 if co2_mal else int(frame.readings["Agent_EtCO2"])
+                    ibp_reading = frame.readings["Agent_IBP"]
+                    sys_val = 310 if ibp_mal else int(ibp_reading["systolic"])
+                    dia_val = 20 if ibp_mal else int(ibp_reading["diastolic"])
                     map_val = int(round((sys_val + 2 * dia_val) / 3))
 
-                    nibp_sys = 290 if nibp_mal else sys_val
-                    nibp_dia = 25 if nibp_mal else dia_val
+                    cuff_reading = frame.readings.get("Agent_NIBP") or ibp_reading
+                    nibp_sys = 290 if nibp_mal else int(cuff_reading["systolic"])
+                    nibp_dia = 25 if nibp_mal else int(cuff_reading["diastolic"])
                     nibp_map = int(round((nibp_sys + 2 * nibp_dia) / 3))
 
                     ibp_val = {"sys": sys_val, "dia": dia_val, "map": map_val, "formatted": f"{sys_val}/{dia_val} ({map_val})"}
@@ -890,6 +896,13 @@ class MultiPatientTrustEngine:
 
     def snapshot(self):
         now = time.time()
+        chaos_data = {}
+        if os.path.exists(CHAOS_FILE):
+            try:
+                with open(CHAOS_FILE, "r", encoding="utf-8") as f:
+                    chaos_data = json.load(f)
+            except Exception:
+                pass
         with self.lock:
             beds_snap = {}
             for pid in sorted(self.beds.keys()):
@@ -923,6 +936,9 @@ class MultiPatientTrustEngine:
                     "agents": agents_snap,
                     "edge": dict(bed.edge_summary),
                     "ecg_wave": list(bed.latest_ecg_wave),
+                    "ecg_end_ts": bed.latest_ecg_end_ts,
+                    "ecg_rate": bed.latest_ecg_rate,
+                    "chaos": chaos_data.get(pid, {}),
                     "gateway_cpu_inf_ms": bed.gateway_cpu_inf_ms,
                     "compute_mode": "Gateway CPU (Offloaded)" if bed.offload_active else "Jetson Local",
                     "alert_route": bed.active_routing,
@@ -950,6 +966,7 @@ class MultiPatientTrustEngine:
             }
 
             return {
+                "server_time": now,
                 "beds": beds_snap,
                 "bed_directory": [
                     {"patient_id": pid, "number": str(number), "department": self.get_bed_department(pid),

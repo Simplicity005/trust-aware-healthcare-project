@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bedside Simulation Control</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+    rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0b111a;
+      --card: #141e2b;
+      --inner: #101925;
+      --border: #28384a;
+      --text: #ecf2f8;
+      --muted: #a5b5c7;
+      --dim: #738498;
+      --green: #80e5bd;
+      --amber: #f9c779;
+      --red: #ff99a2;
+      --blue: #91c8ff;
+      --ui: 'Manrope', system-ui, -apple-system, sans-serif;
+      --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--ui);
+      padding: 24px 28px;
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: grid;
+      gap: 18px;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .title-group p {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--green);
+      margin-bottom: 4px;
+    }
+
+    h1 {
+      font-size: 24px;
+      font-weight: 800;
+      letter-spacing: -.03em;
+    }
+
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    select,
+    button,
+    .btn-link {
+      background: #1a2636;
+      color: var(--text);
+      border: 1px solid #35475a;
+      border-radius: 7px;
+      padding: 8px 13px;
+      font: 600 13px var(--ui);
+      cursor: pointer;
+      text-decoration: none;
+      transition: .15s;
+    }
+
+    select:hover,
+    button:hover,
+    .btn-link:hover {
+      background: #25394e;
+      border-color: #536b82;
+    }
+
+    .feedback {
+      font: 600 12px var(--mono);
+      color: var(--green);
+      opacity: 0;
+      transition: opacity .25s;
+    }
+
+    .feedback.show {
+      opacity: 1;
+    }
+
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px;
+    }
+
+    .panel-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+      gap: 10px;
+    }
+
+    .panel-head h2 {
+      font-size: 14px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--muted);
+    }
+
+    .live-strip {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(125px, 1fr));
+      gap: 10px;
+    }
+
+    .live-item {
+      background: var(--inner);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+
+    .live-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      font-size: 11px;
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .live-trust {
+      font: 600 11px var(--mono);
+      color: var(--green);
+    }
+
+    .live-trust.warn {
+      color: var(--amber);
+    }
+
+    .live-trust.bad {
+      color: var(--red);
+    }
+
+    .live-val {
+      font: 600 18px/1.3 var(--mono);
+      margin-top: 4px;
+    }
+
+    .sim-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 12px;
+    }
+
+    .box {
+      background: var(--inner);
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      padding: 14px;
+    }
+
+    .row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 10px;
+    }
+
+    .row b {
+      font-family: var(--mono);
+      font-weight: 600;
+      color: var(--blue);
+    }
+
+    input[type=range] {
+      width: 100%;
+      accent-color: var(--green);
+      cursor: pointer;
+    }
+
+    select.full {
+      width: 100%;
+      background: #101925;
+    }
+
+    .fault-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .check-card {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--inner);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 9px 11px;
+      font-size: 12.5px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .check-card input {
+      accent-color: var(--red);
+      width: 15px;
+      height: 15px;
+      cursor: pointer;
+    }
+
+    .btns {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .b-ok {
+      border-color: #396b59;
+      color: var(--green);
+    }
+
+    .b-bad {
+      border-color: #7f424d;
+      color: var(--red);
+    }
+
+    .b-warn {
+      border-color: #7d6237;
+      color: var(--amber);
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <header>
+      <div class="title-group">
+        <p>Bedside Scenario &amp; Fault Controller</p>
+        <h1>Bedside Simulation &middot; <span id="bedTitle">Bed 1</span></h1>
+      </div>
+      <div class="actions">
+        <span class="feedback" id="fb">&#10003; Applied</span>
+        <label style="font-size:13px;color:var(--muted);font-weight:600;">
+          Target Bed
+          <select id="bedSelect" onchange="switchBed(this.value)" style="margin-left:6px;"></select>
+        </label>
+        <a class="btn-link" id="monitorLink" href="/" target="_blank" rel="noopener">Open Bedside Monitor &nearr;</a>
+      </div>
+    </header>
+
+    <section class="panel" aria-label="Live telemetry preview">
+      <div class="panel-head">
+        <h2>Live Patient Readings &amp; Trust Scores</h2>
+        <span id="rhythmStatus" style="font:600 12px var(--mono);color:var(--green)">Normal rhythm</span>
+      </div>
+      <div class="live-strip" id="liveStrip"></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Clinical Scenario Presets</h2>
+      </div>
+      <div class="btns">
+        <button class="b-ok" onclick="preset('healthy')">Healthy Baseline</button>
+        <button class="b-bad" onclick="preset('arrhythmia')">Ventricular Arrhythmia</button>
+        <button class="b-warn" onclick="preset('hypoxia')">Hypoxia (Low O₂)</button>
+        <button class="b-warn" onclick="preset('hypercapnia')">Hypercapnia (High CO₂)</button>
+        <button class="b-bad" onclick="preset('hypotension')">Hypotensive Shock</button>
+        <button class="b-warn" onclick="preset('hypertension')">Hypertensive Crisis</button>
+        <button onclick="resetAll()">Reset Defaults</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Physiological Vital Parameters</h2>
+      </div>
+      <div class="sim-grid">
+        <div class="box">
+          <div class="row"><span>Heart rate</span><b id="hrLbl">75 bpm</b></div>
+          <input type="range" id="tHr" min="40" max="200" value="75" oninput="send()">
+        </div>
+        <div class="box">
+          <div class="row"><span>Oxygen saturation (SpO₂)</span><b id="spLbl">98 %</b></div>
+          <input type="range" id="tSp" min="70" max="100" value="98" oninput="send()">
+        </div>
+        <div class="box">
+          <div class="row"><span>End-Tidal CO₂</span><b id="co2Lbl">38 mmHg</b></div>
+          <input type="range" id="tCo2" min="15" max="75" value="38" oninput="send()">
+        </div>
+        <div class="box">
+          <div class="row"><span>Respiration rate</span><b id="respLbl">16 br/min</b></div>
+          <input type="range" id="tResp" min="8" max="35" value="16" oninput="send()">
+        </div>
+        <div class="box">
+          <div class="row"><span>Systolic BP</span><b id="sysLbl">120 mmHg</b></div>
+          <input type="range" id="tSys" min="60" max="220" value="120" oninput="send()">
+        </div>
+        <div class="box">
+          <div class="row"><span>Diastolic BP</span><b id="diaLbl">80 mmHg</b></div>
+          <input type="range" id="tDia" min="30" max="130" value="80" oninput="send()">
+        </div>
+        <div class="box">
+          <div class="row"><span>Cardiac rhythm</span></div>
+          <select class="full" id="tEcg" onchange="send()">
+            <option value="normal">Normal sinus rhythm</option>
+            <option value="arrhythmia">Ventricular arrhythmia</option>
+            <option value="malicious">Irregular / artifact signal</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Network, Sensor Trust &amp; Edge Compute Simulation</h2>
+      </div>
+      <div class="sim-grid">
+        <div class="box">
+          <div class="row"><span>Network delay</span><b id="delayLbl">10 ms</b></div>
+          <input type="range" id="tDelay" min="0" max="500" step="5" value="10" oninput="send()">
+        </div>
+        <div class="box">
+          <div class="row"><span>Sensor packet drop</span><b id="dropLbl">0%</b></div>
+          <input type="range" id="tDrop" min="0" max="0.9" step="0.05" value="0" oninput="send()">
+        </div>
+        <div class="box">
+          <div class="row"><span>Edge compute routing</span></div>
+          <label class="check-card" style="border:0;padding:4px 0;">
+            <input type="checkbox" id="tOverload" onchange="send()">
+            <span>Overload Jetson GPU / Reroute via Relay B</span>
+          </label>
+        </div>
+      </div>
+
+      <div style="margin-top:16px;">
+        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;">
+          Per-Sensor Fault / Spoofing Injection (Tests Trust Score Degradation)
+        </div>
+        <div class="fault-grid" id="faultGrid"></div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const $ = id => document.getElementById(id);
+    const nice = id => (id || 'Bed_1').replace(/_/g, ' ');
+    let bed = new URLSearchParams(window.location.search).get('bed') || null;
+    let loadedBedConfig = null;
+
+    const sensorDefs = [
+      { id: 'Agent_ECG', label: 'ECG Lead II', key: 'ecg' },
+      { id: 'Agent_HR', label: 'Heart Rate', key: 'hr', unit: 'bpm' },
+      { id: 'Agent_SpO2', label: 'SpO₂', key: 'spo2', unit: '%' },
+      { id: 'Agent_EtCO2', label: 'EtCO₂', key: 'co2', unit: 'mmHg' },
+      { id: 'Agent_Respiration', label: 'Respiration', key: 'resp', unit: 'br/min' },
+      { id: 'Agent_IBP', label: 'IBP', key: 'ibp', unit: 'mmHg' },
+      { id: 'Agent_NIBP', label: 'NIBP', key: 'nibp', unit: 'mmHg' },
+      { id: 'Agent_Temperature', label: 'Temperature', key: 'temp', unit: '°C' }
+    ];
+
+    $('faultGrid').innerHTML = sensorDefs.map(s => `
+      <label class="check-card">
+        <input type="checkbox" id="fault_${s.id}" onchange="send()">
+        <span>Spoof ${s.label}</span>
+      </label>
+    `).join('');
+
+    function updateLabels() {
+      $('hrLbl').textContent = $('tHr').value + ' bpm';
+      $('spLbl').textContent = $('tSp').value + ' %';
+      $('co2Lbl').textContent = $('tCo2').value + ' mmHg';
+      $('respLbl').textContent = $('tResp').value + ' br/min';
+      $('sysLbl').textContent = $('tSys').value + ' mmHg';
+      $('diaLbl').textContent = $('tDia').value + ' mmHg';
+      $('dropLbl').textContent = Math.round(+$('tDrop').value * 100) + '%';
+      $('delayLbl').textContent = $('tDelay').value + ' ms';
+    }
+
+    function applyConfigToInputs(chaos) {
+      if (!chaos) return;
+      const v = chaos.vitals || {};
+      $('tHr').value = v.target_hr ?? chaos.Agent_HR?.target_hr ?? 75;
+      $('tSp').value = v.target_spo2 ?? chaos.Agent_SpO2?.target_spo2 ?? 98;
+      $('tCo2').value = v.target_co2 ?? v.target_etco2 ?? chaos.Agent_CO2?.target_co2 ?? 38;
+      $('tResp').value = v.target_respiration ?? 16;
+      $('tSys').value = v.target_sys ?? chaos.Agent_IBP?.target_sys ?? 120;
+      $('tDia').value = v.target_dia ?? chaos.Agent_IBP?.target_dia ?? 80;
+      $('tEcg').value = v.ecg_condition ?? chaos.Agent_ECG?.condition ?? 'normal';
+      $('tDelay').value = chaos.Agent_ECG?.delay_ms ?? 10;
+      $('tDrop').value = chaos.Agent_ECG?.drop_rate ?? 0;
+      $('tOverload').checked = Boolean(chaos.Orin_Link?.overload_gpu);
+      for (const s of sensorDefs) {
+        const box = $(`fault_${s.id}`);
+        if (box) box.checked = Boolean(chaos[s.id]?.malicious);
+      }
+      updateLabels();
+    }
+
+    function switchBed(id) {
+      bed = id;
+      loadedBedConfig = null;
+      $('bedTitle').textContent = nice(id);
+      $('monitorLink').href = `/?bed=${encodeURIComponent(id)}`;
+      poll();
+    }
+
+    async function poll() {
+      try {
+        const r = await fetch('/api/state');
+        if (!r.ok) return;
+        const d = await r.json();
+        const beds = Object.keys(d.beds || {});
+        if (!beds.length) return;
+        const sel = $('bedSelect');
+        if (Array.from(sel.options).map(o => o.value).join() !== beds.join()) {
+          sel.options.length = 0;
+          for (const id of beds) sel.add(new Option(nice(id), id));
+        }
+        if (!bed || !d.beds[bed]) bed = beds[0];
+        if (sel.value !== bed) sel.value = bed;
+        $('bedTitle').textContent = nice(bed);
+        $('monitorLink').href = `/?bed=${encodeURIComponent(bed)}`;
+
+        const b = d.beds[bed];
+        if (!b) return;
+        if (loadedBedConfig !== bed && b.chaos) {
+          loadedBedConfig = bed;
+          applyConfigToInputs(b.chaos);
+        }
+
+        const sensors = b.sensors || {};
+        const items = [
+          { label: 'ECG', agent: 'Agent_ECG', val: b.arrhythmia ? 'Arrhythmia' : 'Sinus' },
+          { label: 'HR', agent: 'Agent_HR', val: b.hr != null ? `${b.hr} bpm` : '--' },
+          { label: 'SpO₂', agent: 'Agent_SpO2', val: b.spo2 != null ? `${b.spo2}%` : '--' },
+          { label: 'EtCO₂', agent: 'Agent_EtCO2', val: (sensors.Agent_EtCO2?.value ?? b.co2) != null ? `${sensors.Agent_EtCO2?.value ?? b.co2} mmHg` : '--' },
+          { label: 'Resp', agent: 'Agent_Respiration', val: sensors.Agent_Respiration?.value != null ? `${sensors.Agent_Respiration.value} br/m` : '--' },
+          { label: 'IBP', agent: 'Agent_IBP', val: b.ibp?.sys != null ? `${b.ibp.sys}/${b.ibp.dia}` : '--' },
+          { label: 'NIBP', agent: 'Agent_NIBP', val: b.nibp?.sys != null ? `${b.nibp.sys}/${b.nibp.dia}` : '--' },
+          { label: 'Temp', agent: 'Agent_Temperature', val: Number.isFinite(b.temperature_c) ? `${b.temperature_c.toFixed(1)} °C` : '--' }
+        ];
+
+        $('rhythmStatus').textContent = b.arrhythmia ? 'Ventricular Arrhythmia Alert' : 'Normal Sinus Rhythm';
+        $('rhythmStatus').style.color = b.arrhythmia ? 'var(--red)' : 'var(--green)';
+
+        $('liveStrip').innerHTML = items.map(item => {
+          const s = sensors[item.agent] || {};
+          const score = Number(s.trust_score ?? 100);
+          const cls = score < 45 ? 'bad' : score < 70 ? 'warn' : '';
+          return `
+            <div class="live-item">
+              <div class="live-top">
+                <span>${item.label}</span>
+                <span class="live-trust ${cls}">${score.toFixed(0)}%</span>
+              </div>
+              <div class="live-val">${item.val}</div>
+            </div>
+          `;
+        }).join('');
+      } catch (e) {}
+    }
+
+    async function send() {
+      updateLabels();
+      const hr = +$('tHr').value;
+      const sp = +$('tSp').value;
+      const co2 = +$('tCo2').value;
+      const resp = +$('tResp').value;
+      const sys = +$('tSys').value;
+      const dia = +$('tDia').value;
+      const ec = $('tEcg').value;
+      const drop = +$('tDrop').value;
+      const delay = +$('tDelay').value;
+      const overload = $('tOverload').checked;
+
+      const sensorFaults = {};
+      for (const s of sensorDefs) {
+        sensorFaults[s.id] = Boolean($(`fault_${s.id}`)?.checked);
+      }
+      if (ec === 'malicious') {
+        sensorFaults.Agent_ECG = true;
+      }
+
+      try {
+        const r = await fetch('/api/manipulate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            patient_id: bed || 'Bed_1',
+            target_hr: hr,
+            target_spo2: sp,
+            target_co2: co2,
+            target_respiration: resp,
+            target_sys: sys,
+            target_dia: dia,
+            ecg_condition: ec,
+            delay_ms: delay,
+            drop_rate: drop,
+            sensor_faults: sensorFaults,
+            overload_gpu: overload,
+            use_relay_b: overload
+          })
+        });
+        if (r.ok) {
+          $('fb').classList.add('show');
+          setTimeout(() => $('fb').classList.remove('show'), 1500);
+        }
+      } catch (e) {}
+    }
+
+    function preset(n) {
+      const P = {
+        healthy: [75, 98, 38, 16, 120, 80, 'normal'],
+        arrhythmia: [142, 93, 36, 22, 110, 70, 'arrhythmia'],
+        hypoxia: [108, 86, 48, 24, 105, 65, 'normal'],
+        hypercapnia: [94, 91, 56, 10, 130, 85, 'normal'],
+        hypotension: [124, 93, 28, 22, 76, 46, 'normal'],
+        hypertension: [95, 98, 41, 18, 185, 110, 'normal']
+      }[n];
+      if (!P) return;
+      $('tHr').value = P[0];
+      $('tSp').value = P[1];
+      $('tCo2').value = P[2];
+      $('tResp').value = P[3];
+      $('tSys').value = P[4];
+      $('tDia').value = P[5];
+      $('tEcg').value = P[6];
+      if (n === 'healthy') {
+        $('tDrop').value = 0;
+        $('tDelay').value = 10;
+        $('tOverload').checked = false;
+        for (const s of sensorDefs) $(`fault_${s.id}`).checked = false;
+      }
+      send();
+    }
+
+    async function resetAll() {
+      try {
+        const r = await fetch('/api/manipulate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ patient_id: bed || 'Bed_1', reset: true })
+        });
+        if (r.ok) {
+          const data = await r.json();
+          applyConfigToInputs(data.chaos);
+          $('fb').classList.add('show');
+          setTimeout(() => $('fb').classList.remove('show'), 1500);
+        }
+      } catch (e) {}
+    }
+
+    setInterval(poll, 400);
+    poll();
+  </script>
+</body>
+
+</html>

@@ -49,6 +49,23 @@ class AlarmAction(BedAction):
     active: bool
 
 
+class ManipulateAction(BedAction):
+    target_hr: int | None = None
+    target_spo2: int | None = None
+    target_co2: int | None = None
+    target_respiration: int | None = None
+    target_sys: int | None = None
+    target_dia: int | None = None
+    ecg_condition: str | None = None
+    delay_ms: float | None = None
+    drop_rate: float | None = None
+    malicious: bool | None = None
+    sensor_faults: dict[str, bool] | None = None
+    overload_gpu: bool | None = None
+    use_relay_b: bool | None = None
+    reset: bool = False
+
+
 def validate_department(department):
     if department not in DEPARTMENT_CODES:
         raise HTTPException(422, "Unknown department.")
@@ -101,17 +118,39 @@ def telemetry_json(engine):
     return json.dumps(data, separators=(",", ":"))
 
 
-def set_simulated_alarm(patient_id, active):
+ALL_SENSOR_AGENTS = (
+    "Agent_ECG", "Agent_SpO2", "Agent_HR", "Agent_CO2",
+    "Agent_Respiration", "Agent_EtCO2", "Agent_IBP", "Agent_NIBP", "Agent_Temperature",
+)
+
+
+def default_bed_chaos():
+    return {
+        "Agent_ECG": {"delay_ms": 12, "drop_rate": 0.0, "malicious": False, "condition": "normal"},
+        "Agent_SpO2": {"delay_ms": 10, "drop_rate": 0.0, "malicious": False, "target_spo2": 98},
+        "Agent_HR": {"delay_ms": 10, "drop_rate": 0.0, "malicious": False, "target_hr": 75},
+        "Agent_CO2": {"delay_ms": 10, "drop_rate": 0.0, "malicious": False, "target_co2": 38},
+        "Agent_Respiration": {"delay_ms": 10, "drop_rate": 0.0, "malicious": False},
+        "Agent_EtCO2": {"delay_ms": 10, "drop_rate": 0.0, "malicious": False, "target_etco2": 38},
+        "Agent_IBP": {"delay_ms": 10, "drop_rate": 0.0, "malicious": False, "target_sys": 120, "target_dia": 80},
+        "Agent_NIBP": {"delay_ms": 15, "drop_rate": 0.0, "malicious": False, "target_sys": 120, "target_dia": 80},
+        "Agent_Temperature": {"delay_ms": 10, "drop_rate": 0.0, "malicious": False},
+        "Orin_Link": {"overload_gpu": False, "use_relay_b": False},
+        "vitals": {
+            "target_hr": 75,
+            "target_spo2": 98,
+            "target_co2": 38,
+            "target_etco2": 38,
+            "target_respiration": 16,
+            "target_sys": 120,
+            "target_dia": 80,
+            "ecg_condition": "normal",
+        },
+    }
+
+
+def write_chaos_config(config):
     path = Path(CHAOS_FILE)
-    config = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-    bed = config.setdefault(patient_id, {})
-    condition = "arrhythmia" if active else "normal"
-    bed.setdefault("vitals", {}).update(
-        ecg_condition=condition,
-        target_hr=165 if active else 75,
-        target_spo2=82 if active else 98,
-    )
-    bed.setdefault("Agent_ECG", {})["condition"] = condition
     with NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as output:
         temporary = Path(output.name)
         try:
@@ -120,6 +159,84 @@ def set_simulated_alarm(patient_id, active):
             os.replace(temporary, path)
         finally:
             temporary.unlink(missing_ok=True)
+
+
+def set_simulated_alarm(patient_id, active):
+    path = Path(CHAOS_FILE)
+    config = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    bed = config.setdefault(patient_id, default_bed_chaos())
+    condition = "arrhythmia" if active else "normal"
+    bed.setdefault("vitals", {}).update(
+        ecg_condition=condition,
+        target_hr=165 if active else 75,
+        target_spo2=82 if active else 98,
+    )
+    bed.setdefault("Agent_ECG", {})["condition"] = condition
+    write_chaos_config(config)
+
+
+def apply_bed_manipulation(body: ManipulateAction, engine):
+    path = Path(CHAOS_FILE)
+    config = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    if body.reset:
+        bed = default_bed_chaos()
+        config[body.patient_id] = bed
+    else:
+        bed = config.setdefault(body.patient_id, default_bed_chaos())
+        vitals = bed.setdefault("vitals", {})
+        if body.target_hr is not None:
+            vitals["target_hr"] = int(body.target_hr)
+            bed.setdefault("Agent_HR", {})["target_hr"] = int(body.target_hr)
+        if body.target_spo2 is not None:
+            vitals["target_spo2"] = int(body.target_spo2)
+            bed.setdefault("Agent_SpO2", {})["target_spo2"] = int(body.target_spo2)
+        if body.target_co2 is not None:
+            vitals["target_co2"] = int(body.target_co2)
+            vitals["target_etco2"] = int(body.target_co2)
+            bed.setdefault("Agent_CO2", {})["target_co2"] = int(body.target_co2)
+            bed.setdefault("Agent_EtCO2", {})["target_etco2"] = int(body.target_co2)
+        if body.target_respiration is not None:
+            vitals["target_respiration"] = int(body.target_respiration)
+        if body.target_sys is not None:
+            vitals["target_sys"] = int(body.target_sys)
+            bed.setdefault("Agent_IBP", {})["target_sys"] = int(body.target_sys)
+            bed.setdefault("Agent_NIBP", {})["target_sys"] = int(body.target_sys)
+        if body.target_dia is not None:
+            vitals["target_dia"] = int(body.target_dia)
+            bed.setdefault("Agent_IBP", {})["target_dia"] = int(body.target_dia)
+            bed.setdefault("Agent_NIBP", {})["target_dia"] = int(body.target_dia)
+        if body.ecg_condition is not None:
+            vitals["ecg_condition"] = str(body.ecg_condition)
+            bed.setdefault("Agent_ECG", {})["condition"] = str(body.ecg_condition)
+        if body.delay_ms is not None:
+            for aid in ALL_SENSOR_AGENTS:
+                bed.setdefault(aid, {})["delay_ms"] = float(body.delay_ms)
+        if body.drop_rate is not None:
+            for aid in ALL_SENSOR_AGENTS:
+                bed.setdefault(aid, {})["drop_rate"] = float(body.drop_rate)
+        if body.malicious is not None:
+            for aid in ALL_SENSOR_AGENTS:
+                bed.setdefault(aid, {})["malicious"] = bool(body.malicious)
+        if body.sensor_faults:
+            for aid, is_mal in body.sensor_faults.items():
+                if aid in ALL_SENSOR_AGENTS:
+                    bed.setdefault(aid, {})["malicious"] = bool(is_mal)
+                    if aid == "Agent_CO2":
+                        bed.setdefault("Agent_EtCO2", {})["malicious"] = bool(is_mal)
+                    elif aid == "Agent_EtCO2":
+                        bed.setdefault("Agent_CO2", {})["malicious"] = bool(is_mal)
+        if body.overload_gpu is not None or body.use_relay_b is not None:
+            ov = bool(body.overload_gpu if body.overload_gpu is not None else body.use_relay_b)
+            bed.setdefault("Orin_Link", {})["overload_gpu"] = ov
+            bed.setdefault("Orin_Link", {})["use_relay_b"] = ov
+
+    write_chaos_config(config)
+    if engine.client:
+        try:
+            engine.client.publish(f"hospital/{body.patient_id}/control/chaos", json.dumps(bed), qos=1)
+        except Exception:
+            pass
+    return bed
 
 
 @app.get("/health")
@@ -142,7 +259,7 @@ async def events(request: Request):
         while not await request.is_disconnected():
             data = await asyncio.to_thread(telemetry_json, request.app.state.engine)
             yield f"data: {data}\n\n"
-            await asyncio.sleep(0.6)
+            await asyncio.sleep(0.35)
 
     return StreamingResponse(
         updates(), media_type="text/event-stream",
@@ -202,3 +319,16 @@ def alarm(body: AlarmAction, request: Request):
 def failover(request: Request):
     request.app.state.engine.trigger_failover_test()
     return {"ok": True}
+
+
+@app.post("/manipulate")
+def manipulate(body: ManipulateAction, request: Request):
+    engine = request.app.state.engine
+    with engine.lock:
+        if body.patient_id not in engine.added_bed_ids:
+            raise HTTPException(404, "This bedside node is not admitted.")
+        try:
+            chaos = apply_bed_manipulation(body, engine)
+        except (OSError, ValueError, TypeError, AttributeError) as exc:
+            raise HTTPException(503, "Could not update the simulator configuration.") from exc
+    return {"ok": True, "chaos": chaos}
