@@ -2,8 +2,8 @@
 
 This folder runs on **each patient's bedside device** (a Jetson or a local test computer). Each bed gets its own private dashboard, its own login password, and its own simulator.
 
-> **Using separate machines over Wi-Fi/Ethernet?**
-> Before starting, set your Mosquitto broker address and bed login from [Option 2: Run on Separate Machines](../README.md#option-2-run-on-separate-machines). If you are running everything on one computer, you can skip this — it connects to the local Nurse Station on port `1884` automatically.
+> **Using separate machines (different Wi-Fis via Tailscale, or real Jetsons)?**
+> Before starting, run the 1-command Mosquitto broker on the Nurse Station computer and use the login + `ca.pem` from [Option 2: Run on Separate Machines](../README.md#option-2-run-on-separate-machines). If you are running everything on one computer, you can skip this — it connects to the local Nurse Station on port `1884` automatically.
 
 ---
 

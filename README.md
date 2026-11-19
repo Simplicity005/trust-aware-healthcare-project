@@ -4,7 +4,7 @@ A hospital monitoring system with two parts:
 - **Bedside Monitors** (one per patient / Jetson): live waveforms, vitals, local login, and a separate simulation page.
 - **Central Nurse Station**: watches all registered beds in one place, tracks sensor trust scores, and shows alerts.
 
-They talk to each other through **Eclipse Mosquitto** (MQTT).
+They talk to each other through **Eclipse Mosquitto** (100% free, self-hosted MQTT — no paid cloud accounts or usage limits).
 
 ---
 
@@ -70,91 +70,60 @@ Open a terminal in this project folder and run **one command**:
 
 ## Option 2: Run on Separate Machines
 
-Use this when the Nurse Station is on one computer and each Bedside Monitor runs on its own Jetson over Wi-Fi or Ethernet.
+Use this to test across **two laptops on completely different Wi-Fis** (e.g., your laptop as the Nurse Station and a friend's laptop acting as a Jetson), or with real Jetsons.
 
-### Step 1 — Set up Mosquitto on one machine (the Nurse Laptop or a server)
+It uses **Eclipse Mosquitto** (running free on your laptop) + **Tailscale** (free personal VPN that makes laptops on different Wi-Fis act like they're on the same private network — no router setup, no paid cloud broker, no data limits).
 
-1. Install **Eclipse Mosquitto 2.x** on that machine and allow TCP port `8883` through its firewall.
-2. Put your TLS certificate & key in `/etc/mosquitto/certs/` (make sure the `mosquitto` user can read them).
-3. Create one login for the Nurse Station and one login per Jetson:
-   ```bash
-   sudo mosquitto_passwd -c /etc/mosquitto/passwd nurse-station
-   sudo mosquitto_passwd /etc/mosquitto/passwd jetson-bed-1
-   sudo mosquitto_passwd /etc/mosquitto/passwd jetson-bed-2
-   ```
-4. Create `/etc/mosquitto/acl` so each Jetson can only publish to its own bed:
-   ```text
-   user nurse-station
-   topic readwrite hospital/#
+### Step 1 — Connect both machines with Tailscale *(skip if on the same Wi-Fi)*
 
-   user jetson-bed-1
-   topic readwrite hospital/Bed_1/#
+1. Install **Tailscale** (free) on **your laptop** and **your friend's laptop (or each Jetson)** from [tailscale.com/download](https://tailscale.com/download).
+2. Sign in and turn Tailscale **On** on both devices (either sign into the same Tailscale account, or share your laptop with your friend from the Tailscale web dashboard).
 
-   user jetson-bed-2
-   topic readwrite hospital/Bed_2/#
-   ```
-5. Add these settings to `/etc/mosquitto/mosquitto.conf` (or a file in `/etc/mosquitto/conf.d/`) and restart Mosquitto:
-   ```conf
-   listener 8883
-   certfile /etc/mosquitto/certs/broker.crt
-   keyfile /etc/mosquitto/certs/broker.key
-   allow_anonymous false
-   password_file /etc/mosquitto/passwd
-   acl_file /etc/mosquitto/acl
-   ```
+*(If both devices are already on the exact same Wi-Fi or mobile hotspot, you can skip Tailscale — Step 2 will automatically use your Wi-Fi IP instead.)*
 
-### Step 2 — Start the Nurse Station (on the Nurse Laptop)
+### Step 2 — Start the private Mosquitto broker (1 command on YOUR laptop)
 
-Set the broker details in your terminal, then start the station:
+Make sure **Eclipse Mosquitto 2.x** is installed on your laptop (from Option 1 Step 1), then run **one command** from this project folder:
 
-- **Linux / macOS:**
+- **Ubuntu / Debian:**
   ```bash
-  export MQTT_HOST='your-broker-hostname'
-  export MQTT_PORT=8883
-  export MQTT_USERNAME='nurse-station'
-  read -rs -p 'MQTT password: ' MQTT_PASSWORD && echo
-  export MQTT_PASSWORD
-  # If using a self-signed/private CA certificate, also run:
-  # export MQTT_CA_FILE='/path/to/ca.pem'
-
-  ./start_nurse_station.sh
+  sudo ./start_network_broker.sh --install-etc
+  ```
+- **macOS / other Linux:**
+  ```bash
+  ./start_network_broker.sh
   ```
 - **Windows (PowerShell):**
   ```powershell
-  $env:MQTT_HOST = 'your-broker-hostname'
-  $env:MQTT_PORT = '8883'
-  $cred = Get-Credential -UserName 'nurse-station' -Message 'Nurse Station MQTT password'
-  $env:MQTT_USERNAME = $cred.UserName
-  $env:MQTT_PASSWORD = $cred.GetNetworkCredential().Password
-  # Optional private CA: $env:MQTT_CA_FILE = 'C:\path\to\ca.pem'
-
-  .\start_nurse_station.bat
+  .\start_network_broker.bat
   ```
 
-Open [http://127.0.0.1:8501](http://127.0.0.1:8501) on the Nurse Laptop.
+This **automatically** detects your Tailscale IP, generates the TLS encryption certificates and per-bed passwords, starts Mosquitto on port `8883`, and **prints the exact copy-paste commands** for Steps 3 and 4!
 
-### Step 3 — Start each Bedside Unit (on each Jetson)
+> **If your friend gets a connection timeout (firewall):**
+> - **Ubuntu:** run `sudo ufw allow 8883/tcp` (only needed if `ufw` is enabled).
+> - **Windows / macOS:** click **Allow** when the firewall popup asks about `mosquitto`.
 
-On **Jetson 1**, set the same `MQTT_HOST` and `MQTT_PORT`, use `jetson-bed-1` credentials, and launch:
+### Step 3 — Start the Nurse Station (on YOUR laptop)
 
-```bash
-export MQTT_HOST='your-broker-hostname'
-export MQTT_PORT=8883
-export MQTT_USERNAME='jetson-bed-1'
-read -rs -p 'MQTT password: ' MQTT_PASSWORD && echo
-export MQTT_PASSWORD
-# Optional private CA: export MQTT_CA_FILE='/path/to/ca.pem'
+Copy and paste **block `1)`** printed by Step 2 into a terminal (it sets `MQTT_HOST`, `MQTT_USERNAME`, `MQTT_PASSWORD`, `MQTT_CA_FILE`, and runs `./start_nurse_station.sh` or `.\start_nurse_station.bat`).
 
-./start_bedside.sh --patient-id Bed_1
-```
+Then open [http://127.0.0.1:8501](http://127.0.0.1:8501) in your browser.
 
-On **Jetson 2**, do the same with `jetson-bed-2` and `--patient-id Bed_2` (and on Windows, use `.\start_bedside.bat --patient-id Bed_1`).
+### Step 4 — Start the Bedside Monitor (on your friend's laptop or a Jetson)
 
-### Step 4 — Register each patient at the bedside
+Your friend's laptop **only needs Python 3.10+** (no Node.js, no Mosquitto, no Docker).
 
-1. On each Jetson, open [http://127.0.0.1:8080](http://127.0.0.1:8080) in its local browser.
-2. Fill in the patient's details, ward/room, and set a bedside password.
-3. The bed will immediately appear on the Nurse Station. Registrations are saved automatically, so if a Jetson restarts it will reconnect on its own.
+1. Send your friend the public **`ca.pem`** file printed in Step 2 (located at `~/.local/state/nurse-station/broker/ca.pem` — completely safe to send over WhatsApp, Discord, or email; never send `server.key`).
+2. Have her save `ca.pem` inside this project folder.
+3. Have her copy and paste **block `2)`** printed in Step 2 into her terminal.
+4. She opens [http://127.0.0.1:8080](http://127.0.0.1:8080), enters a patient name, department, room, and an 8+ character password, and clicks **Register**.
+5. Within a second, that patient appears live on **your** Nurse Station — even across completely different Wi-Fi networks! She can open **Simulation** on her screen to change vitals or unplug sensors and watch both screens react live.
+
+> **Useful tips:**
+> - **Need more than 3 beds?** Pass `--beds Bed_1 Bed_2 Bed_3 Bed_4` to `start_network_broker`.
+> - **Forgot the printed commands?** Re-run the Step 2 command — it reuses your saved passwords and reprints everything.
+> - **Want to remove the Ubuntu system service config later?** Run `sudo ./start_network_broker.sh --uninstall-etc`.
 
 ---
 
@@ -163,6 +132,7 @@ On **Jetson 2**, do the same with `jetson-bed-2` and `--patient-id Bed_2` (and o
 | What you want to run | Linux / macOS / WSL | Windows | Browser URL |
 | --- | --- | --- | --- |
 | Everything on 1 PC (Demo) | `./start_local_demo.sh` | `.\start_local_demo.bat` | Station: `:8501`, Beds: `:8080`, `:8081`, `:8082` |
+| Private Network Broker (Tailscale / Wi-Fi) | `sudo ./start_network_broker.sh --install-etc` *(Ubuntu)* or `./start_network_broker.sh` | `.\start_network_broker.bat` | TLS MQTT on `:8883` |
 | Nurse Station only | `./start_nurse_station.sh` | `.\start_nurse_station.bat` | `http://127.0.0.1:8501` |
 | Single Bedside only | `./start_bedside.sh --patient-id Bed_1` | `.\start_bedside.bat --patient-id Bed_1` | `http://127.0.0.1:8080` |
 

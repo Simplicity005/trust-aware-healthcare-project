@@ -6,8 +6,8 @@ Under the hood, it runs two local services on the station computer:
 - **Web Dashboard (Next.js):** `http://127.0.0.1:8501`
 - **Backend API & Engine (FastAPI + Python):** `http://127.0.0.1:9501` (talks to beds through Mosquitto)
 
-> **Using separate Jetsons over Wi-Fi/Ethernet?**
-> Before starting, set your Mosquitto broker address and `nurse-station` credentials from [Option 2: Run on Separate Machines](../README.md#option-2-run-on-separate-machines). If you are running locally on one computer, the launcher automatically starts Mosquitto on port `1884` (using native Mosquitto or Docker).
+> **Using separate machines (different Wi-Fis via Tailscale, or real Jetsons)?**
+> Start the private Mosquitto broker first using [Option 2: Run on Separate Machines](../README.md#option-2-run-on-separate-machines) and paste the Nurse Station commands it prints. If you are running locally on one computer, the launcher automatically starts Mosquitto on port `1884` (using native Mosquitto or Docker).
 
 ---
 
