@@ -10,6 +10,7 @@
      ========================================================================== -->
   <style id="bento-styles">
     @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200');
 
     :root {
       --bg: #0a0e13;
@@ -34,14 +35,71 @@
       display: none !important;
     }
 
-    .stApp,
-    .stApp * {
-      font-family: var(--ui);
-    }
-
     .stApp {
+      font-family: var(--ui);
       background-color: var(--bg) !important;
       color: var(--text) !important;
+    }
+
+    /* Prevent custom fonts from overriding Streamlit icon ligatures */
+    span[class*="e1vmumty"],
+    span[data-testid*="Icon"],
+    span[data-testid*="icon"],
+    [data-testid="stIcon"],
+    [data-testid="stExpanderToggleIcon"],
+    [data-testid="stExpanderToggleIcon"] *,
+    [class*="material-symbols"],
+    [class*="material-icons"],
+    .material-symbols-rounded,
+    .material-icons,
+    [data-testid="stExpander"] summary span svg {
+      font-family: "Material Symbols Rounded", "Material Icons" !important;
+      font-weight: normal !important;
+      font-style: normal !important;
+      line-height: 1 !important;
+      letter-spacing: normal !important;
+      text-transform: none !important;
+      display: inline-flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      white-space: nowrap !important;
+      word-wrap: normal !important;
+      direction: ltr !important;
+      font-feature-settings: 'liga' 1 !important;
+      -webkit-font-feature-settings: 'liga' 1 !important;
+      -webkit-font-smoothing: antialiased !important;
+    }
+
+    /* Streamlit Expander header & content styling */
+    [data-testid="stExpander"] {
+      background: var(--card) !important;
+      border: 1px solid var(--border) !important;
+      border-radius: 12px !important;
+      margin-bottom: 8px !important;
+      overflow: hidden !important;
+    }
+
+    [data-testid="stExpander"] details {
+      border: none !important;
+      background: transparent !important;
+    }
+
+    [data-testid="stExpander"] summary {
+      padding: 10px 12px !important;
+      cursor: pointer !important;
+    }
+
+    [data-testid="stExpander"] summary p {
+      font-family: var(--ui) !important;
+      font-size: 13px !important;
+      font-weight: 700 !important;
+      color: #f1f5f9 !important;
+      margin: 0 !important;
+    }
+
+    [data-testid="stExpander"] [data-testid="stExpanderDetails"] {
+      padding: 8px 12px 12px 12px !important;
+      border-top: 1px solid var(--border) !important;
     }
 
     code,
@@ -92,9 +150,228 @@
     /* ---------- Bento ---------- */
     .ward-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
       gap: 14px;
       margin-bottom: 8px;
+    }
+
+    .patient-name {
+      font-size: 16px;
+      font-weight: 800;
+      color: #fff;
+      letter-spacing: -0.02em;
+    }
+
+    .patient-diagnosis {
+      font-size: 11px;
+      color: var(--muted);
+      margin: 4px 0 10px 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-weight: 500;
+    }
+
+    .ward-vitals-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 6px;
+      background: var(--card-2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 10px;
+      margin-bottom: 8px;
+    }
+
+    .vital-mini {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .vital-mini .lbl {
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--dim);
+    }
+
+    .vital-mini .val-sm {
+      font-size: 13.5px;
+      font-weight: 700;
+      font-family: var(--mono);
+      line-height: 1.2;
+      margin-top: 2px;
+    }
+
+    .inspect-btn {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--blue);
+      text-decoration: none;
+      padding: 5px 10px;
+      border-radius: 8px;
+      background: rgba(96, 165, 250, 0.09);
+      border: 1px solid rgba(96, 165, 250, 0.25);
+      transition: all 0.15s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .inspect-btn:hover {
+      background: rgba(96, 165, 250, 0.22);
+      border-color: var(--blue);
+      color: #fff;
+    }
+
+    .ward-rect-card {
+      transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+      cursor: pointer;
+    }
+
+    .ward-rect-card:hover {
+      border-color: rgba(96, 165, 250, 0.45) !important;
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    }
+
+    .ward-card-selected {
+      border-color: #3b82f6 !important;
+      box-shadow: 0 0 0 1px #3b82f6, 0 8px 24px rgba(59, 130, 246, 0.22) !important;
+    }
+
+    /* ---------- Blinking Red Emergency Alert Pop-up ---------- */
+    @keyframes emergency-pulse {
+      0%, 100% {
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.95), 0 12px 36px rgba(0, 0, 0, 0.8);
+        border-color: #ef4444;
+        background-color: rgba(69, 10, 10, 0.96);
+      }
+      50% {
+        box-shadow: 0 0 0 16px rgba(239, 68, 68, 0), 0 16px 45px rgba(239, 68, 68, 0.6);
+        border-color: #fca5a5;
+        background-color: rgba(153, 27, 27, 0.98);
+      }
+    }
+
+    @keyframes emergency-badge-flash {
+      0%, 100% {
+        background-color: #ef4444;
+        color: #ffffff;
+      }
+      50% {
+        background-color: #7f1d1d;
+        color: #fecaca;
+      }
+    }
+
+    @keyframes emergency-text-flash {
+      0%, 100% {
+        opacity: 1;
+        color: #fee2e2;
+      }
+      50% {
+        opacity: 0.45;
+        color: #fca5a5;
+      }
+    }
+
+    @keyframes emergency-dot-blink {
+      0%, 100% {
+        transform: scale(1);
+        opacity: 1;
+      }
+      50% {
+        transform: scale(1.4);
+        opacity: 0.35;
+      }
+    }
+
+    .emergency-toast-container {
+      position: fixed;
+      top: 24px;
+      right: 28px;
+      z-index: 999999;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      max-width: 440px;
+      width: calc(100vw - 56px);
+      pointer-events: auto;
+    }
+
+    .emergency-popup {
+      display: block;
+      text-decoration: none !important;
+      color: #ffffff !important;
+      border: 2px solid #ef4444;
+      border-radius: 16px;
+      padding: 16px 18px;
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      animation: emergency-pulse 1.0s infinite ease-in-out;
+      cursor: pointer;
+      transition: transform 0.15s ease, filter 0.15s ease;
+      box-sizing: border-box;
+    }
+
+    .emergency-popup:hover {
+      transform: scale(1.02);
+      filter: brightness(1.1);
+    }
+
+    .emergency-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      animation: emergency-badge-flash 0.8s infinite;
+    }
+
+    .emergency-pulse-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #fff;
+      display: inline-block;
+      animation: emergency-dot-blink 0.8s infinite;
+    }
+
+    .emergency-reason {
+      font-size: 13px;
+      font-weight: 800;
+      margin: 8px 0 6px 0;
+      animation: emergency-text-flash 1.0s infinite;
+      letter-spacing: -0.01em;
+    }
+
+    .emergency-action-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      width: 100%;
+      padding: 9px 12px;
+      margin-top: 10px;
+      background: #ef4444;
+      color: #ffffff !important;
+      font-weight: 800;
+      font-size: 12px;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      text-decoration: none !important;
+      letter-spacing: 0.02em;
+      transition: background 0.15s ease;
+    }
+
+    .emergency-popup:hover .emergency-action-btn {
+      background: #dc2626;
     }
 
     .bento {
@@ -420,10 +697,134 @@
       justify-content: space-between;
       align-items: center;
     }
+
+    /* ---------- Bedside Detection & Scanner Animation ---------- */
+    @keyframes scan-radar-pulse {
+      0% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.75);
+      }
+      70% {
+        transform: scale(1.1);
+        box-shadow: 0 0 0 10px rgba(56, 189, 248, 0);
+      }
+      100% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 rgba(56, 189, 248, 0);
+      }
+    }
+
+    @keyframes scan-line-sweep {
+      0% {
+        left: -35%;
+      }
+      100% {
+        left: 100%;
+      }
+    }
+
+    .detecting-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 11px;
+      font-weight: 700;
+      color: #38bdf8;
+      background: rgba(56, 189, 248, 0.12);
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      border-radius: 999px;
+      padding: 3px 12px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .detecting-pulse-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #38bdf8;
+      animation: scan-radar-pulse 1.4s infinite ease-out;
+      display: inline-block;
+    }
+
+    .scan-progress-track {
+      position: relative;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 999px;
+      overflow: hidden;
+      margin: 12px 0 6px 0;
+    }
+
+    .scan-progress-bar {
+      position: absolute;
+      top: 0;
+      height: 100%;
+      width: 45%;
+      background: linear-gradient(90deg, transparent, #38bdf8, transparent);
+      animation: scan-line-sweep 1.6s infinite linear;
+      border-radius: 999px;
+    }
+
+    .pairing-guidance-card {
+      background: rgba(30, 41, 59, 0.55);
+      border: 1px solid rgba(251, 191, 36, 0.3);
+      border-left: 4px solid #f59e0b;
+      border-radius: 12px;
+      padding: 14px 18px;
+      margin-top: 14px;
+      font-size: 12.5px;
+      line-height: 1.5;
+    }
+
+    .pairing-guidance-title {
+      font-weight: 700;
+      color: #fbbf24;
+      font-size: 13px;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
   </style>
 </head>
 
 <body>
+
+  <!-- ==========================================================================
+     1.5 EMERGENCY BLINKING POP-UP CARD
+     ========================================================================== -->
+  <template id="emergency_popup_card">
+    <a href="?bed={{pid}}&view=detail&dept={{dept}}" target="_self" class="emergency-popup">
+      <div class="row-between" style="align-items:center; margin-bottom:6px;">
+        <span class="emergency-badge">
+          <span class="emergency-pulse-dot"></span>
+          CRITICAL EMERGENCY ALERT
+        </span>
+        <span style="font-size:12px; font-weight:700; color:#fee2e2; font-family:'IBM Plex Mono',monospace;">
+          {{room}}
+        </span>
+      </div>
+
+      <div style="margin:8px 0 6px 0;">
+        <div style="font-size:16px; font-weight:800; color:#ffffff; line-height:1.25;">{{patient_name}}</div>
+        <div style="font-size:11.5px; color:#fecaca; margin-top:2px;">
+          <span style="font-weight:700; color:#fff;">{{pid}}</span> &middot; {{diagnosis}}
+        </div>
+      </div>
+
+      <div class="emergency-reason">{{reason}}</div>
+
+      <div style="font-size:11.5px; color:#fee2e2; font-family:'IBM Plex Mono',monospace; background:rgba(0,0,0,0.35); padding:6px 10px; border-radius:8px; border:1px solid rgba(239,68,68,0.4); margin-bottom:8px;">
+        HR {{hr_v}} bpm &middot; SpO2 {{sp_v}}% &middot; EtCO2 {{co2_v}} &middot; BP {{bp_v}}
+      </div>
+
+      <div class="emergency-action-btn">
+        RESPOND TO EMERGENCY &mdash; OPEN {{pid}} DASHBOARD &rarr;
+      </div>
+    </a>
+  </template>
+
 
   <!-- ==========================================================================
      2. TOPBAR
@@ -440,39 +841,58 @@
      3. WARD OVERVIEW CARD (one per bed)
      ========================================================================== -->
   <template id="ward_tile">
-    <div class="tile" style="border-color:{{border_col}};">
-      <div class="row-between">
-        <div><span class="bed-id">{{pid}}</span> <span class="room-sub">&middot; {{room_short}}</span></div>
+    <a href="?bed={{pid}}&view=detail&dept={{dept}}" target="_self" class="tile ward-rect-card {{selected_cls}}" style="border-color:{{border_col}}; text-decoration:none; color:inherit; display:flex;">
+      <div class="row-between" style="align-items:flex-start; margin-bottom:4px;">
+        <div>
+          <div class="patient-name">{{patient_name}}</div>
+          <div class="sub" style="margin-top:2px;">
+            <span class="bed-id" style="font-size:13px; color:var(--text); font-weight:700;">{{pid}}</span> &middot; <span class="room-sub">{{room_short}}</span>
+          </div>
+        </div>
         <span class="pill {{pill_cls}}">{{label}}</span>
       </div>
-      <div class="ward-vitals">
-        <div>
+
+      <div class="patient-diagnosis">{{diagnosis}}</div>
+
+      <div class="ward-vitals-grid">
+        <div class="vital-mini">
           <div class="lbl">Heart rate</div>
-          <div class="val-sm">{{hr_txt}} <span class="unit">bpm</span></div>
+          <div class="val-sm" style="color:var(--blue);">{{hr_txt}} <span class="unit">bpm</span></div>
         </div>
-        <div>
+        <div class="vital-mini">
           <div class="lbl">SpO2</div>
-          <div class="val-sm">{{sp_txt}}</div>
+          <div class="val-sm" style="color:var(--green);">{{sp_txt}}</div>
         </div>
-        <div>
+        <div class="vital-mini">
           <div class="lbl">EtCO2</div>
-          <div class="val-sm">{{co2_txt}} <span class="unit">mmHg</span></div>
+          <div class="val-sm" style="color:var(--amber);">{{co2_txt}} <span class="unit">mmHg</span></div>
         </div>
-        <div>
-          <div class="lbl">BP (IBP)</div>
-          <div class="val-sm">{{bp_txt}} <span class="unit">mmHg</span></div>
+        <div class="vital-mini">
+          <div class="lbl">Invasive BP</div>
+          <div class="val-sm" style="color:#f472b6;">{{ibp_txt}} <span class="unit">mmHg</span></div>
+        </div>
+        <div class="vital-mini">
+          <div class="lbl">Cuff NIBP</div>
+          <div class="val-sm" style="color:#a78bfa;">{{nibp_txt}} <span class="unit">mmHg</span></div>
         </div>
       </div>
-      <div style="margin:14px 0 12px 0;">{{ecg_svg}}</div>
-      <div class="trust-dots">
-        <span><i class="dot" style="background:{{ecg_dot}}"></i>ECG</span>
-        <span><i class="dot" style="background:{{spo2_dot}}"></i>SpO2</span>
-        <span><i class="dot" style="background:{{hr_dot}}"></i>HR</span>
-        <span><i class="dot" style="background:{{co2_dot}}"></i>CO2</span>
-        <span><i class="dot" style="background:{{ibp_dot}}"></i>IBP</span>
-        <span><i class="dot" style="background:{{nibp_dot}}"></i>NIBP</span>
+
+      <div style="margin:8px 0 10px 0;">{{ecg_svg}}</div>
+
+      <div class="row-between" style="border-top:1px solid rgba(255,255,255,0.06); padding-top:10px; margin-top:4px;">
+        <div class="trust-dots">
+          <span><i class="dot" style="background:{{ecg_dot}}"></i>ECG</span>
+          <span><i class="dot" style="background:{{spo2_dot}}"></i>SpO2</span>
+          <span><i class="dot" style="background:{{hr_dot}}"></i>HR</span>
+          <span><i class="dot" style="background:{{co2_dot}}"></i>CO2</span>
+          <span><i class="dot" style="background:{{ibp_dot}}"></i>IBP</span>
+          <span><i class="dot" style="background:{{nibp_dot}}"></i>NIBP</span>
+        </div>
+        <span class="inspect-btn">
+          View Bed Dashboard &rarr;
+        </span>
       </div>
-    </div>
+    </a>
   </template>
 
 
@@ -503,10 +923,24 @@
      ========================================================================== -->
   <template id="detail_view">
     <div class="bento">
+      {{emergency_banner_html}}
+      <div class="tile span-12" style="background:var(--card-2); border-color:rgba(96,165,250,0.22); padding:16px 20px;">
+        <div class="row-between">
+          <div>
+            <div style="font-size:20px; font-weight:800; color:#fff;">{{patient_name}}</div>
+            <div class="meta" style="margin-top:2px;">{{pid}} &middot; {{room}} &middot; {{diagnosis}} &middot; Admitted: {{admitted_ts}}</div>
+          </div>
+          <div style="display:flex; gap:10px; align-items:center;">
+            <span class="pill pill-blue">Synced with Bedside Node</span>
+            <span class="pill {{pill_cls}}">{{label}}</span>
+          </div>
+        </div>
+      </div>
+
       <div class="tile span-8">
         <div class="row-between">
           <span class="lbl">ECG &middot; Lead II<span class="info">i<span class="tip">Live electrocardiogram trace for
-                this patient.</span></span></span>
+                this patient, synchronized from Bedside Jetson.</span></span></span>
           <span class="sub">{{pid}} &middot; {{room}}</span>
         </div>
         <div style="margin-top:14px;">{{ecg_svg}}</div>
@@ -571,9 +1005,23 @@
   </template>
 
   <template id="sidebar_bed_row">
-    <strong>{{pid}}</strong> &nbsp; <span class="pill {{pill_cls}}">{{st_lbl}}</span><br>
-    <span style="font-size:11px;color:#8a96a6;">{{room_label}}</span><br>
-    <span style="font-size:12px;color:#aab4c2;font-family:'IBM Plex Mono',monospace;">HR {{hr_v}} &middot; SpO2 {{sp_v}}% &middot; CO2 {{co2_v}}</span>
+    <div style="background:#111720; border:1px solid rgba(255,255,255,0.08); border-radius:12px; padding:10px 12px; margin-bottom:8px;">
+      <div class="row-between" style="align-items:flex-start; margin-bottom:3px;">
+        <div>
+          <div style="font-weight:700; color:#fff; font-size:13px; line-height:1.25;">{{patient_name}}</div>
+          <div style="font-size:11px; color:#8a96a6; margin-top:2px;">
+            <span style="color:#eef2f6; font-weight:600;">{{pid}}</span> &middot; {{room_label}}
+          </div>
+        </div>
+        <span class="pill {{pill_cls}}" style="font-size:10px; padding:2px 7px;">{{st_lbl}}</span>
+      </div>
+      <div style="font-size:11px; color:#aab4c2; font-family:'IBM Plex Mono',monospace; margin:6px 0 8px 0; line-height:1.35;">
+        HR {{hr_v}} &middot; SpO2 {{sp_v}}% &middot; CO2 {{co2_v}} &middot; BP {{bp_v}}
+      </div>
+      <a href="?bed={{pid}}&view=detail&dept={{dept}}" target="_self" style="display:block; text-align:center; padding:6px 10px; font-size:11px; font-weight:700; color:#60a5fa; background:rgba(96,165,250,0.1); border:1px solid rgba(96,165,250,0.28); border-radius:7px; text-decoration:none;">
+        Open Bed Dashboard &rarr;
+      </a>
+    </div>
   </template>
 
   <template id="sidebar_unassigned_row">
@@ -596,17 +1044,41 @@
      7. BED ADMISSION
      ========================================================================== -->
   <template id="admission_banner">
-    <div
-      style="background:#111720;border:1px solid rgba(96,165,250,0.35);border-radius:18px;padding:16px 20px;margin-bottom:18px;">
-      <span style="font-size:16px;font-weight:700;color:#f8fafc;">Add a bed</span>
-      <div style="font-size:13px;color:#8a96a6;margin-top:2px;">Detected bedside units ready to be assigned to a patient
-        bed.</div>
+    <div style="background:#111720; border:1px solid rgba(56,189,248,0.35); border-radius:18px; padding:18px 22px; margin-bottom:18px;">
+      <div class="row-between" style="align-items:center; margin-bottom:4px;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span style="font-size:16px; font-weight:800; color:#f8fafc; letter-spacing:-0.01em;">Bedside Hardware Discovery & Admission</span>
+          {{status_badge_html}}
+        </div>
+        <div style="font-size:12px; font-family:'IBM Plex Mono',monospace; color:#94a3b8; font-weight:600;">
+          {{timer_text}}
+        </div>
+      </div>
+      <div style="font-size:12.5px; color:#94a3b8; margin-top:2px;">
+        {{status_message}}
+      </div>
+      {{progress_bar_html}}
     </div>
   </template>
 
   <template id="admission_empty">
-    <div style="padding:14px 16px;background:#111720;border-radius:12px;font-size:13px;color:#8a96a6;margin:12px 0;">
-      No new bedside units detected. Power one on and rescan.
+    <div style="padding:16px 20px; background:#111720; border:1px solid rgba(255,255,255,0.08); border-radius:14px; margin:14px 0;">
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+        <span class="pill pill-amber" style="font-size:11px; padding:3px 9px;">NO UNASSIGNED DEVICES FOUND</span>
+        <span style="font-size:12.5px; color:#e2e8f0; font-weight:600;">No new bedside monitors detected yet.</span>
+      </div>
+      <div class="pairing-guidance-card">
+        <div class="pairing-guidance-title">
+          Bedside not appearing? Make sure the bedside monitor is ready to pair:
+        </div>
+        <div style="color:#cbd5e1; font-size:12px; margin-top:6px; line-height:1.65;">
+          <ul style="margin:4px 0 0 16px; padding:0;">
+            <li><strong>Power on the bedside:</strong> Run <code style="background:rgba(0,0,0,0.4); padding:2px 6px; border-radius:4px; color:#38bdf8;">start_bedside.bat</code> or <code style="background:rgba(0,0,0,0.4); padding:2px 6px; border-radius:4px; color:#38bdf8;">python jetson_bedside\jetson_edge_brain.py</code> on the bedside laptop/hardware.</li>
+            <li><strong>Verify Wi-Fi / Local Network:</strong> Confirm both laptops are connected to the same Wi-Fi or LAN subnet.</li>
+            <li><strong>Check Discovery Beacon:</strong> The bedside unit will automatically announce <code style="background:rgba(0,0,0,0.4); padding:2px 6px; border-radius:4px; color:#34d399;">status: ready</code> on MQTT topic <code style="background:rgba(0,0,0,0.4); padding:2px 6px; border-radius:4px; color:#e2e8f0;">hospital/discovery/announce</code> upon boot and when probed.</li>
+          </ul>
+        </div>
+      </div>
     </div>
   </template>
 

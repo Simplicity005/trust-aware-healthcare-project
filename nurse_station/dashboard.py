@@ -51,6 +51,35 @@ HOSPITAL_DEPARTMENTS = [
     ("Trauma / ER", "Emergency & Trauma"),
     ("General Ward", "General & Step-Down Ward"),
 ]
+CHAOS_FILE = os.path.join(os.path.dirname(BASE_DIR), "jetson_bedside", "chaos.json")
+
+DEFAULT_PATIENTS = {
+    "Bed_1": {
+        "name": "Eleanor Vance (F, 64)",
+        "diagnosis": "Acute Myocardial Infarction / Post-CABG",
+        "admitted": "Nov 17, 08:30",
+    },
+    "Bed_2": {
+        "name": "Arthur Pendelton (M, 71)",
+        "diagnosis": "Severe ARDS & Sepsis Protocol",
+        "admitted": "Nov 17, 11:15",
+    },
+    "Bed_3": {
+        "name": "Sarah Jenkins (F, 42)",
+        "diagnosis": "Traumatic Brain Injury / ICP Monitor",
+        "admitted": "Nov 17, 14:00",
+    },
+    "Bed_4": {
+        "name": "Michael Chang (M, 55)",
+        "diagnosis": "Post-Cardiac Arrest / Hypothermia Protocol",
+        "admitted": "Nov 18, 02:45",
+    },
+    "Bed_5": {
+        "name": "Elena Rostova (F, 29)",
+        "diagnosis": "Major Polytrauma & Hemorrhagic Shock",
+        "admitted": "Nov 18, 06:10",
+    },
+}
 
 
 class AgentTrustTracker:
@@ -232,6 +261,7 @@ class PatientBedMonitor:
     def __init__(self, patient_id):
         self.patient_id = patient_id
         self.last_seen_ts = time.time()
+        self.last_mqtt_ts = 0.0
         self.agents = {aid: AgentTrustTracker(aid) for aid in AGENT_IDS}
         self.edge_summary = {
             "patient_id": patient_id,
@@ -278,7 +308,8 @@ class MultiPatientTrustEngine:
         self.broker_port = int(os.environ.get("MQTT_PORT", broker_port))
 
         self.beds = {}
-        self.added_bed_ids = {"Bed_1"}
+        self.added_bed_ids = {"Bed_1", "Bed_2", "Bed_3"}
+        self.bed_patients = dict(DEFAULT_PATIENTS)
         self.discovered_jetsons = {}
         self.global_alert_log = deque(maxlen=30)
         self.stop_event = threading.Event()
@@ -323,8 +354,9 @@ class MultiPatientTrustEngine:
             except Exception as e:
                 print(f"[DASHBOARD] CPU fallback load warning: {e}")
 
-        # Initialize Bed_1 so initial display is active
-        self._get_or_create_bed("Bed_1")
+        # Initialize default beds so initial ward display is populated
+        for b in ["Bed_1", "Bed_2", "Bed_3"]:
+            self._get_or_create_bed(b)
 
         # MQTT Connection
         self.client = None
@@ -337,6 +369,26 @@ class MultiPatientTrustEngine:
         # HA Heartbeat thread
         self.hb_thread = threading.Thread(target=self._run_heartbeat_broadcaster, daemon=True)
         self.hb_thread.start()
+
+    def get_patient_info(self, pid):
+        if pid in self.bed_patients:
+            return self.bed_patients[pid]
+        return {
+            "name": f"Patient {pid}",
+            "diagnosis": "Observation & Standard Telemetry",
+            "admitted": "Nov 18, 08:00",
+        }
+
+    def set_patient_info(self, pid, name=None, diagnosis=None, admitted=None):
+        with self.lock:
+            if pid not in self.bed_patients:
+                self.bed_patients[pid] = self.get_patient_info(pid)
+            if name:
+                self.bed_patients[pid]["name"] = name
+            if diagnosis:
+                self.bed_patients[pid]["diagnosis"] = diagnosis
+            if admitted:
+                self.bed_patients[pid]["admitted"] = admitted
 
     def get_bed_department(self, pid):
         if pid in self.bed_departments:
@@ -466,6 +518,8 @@ class MultiPatientTrustEngine:
                 elif parts[-1] == "summary":
                     with self.lock:
                         bed = self._get_or_create_bed(patient_id)
+                        bed.last_seen_ts = recv_ts
+                        bed.last_mqtt_ts = recv_ts
                         bed.edge_summary = payload
                         if payload.get("ecg_wave") and len(payload["ecg_wave"]) == 250:
                             bed.latest_ecg_wave = payload["ecg_wave"]
@@ -525,6 +579,7 @@ class MultiPatientTrustEngine:
                 )
 
             bed.last_seen_ts = recv_ts
+            bed.last_mqtt_ts = recv_ts
 
     def _get_or_create_bed(self, patient_id):
         if not patient_id:
@@ -591,16 +646,67 @@ class MultiPatientTrustEngine:
 
     def _run_background_synthesizer(self):
         step = 0
+        last_logged_alarm = {}
         while not self.stop_event.is_set():
             time.sleep(0.40)
             step += 1
             now = time.time()
+
+            # Read chaos.json if present to keep bedside and nurse station 100% synchronized
+            chaos_data = {}
+            if os.path.exists(CHAOS_FILE):
+                try:
+                    with open(CHAOS_FILE, "r", encoding="utf-8") as f:
+                        chaos_data = json.load(f)
+                except Exception:
+                    pass
+
             with self.lock:
                 for pid in list(self.added_bed_ids):
                     bed = self._get_or_create_bed(pid)
-                    if (now - bed.last_seen_ts) > 2.0:
-                        phase = ((sum(ord(c) for c in pid) % 5) - 2) * 0.01
-                        t = np.linspace(0, 1, 250)
+                    # If live physical MQTT packets arrived within 2.0 seconds, let physical hardware drive
+                    if (now - bed.last_mqtt_ts) <= 2.0:
+                        continue
+
+                    # Otherwise, synchronize from chaos.json (bedside simulator state)
+                    bed_cfg = chaos_data.get(pid, {})
+                    vitals_cfg = bed_cfg.get("vitals", {})
+
+                    target_hr = int(vitals_cfg.get("target_hr") or bed_cfg.get("Agent_HR", {}).get("target_hr", 75))
+                    target_spo2 = int(vitals_cfg.get("target_spo2") or bed_cfg.get("Agent_SpO2", {}).get("target_spo2", 98))
+                    target_co2 = int(vitals_cfg.get("target_co2") or bed_cfg.get("Agent_CO2", {}).get("target_co2", 38))
+                    target_sys = int(vitals_cfg.get("target_sys") or bed_cfg.get("Agent_IBP", {}).get("target_sys", 120))
+                    target_dia = int(vitals_cfg.get("target_dia") or bed_cfg.get("Agent_IBP", {}).get("target_dia", 80))
+                    ecg_condition = vitals_cfg.get("ecg_condition") or bed_cfg.get("Agent_ECG", {}).get("condition", "normal")
+
+                    orin_cfg = bed_cfg.get("Orin_Link", {})
+                    use_relay_b = orin_cfg.get("use_relay_b", False)
+                    overload_gpu = orin_cfg.get("overload_gpu", False)
+
+                    # Determine rhythm and arrhythmia waveform
+                    is_arrhythmia = (ecg_condition == "arrhythmia")
+                    phase = ((sum(ord(c) for c in pid) % 5) - 2) * 0.01
+                    t = np.linspace(0, 1, 250)
+
+                    if is_arrhythmia:
+                        ecg = (
+                            0.20 * np.sin(2 * np.pi * 3.5 * t)
+                            + 1.45 * np.exp(-((t - 0.38) ** 2) / (2 * 0.045 ** 2))
+                            - 0.85 * np.exp(-((t - 0.50) ** 2) / (2 * 0.035 ** 2))
+                            + 0.40 * np.sin(2 * np.pi * 7.0 * t)
+                            + np.random.normal(0, 0.04, 250)
+                        )
+                        arrhythmia_prob = 0.98
+                        local_bed_alarm = True
+                        if now - last_logged_alarm.get(pid, 0) > 10.0:
+                            entry = (
+                                f"[{time.strftime('%H:%M:%S')}] [{pid}] CRITICAL ARRHYTHMIA DETECTED (98.0%) "
+                                f"via Primary Link [0.28 ms]"
+                            )
+                            bed.alert_log.appendleft(entry)
+                            self.global_alert_log.appendleft(entry)
+                            last_logged_alarm[pid] = now
+                    else:
                         ecg = (
                             0.15 * np.exp(-((t - (0.20 + phase)) ** 2) / (2 * 0.025 ** 2))
                             - 0.15 * np.exp(-((t - (0.35 + phase)) ** 2) / (2 * 0.010 ** 2))
@@ -609,48 +715,83 @@ class MultiPatientTrustEngine:
                             + 0.30 * np.exp(-((t - (0.65 + phase)) ** 2) / (2 * 0.040 ** 2))
                             + np.random.normal(0, 0.015, 250)
                         )
+                        arrhythmia_prob = 0.02
+                        local_bed_alarm = False
+
+                    # Sensor Byzantine spoofing from chaos.json
+                    ecg_mal = bed_cfg.get("Agent_ECG", {}).get("malicious", False)
+                    sp_mal = bed_cfg.get("Agent_SpO2", {}).get("malicious", False)
+                    hr_mal = bed_cfg.get("Agent_HR", {}).get("malicious", False)
+                    co2_mal = bed_cfg.get("Agent_CO2", {}).get("malicious", False)
+                    ibp_mal = bed_cfg.get("Agent_IBP", {}).get("malicious", False)
+                    nibp_mal = bed_cfg.get("Agent_NIBP", {}).get("malicious", False)
+
+                    if ecg_mal:
+                        wave_list = [round(float(np.random.uniform(-3.5, 3.5)), 4) for _ in range(250)]
+                    else:
                         wave_list = np.round(ecg, 4).tolist()
-                        bed.latest_ecg_wave = wave_list
-                        hr_val = 72 + (sum(ord(c) for c in pid) % 7) + int(np.random.randint(-1, 2))
-                        spo2_val = 98 + int(np.random.randint(0, 2))
-                        co2_val = 37 + (sum(ord(c) for c in pid) % 5) + int(np.random.randint(-1, 2))
-                        sys_val = 118 + (sum(ord(c) for c in pid) % 8) + int(np.random.randint(-2, 3))
-                        dia_val = 78 + (sum(ord(c) for c in pid) % 5) + int(np.random.randint(-1, 2))
-                        map_val = int(round((sys_val + 2 * dia_val) / 3))
-                        ibp_val = {"sys": sys_val, "dia": dia_val, "map": map_val, "formatted": f"{sys_val}/{dia_val} ({map_val})"}
-                        nibp_val = {"sys": sys_val, "dia": dia_val, "map": map_val, "formatted": f"{sys_val}/{dia_val}"}
-                        var_val = float(np.var(ecg))
-                        bed.edge_summary["latest_vitals"] = {
-                            "hr": hr_val,
-                            "spo2": spo2_val,
-                            "co2": co2_val,
-                            "ibp": ibp_val,
-                            "nibp": nibp_val,
-                            "ecg_variance": round(var_val, 4),
-                        }
-                        bed.edge_summary["inf_ms"] = round(0.22 + float(np.random.uniform(0.01, 0.06)), 2)
-                        bed.edge_summary["arrhythmia_prob"] = 0.02
-                        bed.edge_summary["local_bed_alarm"] = False
-                        bed.agents["Agent_ECG"].update(
-                            seq=step, sent_ts=now - 0.01, recv_ts=now, value=round(var_val, 4), ecg_wave=wave_list
+                    bed.latest_ecg_wave = wave_list
+
+                    hr_val = 240 if hr_mal else max(35, min(220, target_hr + int(np.random.randint(-1, 2))))
+                    spo2_val = 42 if sp_mal else max(60, min(100, target_spo2 + int(np.random.randint(0, 2) if target_spo2 < 100 else 0)))
+                    co2_val = 95 if co2_mal else max(10, min(80, target_co2 + int(np.random.randint(-1, 2))))
+                    sys_val = 310 if ibp_mal else max(40, min(240, target_sys + int(np.random.randint(-2, 3))))
+                    dia_val = 20 if ibp_mal else max(25, min(140, target_dia + int(np.random.randint(-1, 2))))
+                    map_val = int(round((sys_val + 2 * dia_val) / 3))
+
+                    nibp_sys = 290 if nibp_mal else sys_val
+                    nibp_dia = 25 if nibp_mal else dia_val
+                    nibp_map = int(round((nibp_sys + 2 * nibp_dia) / 3))
+
+                    ibp_val = {"sys": sys_val, "dia": dia_val, "map": map_val, "formatted": f"{sys_val}/{dia_val} ({map_val})"}
+                    nibp_val = {"sys": nibp_sys, "dia": nibp_dia, "map": nibp_map, "formatted": f"{nibp_sys}/{nibp_dia}"}
+                    var_val = float(np.var(wave_list))
+
+                    if use_relay_b:
+                        bed.active_routing = "Relay Path B (Rerouted)"
+                        bed.offload_active = True
+                        bed.gateway_cpu_inf_ms = 4.2
+                    else:
+                        bed.active_routing = "Primary Direct Link"
+                        bed.offload_active = False
+                        bed.gateway_cpu_inf_ms = 0.0
+
+                    inf_val = 18.5 if overload_gpu else round(0.22 + float(np.random.uniform(0.01, 0.06)), 2)
+
+                    bed.edge_summary["latest_vitals"] = {
+                        "hr": hr_val,
+                        "spo2": spo2_val,
+                        "co2": co2_val,
+                        "ibp": ibp_val,
+                        "nibp": nibp_val,
+                        "ecg_variance": round(var_val, 4),
+                    }
+                    bed.edge_summary["inf_ms"] = inf_val
+                    bed.edge_summary["arrhythmia_prob"] = arrhythmia_prob
+                    bed.edge_summary["local_bed_alarm"] = local_bed_alarm
+
+                    bed.agents["Agent_ECG"].update(
+                        seq=step, sent_ts=now - 0.01, recv_ts=now, value=round(var_val, 4), ecg_wave=wave_list
+                    )
+                    bed.agents["Agent_SpO2"].update(seq=step, sent_ts=now - 0.01, recv_ts=now, value=spo2_val)
+                    bed.agents["Agent_HR"].update(seq=step, sent_ts=now - 0.01, recv_ts=now, value=hr_val)
+                    bed.agents["Agent_CO2"].update(seq=step, sent_ts=now - 0.01, recv_ts=now, value=co2_val)
+                    bed.agents["Agent_IBP"].update(seq=step, sent_ts=now - 0.01, recv_ts=now, value=ibp_val)
+                    bed.agents["Agent_NIBP"].update(seq=step, sent_ts=now - 0.01, recv_ts=now, value=nibp_val)
+                    bed.last_seen_ts = now
+
+                    if step % 3 == 0:
+                        bed.trust_history.append(
+                            {
+                                "time": time.strftime("%H:%M:%S", time.localtime(now)),
+                                "Agent_ECG": bed.agents["Agent_ECG"].trust_score,
+                                "Agent_SpO2": bed.agents["Agent_SpO2"].trust_score,
+                                "Agent_HR": bed.agents["Agent_HR"].trust_score,
+                                "Agent_CO2": bed.agents["Agent_CO2"].trust_score,
+                                "Agent_IBP": bed.agents["Agent_IBP"].trust_score,
+                                "Agent_NIBP": bed.agents["Agent_NIBP"].trust_score,
+                            }
                         )
-                        bed.agents["Agent_SpO2"].update(seq=step, sent_ts=now - 0.01, recv_ts=now, value=spo2_val)
-                        bed.agents["Agent_HR"].update(seq=step, sent_ts=now - 0.01, recv_ts=now, value=hr_val)
-                        bed.agents["Agent_CO2"].update(seq=step, sent_ts=now - 0.01, recv_ts=now, value=co2_val)
-                        bed.agents["Agent_IBP"].update(seq=step, sent_ts=now - 0.01, recv_ts=now, value=ibp_val)
-                        bed.agents["Agent_NIBP"].update(seq=step, sent_ts=now - 0.01, recv_ts=now, value=nibp_val)
-                        if step % 3 == 0:
-                            bed.trust_history.append(
-                                {
-                                    "time": time.strftime("%H:%M:%S", time.localtime(now)),
-                                    "Agent_ECG": bed.agents["Agent_ECG"].trust_score,
-                                    "Agent_SpO2": bed.agents["Agent_SpO2"].trust_score,
-                                    "Agent_HR": bed.agents["Agent_HR"].trust_score,
-                                    "Agent_CO2": bed.agents["Agent_CO2"].trust_score,
-                                    "Agent_IBP": bed.agents["Agent_IBP"].trust_score,
-                                    "Agent_NIBP": bed.agents["Agent_NIBP"].trust_score,
-                                }
-                            )
 
     def probe_network_for_jetsons(self):
         if self.client:
@@ -663,7 +804,7 @@ class MultiPatientTrustEngine:
             except Exception:
                 pass
 
-    def admit_jetson(self, patient_id, department=None, room_name=None):
+    def admit_jetson(self, patient_id, department=None, room_name=None, patient_name=None, diagnosis=None):
         with self.lock:
             self.added_bed_ids.add(patient_id)
             if department:
@@ -677,9 +818,17 @@ class MultiPatientTrustEngine:
                 )
                 digits = "".join(filter(str.isdigit, patient_id)) or str(len(self.added_bed_ids))
                 self.bed_rooms[patient_id] = f"Room {dept_idx}0{digits}"
+            if patient_name or diagnosis:
+                cur = self.get_patient_info(patient_id)
+                self.bed_patients[patient_id] = {
+                    "name": patient_name or cur.get("name", f"Patient {patient_id}"),
+                    "diagnosis": diagnosis or cur.get("diagnosis", "Observation & Standard Telemetry"),
+                    "admitted": cur.get("admitted", time.strftime("Nov %d, %H:%M")),
+                }
             self._get_or_create_bed(patient_id)
             dept_lbl = self.get_bed_department(patient_id)
             rm_lbl = self.get_bed_room(patient_id)
+            p_lbl = self.get_patient_info(patient_id)["name"]
             if self.client:
                 try:
                     self.client.publish(
@@ -689,7 +838,7 @@ class MultiPatientTrustEngine:
                     )
                 except Exception:
                     pass
-            entry = f"[{time.strftime('%H:%M:%S')}] [WARD ADMISSION] Jetson node {patient_id} admitted to {dept_lbl} ({rm_lbl})."
+            entry = f"[{time.strftime('%H:%M:%S')}] [WARD ADMISSION] {p_lbl} ({patient_id}) admitted to {dept_lbl} ({rm_lbl})."
             self.global_alert_log.appendleft(entry)
 
     def release_jetson(self, patient_id):
@@ -722,8 +871,12 @@ class MultiPatientTrustEngine:
                         "packets_received": ag.packets_received,
                         "packets_missed": ag.packets_missed,
                     }
+                pinfo = self.get_patient_info(pid)
                 beds_snap[pid] = {
                     "patient_id": pid,
+                    "patient_name": pinfo.get("name", f"Patient {pid}"),
+                    "diagnosis": pinfo.get("diagnosis", "Observation & Telemetry"),
+                    "admitted": pinfo.get("admitted", "Nov 18, 08:00"),
                     "department": self.get_bed_department(pid),
                     "room_only": self.get_bed_room(pid),
                     "room": f"{self.get_bed_department(pid)} · {self.get_bed_room(pid)}",
@@ -879,6 +1032,52 @@ def status_pill_info(bed):
     return "STABLE", "pill-green"
 
 
+def detect_bed_emergency(pid, bed):
+    """
+    Evaluates whether a patient bed is in an acute clinical emergency requiring immediate nurse alert:
+    1. Bedside local_bed_alarm is active (Ventricular Arrhythmia / Cardiorespiratory emergency)
+    2. Bedside arrhythmia risk >= 70%
+    3. Critical life-threatening vital breaches:
+       - Critical Hypoxia (SpO2 <= 85%)
+       - Extreme Tachycardia (HR >= 160) or Severe Bradycardia (HR <= 40)
+       - Hypotensive Shock (Sys BP <= 75 mmHg) or Hypertensive Crisis (Sys BP >= 200 mmHg)
+       - Severe Hypercapnic Failure (EtCO2 >= 60 mmHg)
+    """
+    if not bed.get("online", False):
+        return False, ""
+
+    edge = bed.get("edge", {})
+    vitals = edge.get("latest_vitals", {})
+    hr = vitals.get("hr", 75)
+    spo2 = vitals.get("spo2", 98)
+    co2 = vitals.get("co2", 38)
+    ibp = vitals.get("ibp", {})
+    sys_bp = ibp.get("sys", 120) if isinstance(ibp, dict) else 120
+
+    is_alarm = bool(edge.get("local_bed_alarm", False))
+    prob = edge.get("arrhythmia_prob", 0.0)
+
+    reasons = []
+    if is_alarm or prob >= 0.70:
+        reasons.append(f"Ventricular Arrhythmia ({prob*100:.1f}% risk)")
+    if spo2 <= 85:
+        reasons.append(f"Critical Hypoxia (SpO2 {spo2}%)")
+    if hr >= 160:
+        reasons.append(f"Extreme Tachycardia (HR {hr} bpm)")
+    elif hr <= 40:
+        reasons.append(f"Severe Bradycardia (HR {hr} bpm)")
+    if sys_bp <= 75:
+        reasons.append(f"Hypotensive Shock (Sys {sys_bp} mmHg)")
+    elif sys_bp >= 200:
+        reasons.append(f"Hypertensive Crisis (Sys {sys_bp} mmHg)")
+    if co2 >= 60:
+        reasons.append(f"Severe Hypercapnia (EtCO2 {co2} mmHg)")
+
+    if reasons:
+        return True, " &middot; ".join(reasons)
+    return False, ""
+
+
 def dot_color(status):
     if status == "TRUSTED":
         return "#34d399"
@@ -902,33 +1101,45 @@ def ward_tile(pid, bed, is_selected, templates=None):
     sp_txt = "ISO" if sp_ag["status"] == "ISOLATED" else (f"{sp_ag['value']}%" if sp_ag["value"] is not None else "--")
     co2_txt = "ISO" if co2_ag["status"] == "ISOLATED" else (str(co2_ag["value"]) if co2_ag["value"] is not None else "--")
 
-    # Format Blood Pressure reading
-    if ibp_ag["status"] == "ISOLATED" and nibp_ag["status"] == "ISOLATED":
-        bp_txt = "ISO"
-    elif ibp_ag["status"] != "ISOLATED" and ibp_ag["value"] is not None:
+    # Format IBP
+    if ibp_ag["status"] == "ISOLATED":
+        ibp_txt = "ISO"
+    elif ibp_ag["value"] is not None:
         v = ibp_ag["value"]
-        bp_txt = v.get("formatted", f"{v.get('sys', 120)}/{v.get('dia', 80)}") if isinstance(v, dict) else str(v)
-    elif nibp_ag["status"] != "ISOLATED" and nibp_ag["value"] is not None:
-        v = nibp_ag["value"]
-        bp_txt = v.get("formatted", f"{v.get('sys', 120)}/{v.get('dia', 80)}") if isinstance(v, dict) else str(v)
+        ibp_txt = v.get("formatted", f"{v.get('sys', 120)}/{v.get('dia', 80)}") if isinstance(v, dict) else str(v)
     else:
-        bp_txt = "120/80"
+        ibp_txt = "--"
+
+    # Format NIBP
+    if nibp_ag["status"] == "ISOLATED":
+        nibp_txt = "ISO"
+    elif nibp_ag["value"] is not None:
+        v = nibp_ag["value"]
+        nibp_txt = v.get("formatted", f"{v.get('sys', 120)}/{v.get('dia', 80)}") if isinstance(v, dict) else str(v)
+    else:
+        nibp_txt = "--"
 
     ecg_col = "#f87171" if (ecg_ag["status"] == "ISOLATED" or bed["edge"].get("local_bed_alarm")) else "#34d399"
-    border_col = "#3b82f6" if is_selected else "#1f2228"
+    border_col = "#3b82f6" if is_selected else "rgba(255, 255, 255, 0.08)"
+    selected_cls = "ward-card-selected" if is_selected else ""
 
     return render_template(
         templates,
         "ward_tile",
         border_col=border_col,
+        selected_cls=selected_cls,
         pid=pid,
+        dept=bed.get("department", "ICU"),
+        patient_name=bed.get("patient_name", f"Patient {pid}"),
+        diagnosis=bed.get("diagnosis", "Observation & Telemetry"),
         room_short=f"{bed.get('department', 'ICU')} · {bed.get('room_only', bed['room'])}",
         pill_cls=pill_cls,
         label=label,
         hr_txt=hr_txt,
         sp_txt=sp_txt,
         co2_txt=co2_txt,
-        bp_txt=bp_txt,
+        ibp_txt=ibp_txt,
+        nibp_txt=nibp_txt,
         compute_mode=bed["compute_mode"],
         ecg_svg=svg_ecg(bed["ecg_wave"], color=ecg_col, width=360, height=54),
         ecg_dot=dot_color(ecg_ag["status"]),
@@ -1025,10 +1236,34 @@ def detail_view(pid, bed, logs, templates=None):
     else:
         log_rows_html = '<div class="sub" style="padding:6px 0;">No anomaly alerts or quarantine events for this patient bed.</div>'
 
+    label, pill_cls = status_pill_info(bed)
+    is_emerg, emerg_reason = detect_bed_emergency(pid, bed)
+    if is_emerg:
+        emergency_banner_html = (
+            f'<div class="tile span-12" style="background:rgba(127,29,29,0.96); border:2px solid #ef4444; '
+            f'animation:emergency-pulse 1.0s infinite ease-in-out; padding:14px 20px; margin-bottom:4px;">'
+            f'<div class="row-between" style="align-items:center;">'
+            f'<div style="display:flex; align-items:center; gap:10px;">'
+            f'<span class="emergency-badge"><span class="emergency-pulse-dot"></span>ACTIVE CLINICAL EMERGENCY</span>'
+            f'<span style="font-size:15px; font-weight:800; color:#fee2e2;">{emerg_reason}</span>'
+            f'</div>'
+            f'<span style="font-size:12px; font-weight:700; color:#fca5a5; font-family:\'IBM Plex Mono\',monospace;">MONITORING PRIORITY: CRITICAL</span>'
+            f'</div></div>'
+        )
+    else:
+        emergency_banner_html = ""
+
     return render_template(
         templates,
         "detail_view",
+        emergency_banner_html=emergency_banner_html,
         pid=pid,
+        dept=bed.get("department", "ICU"),
+        patient_name=bed.get("patient_name", f"Patient {pid}"),
+        diagnosis=bed.get("diagnosis", "Observation & Telemetry"),
+        admitted_ts=bed.get("admitted", "Nov 18, 08:00"),
+        label=label,
+        pill_cls=pill_cls,
         room=bed["room"],
         ecg_svg=svg_ecg(bed["ecg_wave"], color=ecg_col, width=720, height=150),
         rhythm_col=rhythm_col,
@@ -1041,6 +1276,37 @@ def detail_view(pid, bed, logs, templates=None):
         trust_chart_svg=svg_trust_chart(bed["history"], width=720, height=130),
         log_rows_html=log_rows_html,
     )
+
+
+def set_view(view_mode=None, selected_bed=None, selected_dept=None):
+    """Central state and query parameter synchronizer for smooth navigation."""
+    if view_mode:
+        st.session_state["view_mode"] = view_mode
+        try:
+            st.query_params["view"] = view_mode
+            if view_mode == "ward" and "bed" in st.query_params:
+                del st.query_params["bed"]
+        except Exception:
+            pass
+
+    if selected_bed:
+        st.session_state["selected_bed"] = selected_bed
+        try:
+            st.query_params["bed"] = selected_bed
+        except Exception:
+            pass
+
+    if selected_dept:
+        st.session_state["selected_department"] = selected_dept
+        try:
+            st.query_params["dept"] = selected_dept
+        except Exception:
+            pass
+
+    try:
+        st.session_state["_last_seen_qp"] = dict(st.query_params)
+    except Exception:
+        pass
 
 
 def render_sidebar_room_directory(engine, all_snap, selected_bed, templates):
@@ -1081,6 +1347,44 @@ def render_sidebar_room_directory(engine, all_snap, selected_bed, templates):
             engine.trigger_failover_test()
             st.rerun()
 
+    with st.sidebar.expander("Emergency Alert Simulator", expanded=False):
+        st.caption("Trigger or clear emergency alarm on any bed to test instant blinking red alerts:")
+        sim_bed = st.selectbox("Select Target Bed", options=list(all_snap["beds"].keys()), key="emerg_sim_bed")
+        c_trig, c_clr = st.columns(2)
+        with c_trig:
+            if st.button("Trigger Alarm", key="btn_trig_alarm", type="primary", use_container_width=True):
+                if os.path.exists(CHAOS_FILE):
+                    try:
+                        with open(CHAOS_FILE, "r", encoding="utf-8") as f:
+                            cfg = json.load(f)
+                        if sim_bed not in cfg:
+                            cfg[sim_bed] = {"vitals": {}, "Agent_ECG": {}, "Agent_HR": {}, "Agent_SpO2": {}}
+                        cfg[sim_bed].setdefault("vitals", {})["ecg_condition"] = "arrhythmia"
+                        cfg[sim_bed]["vitals"]["target_hr"] = 165
+                        cfg[sim_bed]["vitals"]["target_spo2"] = 82
+                        cfg[sim_bed].setdefault("Agent_ECG", {})["condition"] = "arrhythmia"
+                        with open(CHAOS_FILE, "w", encoding="utf-8") as f:
+                            json.dump(cfg, f, indent=2)
+                    except Exception:
+                        pass
+                st.rerun()
+        with c_clr:
+            if st.button("Clear Alarm", key="btn_clr_alarm", use_container_width=True):
+                if os.path.exists(CHAOS_FILE):
+                    try:
+                        with open(CHAOS_FILE, "r", encoding="utf-8") as f:
+                            cfg = json.load(f)
+                        if sim_bed in cfg:
+                            cfg[sim_bed].setdefault("vitals", {})["ecg_condition"] = "normal"
+                            cfg[sim_bed]["vitals"]["target_hr"] = 75
+                            cfg[sim_bed]["vitals"]["target_spo2"] = 98
+                            cfg[sim_bed].setdefault("Agent_ECG", {})["condition"] = "normal"
+                            with open(CHAOS_FILE, "w", encoding="utf-8") as f:
+                                json.dump(cfg, f, indent=2)
+                    except Exception:
+                        pass
+                st.rerun()
+
     st.sidebar.markdown('<div class="sec-label">Hospital Departments</div>', unsafe_allow_html=True)
 
     dept_map = {code: [] for code, _ in HOSPITAL_DEPARTMENTS}
@@ -1091,7 +1395,14 @@ def render_sidebar_room_directory(engine, all_snap, selected_bed, templates):
         dept_map[dept].append((pid, b))
 
     all_depts_list = ["All Departments"] + [code for code, _ in HOSPITAL_DEPARTMENTS]
-    selected_dept_filter = st.sidebar.selectbox("Filter Department", options=all_depts_list, index=0)
+    cur_dept = st.session_state.get("selected_department", "All Departments")
+    if cur_dept not in all_depts_list:
+        cur_dept = "All Departments"
+    cur_dept_idx = all_depts_list.index(cur_dept)
+    selected_dept_filter = st.sidebar.selectbox("Filter Department", options=all_depts_list, index=cur_dept_idx)
+    if selected_dept_filter != cur_dept:
+        set_view(view_mode="ward", selected_dept=selected_dept_filter)
+        st.rerun()
 
     for dept_code, dept_full in HOSPITAL_DEPARTMENTS:
         if selected_dept_filter != "All Departments" and dept_code != selected_dept_filter:
@@ -1111,28 +1422,28 @@ def render_sidebar_room_directory(engine, all_snap, selected_bed, templates):
                 hr_v = v.get("hr", 75)
                 sp_v = v.get("spo2", 98)
                 co2_v = v.get("co2", 38)
+                ibp_v = v.get("ibp", {})
+                bp_v = ibp_v.get("formatted", "120/80") if isinstance(ibp_v, dict) else str(ibp_v)
                 rm_lbl = b.get("room_only", "Room 101")
+                p_name = b.get("patient_name", f"Patient {pid}")
 
-                col1, col2 = st.columns([3, 1])
-                with col1:
-                    st.markdown(
-                        render_template(
-                            templates,
-                            "sidebar_bed_row",
-                            pid=pid,
-                            pill_cls=pill_cls,
-                            st_lbl=st_lbl,
-                            room_label=rm_lbl,
-                            hr_v=hr_v,
-                            sp_v=sp_v,
-                            co2_v=co2_v,
-                        ),
-                        unsafe_allow_html=True,
-                    )
-                with col2:
-                    if st.button("View", key=f"sel_btn_{pid}", use_container_width=True):
-                        st.session_state["selected_bed"] = pid
-                        st.rerun()
+                st.markdown(
+                    render_template(
+                        templates,
+                        "sidebar_bed_row",
+                        pid=pid,
+                        dept=b.get("department", "ICU"),
+                        patient_name=p_name,
+                        pill_cls=pill_cls,
+                        st_lbl=st_lbl,
+                        room_label=rm_lbl,
+                        hr_v=hr_v,
+                        sp_v=sp_v,
+                        co2_v=co2_v,
+                        bp_v=bp_v,
+                    ),
+                    unsafe_allow_html=True,
+                )
 
     unadded = all_snap["unadded_jetsons"]
     if unadded:
@@ -1155,25 +1466,95 @@ def render_sidebar_room_directory(engine, all_snap, selected_bed, templates):
             target_rm = dev.get("room", "Room 101")
             if st.sidebar.button(f"+ Admit {pid} ({target_dept})", key=f"side_admit_{pid}", use_container_width=True):
                 engine.admit_jetson(pid, department=target_dept, room_name=target_rm)
-                st.session_state["selected_bed"] = pid
+                set_view(view_mode="detail", selected_bed=pid, selected_dept=target_dept)
+                st.session_state["show_add_bed"] = False
+                st.session_state["detecting_bedside"] = False
                 st.rerun()
+    elif st.session_state.get("detecting_bedside", False):
+        st.sidebar.markdown(
+            '<div style="font-size:11px; color:#38bdf8; display:flex; align-items:center; gap:6px; margin:8px 0; padding:6px 10px; background:rgba(56,189,248,0.08); border-radius:8px; border:1px solid rgba(56,189,248,0.2);">'
+            '<span class="detecting-pulse-dot" style="width:6px; height:6px;"></span>'
+            'Detecting bedside units...</div>',
+            unsafe_allow_html=True,
+        )
 
     st.sidebar.markdown(render_template(templates, "sidebar_bedside_link"), unsafe_allow_html=True)
 
 
+SCAN_TIMEOUT_SECONDS = 150  # 2.5 minutes (2-3 min detection window)
+
+
 def render_admission_modal(engine, unadded_jetsons, added_bed_ids, templates):
-    st.markdown(render_template(templates, "admission_banner"), unsafe_allow_html=True)
+    # Ensure detection is started when panel is opened
+    if "detecting_bedside" not in st.session_state:
+        st.session_state["detecting_bedside"] = True
+        st.session_state["detect_start_time"] = time.time()
+        st.session_state["last_probe_time"] = time.time()
+        engine.probe_network_for_jetsons()
+
+    is_detecting = st.session_state.get("detecting_bedside", False)
+    start_time = st.session_state.get("detect_start_time", time.time())
+    now = time.time()
+    elapsed = now - start_time
+    remaining = max(0, int(SCAN_TIMEOUT_SECONDS - elapsed))
+
+    # Auto-stop after 2.5 minutes
+    if is_detecting and remaining <= 0:
+        st.session_state["detecting_bedside"] = False
+        is_detecting = False
+
+    # Send periodic MQTT probe ping every 4 seconds while actively detecting
+    if is_detecting:
+        last_probe = st.session_state.get("last_probe_time", 0.0)
+        if (now - last_probe) >= 4.0:
+            engine.probe_network_for_jetsons()
+            st.session_state["last_probe_time"] = now
+
+    rem_mins = remaining // 60
+    rem_secs = remaining % 60
+
+    if is_detecting:
+        timer_text = f"{rem_mins:02d}:{rem_secs:02d} remaining"
+        status_badge_html = '<span class="detecting-badge"><span class="detecting-pulse-dot"></span>DETECTING DEVICES</span>'
+        status_message = "Actively probing local network on MQTT port 1883 for new bedside units ready to pair."
+        progress_bar_html = '<div class="scan-progress-track"><div class="scan-progress-bar"></div></div>'
+    else:
+        timer_text = "Scan Window Ended"
+        status_badge_html = '<span class="pill pill-muted" style="font-size:10.5px; padding:3px 10px;">DETECTION STOPPED</span>'
+        status_message = "Detection stopped after 2.5 minutes. If your bedside is not listed below, make sure it is ready to pair and restart detection."
+        progress_bar_html = ""
+
+    st.markdown(
+        render_template(
+            templates,
+            "admission_banner",
+            status_badge_html=status_badge_html,
+            timer_text=timer_text,
+            status_message=status_message,
+            progress_bar_html=progress_bar_html,
+        ),
+        unsafe_allow_html=True,
+    )
 
     c1, c2, c3 = st.columns([2, 1, 1])
     with c1:
         st.markdown(f"**Discovered Nodes Ready to Pair:** `{len(unadded_jetsons)}` unassigned device(s) online.")
     with c2:
-        if st.button("Rescan Network / Probe", key="rescan_modal_btn", use_container_width=True):
-            engine.probe_network_for_jetsons()
-            st.rerun()
+        if is_detecting:
+            if st.button("Stop Detection", key="btn_stop_detection", use_container_width=True):
+                st.session_state["detecting_bedside"] = False
+                st.rerun()
+        else:
+            if st.button("Restart Detection (2.5m)", key="btn_restart_detection", type="primary", use_container_width=True):
+                st.session_state["detecting_bedside"] = True
+                st.session_state["detect_start_time"] = time.time()
+                st.session_state["last_probe_time"] = time.time()
+                engine.probe_network_for_jetsons()
+                st.rerun()
     with c3:
         if st.button("Close Panel", key="close_admission_btn", use_container_width=True):
             st.session_state["show_add_bed"] = False
+            st.session_state["detecting_bedside"] = False
             st.rerun()
 
     if unadded_jetsons:
@@ -1185,13 +1566,16 @@ def render_admission_modal(engine, unadded_jetsons, added_bed_ids, templates):
             vitals = dev.get("latest_vitals", {})
             hr = vitals.get("hr", 75)
             spo2 = vitals.get("spo2", 98)
+            co2 = vitals.get("co2", 38)
+            ibp = vitals.get("ibp", {})
+            bp_txt = ibp.get("formatted", "120/80") if isinstance(ibp, dict) else str(ibp)
 
             col_dev, col_room, col_act = st.columns([4, 4, 3], gap="medium")
             with col_dev:
                 st.markdown(
                     f"**Hardware Node:** `{pid}`  \n"
                     f"Model: `{model}` | AI Engine: `{provider}`  \n"
-                    f"Vitals Snapshot: **HR {hr} bpm** | **SpO2 {spo2}%**"
+                    f"Vitals Snapshot: **HR {hr} bpm** | **SpO2 {spo2}%** | **CO2 {co2}** | **BP {bp_txt}**"
                 )
             with col_room:
                 dept_opts = [f"{code} - {name}" for code, name in HOSPITAL_DEPARTMENTS]
@@ -1208,9 +1592,22 @@ def render_admission_modal(engine, unadded_jetsons, added_bed_ids, templates):
             with col_act:
                 if st.button(f"+ Admit {pid}", key=f"admit_btn_{pid}", type="primary", use_container_width=True):
                     engine.admit_jetson(pid, department=assigned_dept)
-                    st.session_state["selected_bed"] = pid
+                    set_view(view_mode="detail", selected_bed=pid, selected_dept=assigned_dept)
                     st.session_state["show_add_bed"] = False
+                    st.session_state["detecting_bedside"] = False
                     st.rerun()
+
+        st.markdown(
+            '<div class="pairing-guidance-card" style="border-left-color:#38bdf8;">'
+            '<div class="pairing-guidance-title" style="color:#38bdf8;">'
+            'Don\'t see the specific bedside you want to add?'
+            '</div>'
+            '<div style="color:#94a3b8; font-size:12px; margin-top:4px; line-height:1.5;">'
+            'Make sure the desired bedside monitor is powered on, running <code>start_bedside.bat</code>, and connected to this local network. Network discovery probes are being broadcast continuously.'
+            '</div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
     else:
         st.markdown(render_template(templates, "admission_empty"), unsafe_allow_html=True)
         sim_id = f"Bed_{len(added_bed_ids) + 1}"
@@ -1224,9 +1621,11 @@ def render_admission_modal(engine, unadded_jetsons, added_bed_ids, templates):
         with sim_col2:
             st.write("")
             if st.button(f"+ Simulate & Detect New Jetson Node ({sim_id})", key="btn_sim_jetson", use_container_width=True):
-                engine.admit_jetson(sim_id, department=sim_dept_full.split(" - ", 1)[0])
-                st.session_state["selected_bed"] = sim_id
+                sim_dept_target = sim_dept_full.split(" - ", 1)[0]
+                engine.admit_jetson(sim_id, department=sim_dept_target)
+                set_view(view_mode="detail", selected_bed=sim_id, selected_dept=sim_dept_target)
                 st.session_state["show_add_bed"] = False
+                st.session_state["detecting_bedside"] = False
                 st.rerun()
 
 
@@ -1247,10 +1646,79 @@ def main():
     added_bed_ids = all_snap["added_bed_ids"]
     ha = all_snap["ha"]
 
+    # Handle query parameters from URL / clickable card links (?bed=Bed_1&view=detail&dept=ICU)
+    try:
+        cur_qp = dict(st.query_params)
+        last_qp = st.session_state.get("_last_seen_qp", None)
+        if last_qp is None or cur_qp != last_qp:
+            if "bed" in cur_qp and cur_qp["bed"] in beds_snap:
+                st.session_state["selected_bed"] = cur_qp["bed"]
+            if "view" in cur_qp and cur_qp["view"] in ("ward", "detail"):
+                st.session_state["view_mode"] = cur_qp["view"]
+            if "dept" in cur_qp and cur_qp["dept"]:
+                st.session_state["selected_department"] = cur_qp["dept"]
+            elif "bed" in cur_qp and cur_qp["bed"] in beds_snap and "dept" not in cur_qp:
+                st.session_state["selected_department"] = beds_snap[cur_qp["bed"]].get("department", "ICU")
+            st.session_state["_last_seen_qp"] = dict(cur_qp)
+    except Exception:
+        pass
+
+    if "view_mode" not in st.session_state:
+        st.session_state["view_mode"] = "ward"
+    if "selected_department" not in st.session_state:
+        st.session_state["selected_department"] = "All Departments"
     if "selected_bed" not in st.session_state or st.session_state["selected_bed"] not in beds_snap:
         st.session_state["selected_bed"] = next(iter(beds_snap.keys()), "Bed_1")
 
     selected_bed = st.session_state["selected_bed"]
+    selected_dept = st.session_state["selected_department"]
+    view_mode = st.session_state["view_mode"]
+
+    # Check for active emergency in any admitted patient room
+    active_emergencies = []
+    for pid, b in beds_snap.items():
+        is_emerg, reason = detect_bed_emergency(pid, b)
+        if is_emerg:
+            active_emergencies.append((pid, b, reason))
+
+    if active_emergencies:
+        popup_cards_html = []
+        for emerg_pid, emerg_bed, reason in active_emergencies:
+            if view_mode == "detail" and emerg_pid == selected_bed:
+                continue
+            v = emerg_bed["edge"].get("latest_vitals", {})
+            hr_v = v.get("hr", "--")
+            sp_v = v.get("spo2", "--")
+            co2_v = v.get("co2", "--")
+            ibp_v = emerg_bed["agents"].get("Agent_IBP", {}).get("value", {})
+            bp_v = (
+                ibp_v.get("formatted", f"{ibp_v.get('sys', '--')}/{ibp_v.get('dia', '--')}")
+                if isinstance(ibp_v, dict)
+                else str(ibp_v)
+            )
+
+            card_html = render_template(
+                templates,
+                "emergency_popup_card",
+                pid=emerg_pid,
+                dept=emerg_bed.get("department", "ICU"),
+                room=emerg_bed.get("room", f"Room {emerg_pid}"),
+                patient_name=emerg_bed.get("patient_name", f"Patient {emerg_pid}"),
+                diagnosis=emerg_bed.get("diagnosis", "Critical Telemetry"),
+                reason=reason,
+                hr_v=hr_v,
+                sp_v=sp_v,
+                co2_v=co2_v,
+                bp_v=bp_v,
+            )
+            popup_cards_html.append(card_html)
+
+        if popup_cards_html:
+            st.markdown(
+                f'<div class="emergency-toast-container">{"".join(popup_cards_html)}</div>',
+                unsafe_allow_html=True,
+            )
+
     render_sidebar_room_directory(engine, all_snap, selected_bed, templates)
 
     add_bed_badge = f" ({len(unadded_jetsons)} Detected)" if unadded_jetsons else ""
@@ -1277,44 +1745,137 @@ def main():
             add_lbl = "- Close Panel" if st.session_state["show_add_bed"] else f"+ Add New Bed{add_bed_badge}"
             if st.button(add_lbl, key="toggle_add_bed", use_container_width=True):
                 st.session_state["show_add_bed"] = not st.session_state["show_add_bed"]
+                if st.session_state["show_add_bed"]:
+                    st.session_state["detecting_bedside"] = True
+                    st.session_state["detect_start_time"] = time.time()
+                    st.session_state["last_probe_time"] = time.time()
+                    engine.probe_network_for_jetsons()
+                else:
+                    st.session_state["detecting_bedside"] = False
                 st.rerun()
         with btn_c2:
-            if st.button("Rescan LAN", key="top_rescan_btn", use_container_width=True):
+            is_scanning = st.session_state.get("detecting_bedside", False)
+            rescan_lbl = "Scanning..." if is_scanning else "Rescan LAN"
+            if st.button(rescan_lbl, key="top_rescan_btn", use_container_width=True):
+                st.session_state["show_add_bed"] = True
+                st.session_state["detecting_bedside"] = True
+                st.session_state["detect_start_time"] = time.time()
+                st.session_state["last_probe_time"] = time.time()
                 engine.probe_network_for_jetsons()
                 st.rerun()
 
     if st.session_state.get("show_add_bed", False):
         render_admission_modal(engine, unadded_jetsons, added_bed_ids, templates)
 
-    st.markdown('<div class="sec-label">Ward overview</div>', unsafe_allow_html=True)
-    if not beds_snap:
-        st.info("No active patient beds admitted. Click '+ Add New Bed' above to detect and admit Jetson bedside nodes.")
-    else:
-        ward_html = "".join(ward_tile(pid, b, pid == selected_bed, templates=templates) for pid, b in beds_snap.items())
-        st.markdown(f'<div class="ward-grid">{ward_html}</div>', unsafe_allow_html=True)
+    # Department category navigation bar
+    st.markdown('<div class="sec-label">Hospital Department Navigation</div>', unsafe_allow_html=True)
+    dept_cols = st.columns(len(HOSPITAL_DEPARTMENTS) + 1)
 
-    bed_keys = list(beds_snap.keys())
-    if len(bed_keys) > 1:
-        sel_c1, sel_c2 = st.columns([3, 9])
-        with sel_c1:
-            cur_idx = bed_keys.index(selected_bed) if selected_bed in bed_keys else 0
-            new_sel = st.selectbox(
-                "Inspect Bed",
-                options=bed_keys,
-                index=cur_idx,
-                label_visibility="collapsed",
-                key="bed_select_dropdown",
-            )
-            if new_sel != selected_bed:
-                st.session_state["selected_bed"] = new_sel
+    with dept_cols[0]:
+        is_sel = (selected_dept == "All Departments")
+        if st.button(
+            f"All ({len(beds_snap)})",
+            key="cat_btn_all",
+            type="primary" if is_sel else "secondary",
+            use_container_width=True,
+        ):
+            set_view(view_mode="ward", selected_dept="All Departments")
+            st.rerun()
+
+    for i, (code, full_name) in enumerate(HOSPITAL_DEPARTMENTS):
+        with dept_cols[i + 1]:
+            count = sum(1 for b in beds_snap.values() if b.get("department") == code)
+            is_sel = (selected_dept == code)
+            if st.button(
+                f"{code} ({count})",
+                key=f"cat_btn_{code}",
+                type="primary" if is_sel else "secondary",
+                use_container_width=True,
+            ):
+                set_view(view_mode="ward", selected_dept=code)
                 st.rerun()
 
-    st.markdown(
-        f'<div class="sec-label">{selected_bed} ({engine.get_bed_department(selected_bed)} &middot; {engine.get_bed_room(selected_bed)})</div>',
-        unsafe_allow_html=True,
-    )
-    if selected_bed in beds_snap:
-        st.markdown(detail_view(selected_bed, beds_snap[selected_bed], logs, templates=templates), unsafe_allow_html=True)
+    # VIEW 1: DEDICATED BED DASHBOARD (when clicked on a rectangular card or inspect)
+    if view_mode == "detail":
+        cur_bed_data = beds_snap.get(selected_bed)
+        if not cur_bed_data:
+            set_view(view_mode="ward")
+            st.rerun()
+
+        bed_dept = cur_bed_data.get("department", "ICU")
+        bed_room = cur_bed_data.get("room_only", "Room 101")
+        p_name = cur_bed_data.get("patient_name", f"Patient {selected_bed}")
+
+        nav_c1, nav_c2 = st.columns([4, 8])
+        with nav_c1:
+            back_dept = selected_dept if selected_dept in ([code for code, _ in HOSPITAL_DEPARTMENTS] + ["All Departments"]) else bed_dept
+            back_lbl = "← Back to All Rooms" if back_dept == "All Departments" else f"← Back to {back_dept} Rooms"
+            if st.button(back_lbl, key="btn_back_to_ward", use_container_width=False):
+                set_view(view_mode="ward", selected_dept=back_dept)
+                st.rerun()
+        with nav_c2:
+            bed_keys = list(beds_snap.keys())
+            if len(bed_keys) > 1:
+                cur_idx = bed_keys.index(selected_bed) if selected_bed in bed_keys else 0
+
+                def format_bed_label(b_key):
+                    bd = beds_snap[b_key]
+                    return f"{bd.get('patient_name')} ({b_key} · {bd.get('room')})"
+
+                switched_bed = st.selectbox(
+                    "Switch Bed Dashboard",
+                    options=bed_keys,
+                    index=cur_idx,
+                    format_func=format_bed_label,
+                    label_visibility="collapsed",
+                )
+                if switched_bed != selected_bed:
+                    target_dept = beds_snap.get(switched_bed, {}).get("department", "ICU")
+                    set_view(view_mode="detail", selected_bed=switched_bed, selected_dept=target_dept)
+                    st.rerun()
+
+        st.markdown(
+            f'<div class="sec-label">{p_name} &middot; {selected_bed} ({bed_dept} &middot; {bed_room}) &middot; Synchronized Live Bedside Telemetry</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(detail_view(selected_bed, cur_bed_data, logs, templates=templates), unsafe_allow_html=True)
+
+    # VIEW 2: CATEGORY ROOMS OVERVIEW (rectangular cards with patient name and all vitals)
+    else:
+        if selected_dept == "All Departments":
+            category_beds = beds_snap
+            dept_title = f"All Hospital Departments &middot; {len(category_beds)} Rooms Monitored"
+        else:
+            category_beds = {pid: b for pid, b in beds_snap.items() if b.get("department") == selected_dept}
+            full_dept_name = next((name for code, name in HOSPITAL_DEPARTMENTS if code == selected_dept), selected_dept)
+            dept_title = f"{selected_dept} &mdash; {full_dept_name} &middot; {len(category_beds)} Room{'s' if len(category_beds) != 1 else ''} Monitored"
+
+        st.markdown(f'<div class="sec-label">{dept_title}</div>', unsafe_allow_html=True)
+
+        if not category_beds:
+            st.info(f"No active patient beds currently assigned to {selected_dept}.")
+            if st.button(f"+ Detect & Admit New Bed to {selected_dept}", key=f"btn_admit_to_{selected_dept}"):
+                st.session_state["show_add_bed"] = True
+                st.session_state["detecting_bedside"] = True
+                st.session_state["detect_start_time"] = time.time()
+                st.session_state["last_probe_time"] = time.time()
+                engine.probe_network_for_jetsons()
+                st.rerun()
+        else:
+            card_items = list(category_beds.items())
+            cols_per_row = 2 if len(card_items) >= 2 else 1
+
+            for row_start in range(0, len(card_items), cols_per_row):
+                row_slice = card_items[row_start : row_start + cols_per_row]
+                row_cols = st.columns(cols_per_row)
+                for col_idx, (pid, b) in enumerate(row_slice):
+                    with row_cols[col_idx]:
+                        st.markdown(ward_tile(pid, b, pid == selected_bed, templates=templates), unsafe_allow_html=True)
+                        p_name = b.get("patient_name", f"Patient {pid}")
+                        if st.button(f"Open {p_name}'s Bed Dashboard →", key=f"open_dash_btn_{pid}", use_container_width=True):
+                            set_view(view_mode="detail", selected_bed=pid, selected_dept=b.get("department", "ICU"))
+                            st.rerun()
+                st.write("")
 
     time.sleep(0.6)
     st.rerun()
