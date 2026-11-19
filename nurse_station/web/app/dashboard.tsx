@@ -5,7 +5,8 @@ import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import Admission, { type Action } from "./admission";
 import { Badge, BedCard, BedPanel, EventLog } from "./bed-panel";
-import { bedStatus, formatReading, type Bed, type Device, type Snapshot, wardURL } from "./telemetry";
+import RoomDirectory from "./room-directory";
+import { formatReading, type Bed, type Device, type Snapshot, wardURL } from "./telemetry";
 
 const requestAction: Action = async (operation, data) => {
   const response = await fetch(`/api/${operation}`, {
@@ -51,10 +52,11 @@ function useTelemetry() {
   return { snapshot, connection };
 }
 
-function Directory({ snapshot, beds, selected, openAdmission, runAction, busy }: {
+function Directory({ snapshot, beds, selected, live, openAdmission, runAction, busy }: {
   snapshot: Snapshot;
   beds: Bed[];
   selected?: Bed;
+  live: boolean;
   openAdmission: () => void;
   runAction: (operation: string, data: Record<string, string | boolean>) => void;
   busy: boolean;
@@ -74,22 +76,7 @@ function Directory({ snapshot, beds, selected, openAdmission, runAction, busy }:
     </div>
     <div className="sidebar-directory">
       <h2>Room directory</h2>
-      {snapshot.departments.map(([department, name]) => {
-        const rooms = beds.filter((bed) => bed.department === department);
-        if (!rooms.length) return null;
-        return <div key={department} className="room-group">
-          <Link className="department-link" href={wardURL(department)} prefetch={false} title={name}>{department}</Link>
-          {rooms.map((bed) => {
-            const status = bedStatus(bed);
-            return <Link key={bed.patient_id} className="room-link" aria-current={selected?.patient_id === bed.patient_id ? "page" : undefined}
-              href={wardURL(department, bed.patient_id)} prefetch={false}>
-              <span className={`status-dot ${status.tone}`} title={status.label} />
-              <span>{bed.room_only}<small>{bed.patient_name}</small></span>
-            </Link>;
-          })}
-        </div>;
-      })}
-      {!beds.length && <p className="secondary">No active beds.</p>}
+      <RoomDirectory snapshot={snapshot} selectedId={selected?.patient_id} live={live} />
       {snapshot.unadded_jetsons.length > 0 && <button className="button sidebar-button" onClick={openAdmission}>
         Unassigned devices ({snapshot.unadded_jetsons.length})
       </button>}
@@ -193,7 +180,7 @@ export default function Dashboard() {
           <span className="brand-icon" aria-hidden="true">+</span>
           <span>Nurse Station<small>Trust-Aware Healthcare</small></span>
         </Link>
-        {snapshot && <Directory snapshot={snapshot} beds={allBeds} selected={selected}
+        {snapshot && <Directory snapshot={snapshot} beds={allBeds} selected={selected} live={connection === "live"}
           openAdmission={openAdmission} runAction={runAction} busy={busy} />}
       </aside>
       <main id="content" className="main">

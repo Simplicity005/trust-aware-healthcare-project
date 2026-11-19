@@ -64,6 +64,7 @@ export type Device = {
 
 export type Snapshot = {
   beds: Record<string, Bed>;
+  bed_directory: { patient_id: string; number: string; department: string; room: string }[];
   departments: [string, string][];
   unadded_jetsons: Device[];
   global_alert_log: string[];

@@ -26,6 +26,7 @@ Both components ship the same ECG model. To regenerate it, run `python3 jetson_b
 ## Use the dashboard
 
 - **All wards** and the department filters show admitted beds. Open a bed to inspect ECG, compute and routing, recent alerts, and the six sensor trust scores.
+- In the sidebar **Room directory**, expand a department and select a bed number to open its dashboard. Green means stable, amber flags a monitoring issue, red indicates a patient alarm, and gray means unoccupied. Hover over a number for details.
 - **Add new bed** probes the broker for up to 2.5 minutes. Assign a department and an optional room to a discovered device, or add a simulated bed.
 - **Release bed** removes a device from active monitoring. Physical devices still sending telemetry will appear in discovery again.
 - **Emergency simulator** in the sidebar triggers or clears an alarm for demonstration. **Open emergency bed** jumps directly from a ward-wide alert to the affected bed.

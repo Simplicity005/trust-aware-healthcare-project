@@ -335,6 +335,8 @@ class MultiPatientTrustEngine:
             "Bed_4": "Room 401",
             "Bed_5": "Room 501",
         }
+        # Keep the display number with the bed when its patient is released.
+        self.bed_numbers = {pid: int(pid.removeprefix("Bed_")) for pid in self.bed_rooms}
 
         # CPU fallback ONNX inference
         self.cpu_session = None
@@ -824,6 +826,13 @@ class MultiPatientTrustEngine:
 
     def admit_jetson(self, patient_id, department=None, room_name=None, patient_name=None, diagnosis=None):
         with self.lock:
+            if patient_id not in self.bed_numbers:
+                suffix = patient_id.removeprefix("Bed_")
+                number = int(suffix) if suffix.isdecimal() else None
+                used = set(self.bed_numbers.values())
+                if number is None or number in used:
+                    number = next(n for n in range(1, len(used) + 2) if n not in used)
+                self.bed_numbers[patient_id] = number
             changed_department = department and department != self.get_bed_department(patient_id)
             self.added_bed_ids.add(patient_id)
             if department:
@@ -942,6 +951,11 @@ class MultiPatientTrustEngine:
 
             return {
                 "beds": beds_snap,
+                "bed_directory": [
+                    {"patient_id": pid, "number": str(number), "department": self.get_bed_department(pid),
+                     "room": self.get_bed_room(pid)}
+                    for pid, number in sorted(self.bed_numbers.items(), key=lambda item: item[1])
+                ],
                 "global_alert_log": list(self.global_alert_log),
                 "unadded_jetsons": unadded_jetsons,
                 "added_bed_ids": list(self.added_bed_ids),
