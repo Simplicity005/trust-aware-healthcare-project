@@ -1,10 +1,10 @@
 # Nurse Station
 
-The Next.js Central Dashboard receives snapshots and live events from a local FastAPI service. The Python engine subscribes to registrations, sensor data and alerts through HiveMQ, tracks sensor trust, and coordinates station failover.
+The Next.js Central Dashboard receives snapshots and live events from a local FastAPI service. The Python engine subscribes to registrations, sensor data and alerts through Mosquitto, tracks sensor trust, and coordinates station failover.
 
 ## Run the station
 
-From the repository root, run `./start_nurse_station.sh` or `.\start_nurse_station.bat`. Open [localhost:8501](http://localhost:8501) on the station computer. The API binds to loopback port 9501. With default settings the launcher starts the Compose-managed HiveMQ broker on loopback port 1884. For separate hardware, configure the station’s credentials using the [shared HiveMQ setup](../README.md#connect-separate-jetsons-and-the-nurse-station).
+From the repository root, run `./start_nurse_station.sh` or `.\start_nurse_station.bat`. Open [localhost:8501](http://localhost:8501) on the station computer. The API binds to loopback port 9501. With default settings the launcher starts Mosquitto (native executable or Docker Compose) on loopback port 1884. For separate hardware, configure the station’s credentials using the [shared Mosquitto setup](../README.md#connect-separate-jetsons-and-the-nurse-station).
 
 ## Monitor patients
 
@@ -15,11 +15,11 @@ From the repository root, run `./start_nurse_station.sh` or `.\start_nurse_stati
 
 ## Test high availability
 
-Run `./start_nurse_station.sh --dual` to start the primary on port 8501 and standby on 8502. Once the peer appears, expand **High availability** in the sidebar and use **Test failover / switch role**. The stations exchange heartbeats over HiveMQ.
+Run `./start_nurse_station.sh --dual` to start the primary on port 8501 and standby on 8502. Once the peer appears, expand **High availability** in the sidebar and use **Test failover / switch role**. The stations exchange heartbeats over Mosquitto.
 
 ## Run the web and API separately
 
-With HiveMQ running and the project Python environment activated, start the API from this directory.
+With Mosquitto running and the project Python environment activated, start the API from this directory.
 
 ```bash
 python -m pip install -r requirements.txt

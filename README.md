@@ -1,10 +1,14 @@
 # Trust-aware bedside monitoring
 
-Each Jetson runs a local patient monitor and simulator. The Next.js Nurse Station collects registered beds over HiveMQ and displays their readings, ECG traces, sensor trust and alerts.
+Each Jetson runs a local patient monitor and simulator. The Next.js Nurse Station collects registered beds over Eclipse Mosquitto and displays their readings, ECG traces, sensor trust and alerts.
 
 ## Total Local Demo
 
-Install Python 3.10 or newer with venv support, Node.js 20.9 or newer with npm, and Docker with Compose v2. Start Docker, then run one launcher from the repository root. The launchers install their dependencies on first use.
+Test the entire system on one computer using simulated Jetsons. All connections use loopback. No physical sensors, cloud account or Wi-Fi setup is needed.
+
+1. Install Python 3.10+ with venv support and Node.js 20.9+ with npm. The launcher installs project dependencies and builds the dashboard on its first run.
+2. Install Eclipse Mosquitto 2.x. On Ubuntu or Debian, run `sudo apt install mosquitto`. On macOS, run `brew install mosquitto`. Windows users can use the [Mosquitto installer](https://mosquitto.org/download/). If Docker with Compose is already installed and running, the launcher can use that instead.
+3. From the repository root, run **Total Local Demo**.
 
 | Mode | Linux, macOS or WSL | Windows | Open in a local browser |
 | --- | --- | --- | --- |
@@ -16,52 +20,63 @@ Install Python 3.10 or newer with venv support, Node.js 20.9 or newer with npm, 
 2. Open [Bed 1](http://127.0.0.1:8080). Enter a demo patient name, department, room and a bedside password. Registration starts the eight simulated sensors. The patient appears automatically on the station. Open their numbered box to see the bed report.
 3. Open **Simulation** on that bedside to change its readings or disconnect a sensor. To set up another patient, register on [Bed 2](http://127.0.0.1:8081) or [Bed 3](http://127.0.0.1:8082). Each monitor and simulation page uses its own device login.
 
-The bundled HiveMQ Community Edition broker listens on loopback port 1884. Press Ctrl+C in the launcher terminal to stop its application processes. Run `docker compose down` from the project root to stop the shared local broker after all launchers have stopped.
+The demo runs a private local broker on port 1884, the Nurse Station, and three separate simulated Jetsons. The default demo ignores broker addresses and credentials from your hardware setup. Use `--mqtt-port` to select another local port if 1884 is occupied. To deliberately use an existing local broker, pass `--broker 127.0.0.1 --mqtt-port PORT`.
+
+Registrations persist between runs. Total Local Demo stores them in `~/.local/state/nurse-station/demo/` by default. Set `BEDSIDE_STATE_DIR` to a new empty directory for a fresh test. In Bash, `BEDSIDE_STATE_DIR="$(mktemp -d)" ./start_local_demo.sh` starts with zero registrations without deleting existing ones.
+
+Press Ctrl+C in the launcher terminal to stop the apps and the native broker. When using the Docker fallback, run `docker compose down` from the repository root to stop its broker after the apps exit.
 
 ## Connect separate Jetsons and the Nurse Station
 
-1. Create a private HiveMQ Cloud cluster or use a managed HiveMQ broker with a trusted TLS certificate. Copy the cluster hostname and TLS MQTT port, normally 8883. Each machine needs an outbound connection to this endpoint. [HiveMQ Cloud quick start](https://docs.hivemq.com/hivemq-cloud/quick-start-guide.html)
-2. Create a credential for the station and a different credential for each Jetson. Configure topic permissions on the broker as shown below. Each device ID must be unique and match its permission exactly. Use a HiveMQ deployment that supports topic-level permissions. [HiveMQ access management](https://docs.hivemq.com/hivemq-cloud/authn-authz.html)
+On physical hardware, each Jetson and the station connect to the same Mosquitto hostname. Wi-Fi, Ethernet and different routed network segments all work when each machine can reach the broker’s TLS port. Keep the broker on the nurse laptop for a lab or on an always-on internal server. The one-computer demo listener stays on loopback.
 
-| Credential | MQTT topic filter | Permission |
-| --- | --- | --- |
-| Nurse Station | `hospital/#` | Publish and subscribe |
-| Jetson for Bed_1 | `hospital/Bed_1/#` | Publish and subscribe |
-| Jetson for Bed_2 | `hospital/Bed_2/#` | Publish and subscribe |
+1. Install Mosquitto on the broker host. Configure a network listener with a server certificate for its DNS name and allow the devices to reach TCP port 8883. A typical Mosquitto 2.x configuration uses the following settings. Substitute the paths to the actual server certificate chain, private key, password file and topic permissions file. The broker service needs read access to these files. [Mosquitto configuration reference](https://mosquitto.org/man/mosquitto-conf-5.html)
 
-3. Set the following environment variables in the terminal or service that starts each machine. Use that machine’s broker credential. The password set later in the bedside registration form protects the local dashboard.
+```conf
+listener 8883
+certfile /etc/mosquitto/certs/broker.crt
+keyfile /etc/mosquitto/certs/broker.key
+allow_anonymous false
+password_file /etc/mosquitto/passwd
+acl_file /etc/mosquitto/acl
+```
 
-| Variable | Value |
-| --- | --- |
-| `HIVEMQ_HOST` | Cluster hostname, without a scheme or port |
-| `HIVEMQ_PORT` | TLS listener port, normally `8883` |
-| `HIVEMQ_USERNAME` | This machine’s broker username |
-| `HIVEMQ_PASSWORD` | This machine’s broker password |
-| `HIVEMQ_CA_FILE` | Optional PEM file for a privately issued broker certificate |
+2. Create a separate MQTT username and password for each device using `mosquitto_passwd`. In the topic permissions file, grant the station access across beds and each Jetson access only to its own device ID. For example, for two beds:
 
-For example, in Bash on each machine, enter its own credentials at the prompts.
+```text
+user nurse-station
+topic readwrite hospital/#
+
+user jetson-bed-1
+topic readwrite hospital/Bed_1/#
+
+user jetson-bed-2
+topic readwrite hospital/Bed_2/#
+```
+
+3. Start the configured broker. In each machine’s launcher terminal, set the same broker hostname and use that machine’s own credentials. For a private certificate authority, set `MQTT_CA_FILE` to its trusted PEM certificate on each machine. The bedside dashboard password is set separately during patient registration.
 
 ```bash
-export HIVEMQ_HOST='your-cluster-hostname'
-export HIVEMQ_PORT=8883
-read -r -p 'HiveMQ username: ' HIVEMQ_USERNAME
-read -rs -p 'HiveMQ password: ' HIVEMQ_PASSWORD
+export MQTT_HOST='your-broker-hostname'
+export MQTT_PORT=8883
+read -r -p 'MQTT username: ' MQTT_USERNAME
+read -rs -p 'MQTT password: ' MQTT_PASSWORD
 echo
-export HIVEMQ_USERNAME HIVEMQ_PASSWORD
+export MQTT_USERNAME MQTT_PASSWORD
 ```
 
 In Windows PowerShell, use the following before starting the batch file.
 
 ```powershell
-$env:HIVEMQ_HOST = 'your-cluster-hostname'
-$env:HIVEMQ_PORT = '8883'
-$credential = Get-Credential -Message 'HiveMQ credential for this machine'
-$env:HIVEMQ_USERNAME = $credential.UserName
-$env:HIVEMQ_PASSWORD = $credential.GetNetworkCredential().Password
+$env:MQTT_HOST = 'your-broker-hostname'
+$env:MQTT_PORT = '8883'
+$credential = Get-Credential -Message 'MQTT credential for this machine'
+$env:MQTT_USERNAME = $credential.UserName
+$env:MQTT_PASSWORD = $credential.GetNetworkCredential().Password
 ```
 
-4. Run `./start_nurse_station.sh` on the nurse laptop. On each Jetson, run `./start_bedside.sh --patient-id Bed_1`, substituting its own device ID. Open the dashboard on each device’s **own** browser. Both roles bind their web interface to loopback by default. An explicit HiveMQ host uses the existing broker, so Docker is optional on those machines.
-5. Register the patient at their Jetson. The registration survives a restart under the same OS account. If the station starts later, registered Jetsons announce themselves again automatically.
+4. On the nurse laptop run `./start_nurse_station.sh`. On each Jetson run `./start_bedside.sh --patient-id Bed_1`, substituting its device ID. On Windows use the corresponding batch file. An explicit broker host connects to the existing service.
+5. Open each device’s own dashboard and register the patient at the bedside. The registration survives a restart under the same OS account. Registered Jetsons announce themselves again when the station starts later.
 
 ## Development and benchmarks
 

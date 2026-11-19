@@ -26,7 +26,7 @@ import numpy as np
 from sensor_agents import SensorAgentThread
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from hivemq_connection import DEPARTMENTS, broker_host, broker_port, mqtt_client, valid_device_id
+from mqtt_connection import DEPARTMENTS, broker_host, broker_port, mqtt_client, valid_device_id
 from patient_simulation import PatientSimulation, SAMPLE_RATE, SENSOR_AGENT_IDS, WAVEFORM_KEYS
 from trust_evaluator import AgentTrustTracker
 
@@ -576,7 +576,7 @@ class JetsonEdgeBrain:
 
     def _on_connect(self, client, userdata, flags, rc, properties=None):
         if rc != 0:
-            print(f"[{self.patient_id}] HiveMQ rejected the connection: {rc}", flush=True)
+            print(f"[{self.patient_id}] Mosquitto rejected the connection: {rc}", flush=True)
             return
         client.subscribe(f"hospital/{self.patient_id}/control/#")
         self.send_discovery_announcement()
@@ -941,8 +941,8 @@ def create_shared_onnx_session(model_path):
 def main():
     parser = argparse.ArgumentParser(description="Bedside GPU Edge Brain & Isolated Local Bedside Monitor")
     parser.add_argument("--patient-id", type=str, default="Bed_1", help="Primary Patient ID")
-    parser.add_argument("--broker", type=str, default=broker_host(), help="HiveMQ hostname")
-    parser.add_argument("--port", type=int, default=None, help="HiveMQ port")
+    parser.add_argument("--broker", type=str, default=broker_host(), help="Mosquitto hostname")
+    parser.add_argument("--port", type=int, default=None, help="Mosquitto port")
     parser.add_argument("--web-port", type=int, default=8080, help="Base Local Bedside Monitor Web UI port")
     parser.add_argument(
         "--web-host",
@@ -963,7 +963,7 @@ def main():
     server = start_bedside_web_server(brain, web_port=args.web_port, web_host=args.web_host)
     if server is None:
         raise SystemExit(f"Could not start {args.patient_id} on port {args.web_port}")
-    print(f"[{args.patient_id}] HiveMQ {args.broker}:{args.port} · {active_provider}", flush=True)
+    print(f"[{args.patient_id}] Mosquitto {args.broker}:{args.port} · {active_provider}", flush=True)
 
     stop_event = threading.Event()
 

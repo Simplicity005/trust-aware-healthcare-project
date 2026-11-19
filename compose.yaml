@@ -1,5 +1,7 @@
 services:
-  hivemq:
-    image: hivemq/hivemq-ce:2026.5
+  mosquitto:
+    image: eclipse-mosquitto:2
     ports:
-      - "127.0.0.1:${HIVEMQ_PORT:-1884}:1883"
+      - "127.0.0.1:${MQTT_PORT:-1884}:1883"
+    volumes:
+      - ./mosquitto-local.conf:/mosquitto/config/mosquitto.conf:ro

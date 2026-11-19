@@ -130,7 +130,7 @@ export default function Dashboard() {
   }
 
   const live = connection === "live" && snapshot?.broker_connected === true;
-  const connectionLabel = connection === "live" ? (live ? "HiveMQ connected" : "HiveMQ disconnected") : connection === "connecting" ? "Connecting" : "Reconnecting";
+  const connectionLabel = connection === "live" ? (live ? "Mosquitto connected" : "Mosquitto disconnected") : connection === "connecting" ? "Connecting" : "Reconnecting";
 
   return (
     <div className="dashboard">

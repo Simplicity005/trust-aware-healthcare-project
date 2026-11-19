@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -18,6 +19,9 @@ WEB = STATION / "web"
 BEDSIDE = ROOT / "jetson_bedside"
 NEXT = WEB / "node_modules" / "next" / "dist" / "bin" / "next"
 IS_WINDOWS = os.name == "nt"
+
+sys.path.insert(0, str(ROOT))
+from mqtt_connection import broker_port, local_host, mqtt_setting
 
 
 def use_virtual_environment(bedside_only):
@@ -82,8 +86,8 @@ def prepare_web(parser):
     return node
 
 
-def start(children, label, command, cwd=STATION, env=None):
-    options = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if IS_WINDOWS else {"start_new_session": True}
+def start(children, label, command, cwd=STATION, env=None, foreground=False):
+    options = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if IS_WINDOWS else {"start_new_session": not foreground}
     child = subprocess.Popen(command, cwd=cwd, env=env, **options)
     children.append((label, child))
     return child
@@ -102,7 +106,11 @@ def stop(children):
         except ProcessLookupError:
             continue
         except PermissionError as error:
-            print(f"Could not stop {label} (PID {child.pid}): {error}", file=sys.stderr, flush=True)
+            # A foreground broker can already be stopping in response to the terminal's Ctrl+C.
+            try:
+                child.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                print(f"Could not stop {label} (PID {child.pid}): {error}", file=sys.stderr, flush=True)
             continue
         pending.append((label, child))
     for label, child in pending:
@@ -118,19 +126,49 @@ def stop(children):
                 print(f"Could not stop {label} (PID {child.pid}): {error}", file=sys.stderr, flush=True)
 
 
-def start_local_hivemq(port):
+def broker_listening(port):
+    with socket.socket() as sock:
+        sock.settimeout(0.25)
+        return sock.connect_ex(("127.0.0.1", port)) == 0
+
+
+def start_local_mosquitto(children, port):
+    executable = shutil.which("mosquitto")
+    if not executable and not IS_WINDOWS:
+        executable = shutil.which("mosquitto", path="/usr/sbin")
+    if not executable and IS_WINDOWS:
+        installed = Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "mosquitto" / "mosquitto.exe"
+        if installed.is_file():
+            executable = str(installed)
+    if executable:
+        if broker_listening(port):
+            raise RuntimeError(f"Port {port} is in use. Use --mqtt-port to choose a free port, "
+                               "or --broker 127.0.0.1 to use an existing broker intentionally.")
+        help_text = subprocess.run([executable, "-h"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT).stdout
+        if b"mosquitto version 2." not in help_text.lower():
+            raise RuntimeError("Install Mosquitto 2.x for its loopback-only local mode.")
+        broker = start(children, "Local Mosquitto", [executable, "-p", str(port)], foreground=True)
+        deadline = time.monotonic() + 5
+        while broker.poll() is None and time.monotonic() < deadline:
+            if broker_listening(port):
+                print(f"Local Mosquitto listening on 127.0.0.1:{port}", flush=True)
+                return
+            time.sleep(0.1)
+        raise RuntimeError(f"Mosquitto could not start on 127.0.0.1:{port}.")
+
     docker = shutil.which("docker")
     if not docker:
-        raise RuntimeError("Install Docker with Compose for local HiveMQ, or set HIVEMQ_HOST to your HiveMQ broker.")
-    subprocess.run([docker, "compose", "-f", str(ROOT / "compose.yaml"), "up", "-d"],
-                   env={**os.environ, "HIVEMQ_PORT": str(port)}, check=True)
+        raise RuntimeError("Install Eclipse Mosquitto or Docker with Compose to run the local broker.")
+    subprocess.run([docker, "compose", "-f", str(ROOT / "compose.yaml"), "up", "-d", "mosquitto"],
+                   env={**os.environ, "MQTT_PORT": str(port)}, check=True)
+    print("Mosquitto is running in Docker. Use docker compose down to stop the broker.", flush=True)
 
 
 def start_station(children, node, args, station_id, port, api_port):
     environment = {
         **os.environ,
-        "HIVEMQ_HOST": args.broker,
-        "HIVEMQ_PORT": str(args.mqtt_port),
+        "MQTT_HOST": args.broker,
+        "MQTT_PORT": str(args.mqtt_port),
         "NURSE_STATION_ID": station_id,
         "NURSE_STATION_PORT": str(port),
     }
@@ -170,8 +208,8 @@ def main():
     parser.add_argument("--host", choices=("127.0.0.1", "localhost", "::1"), default="127.0.0.1",
                         help="Local Nurse Station dashboard address")
     parser.add_argument("--api-port", type=int, default=None, help="Local API port, defaults to 9501 or 9502")
-    parser.add_argument("--broker", default=os.environ.get("HIVEMQ_HOST"), help="Existing HiveMQ hostname")
-    parser.add_argument("--mqtt-port", type=int, default=None, help="HiveMQ listener port")
+    parser.add_argument("--broker", help="Use an existing MQTT broker at this hostname")
+    parser.add_argument("--mqtt-port", type=int, default=None, help="MQTT listener port")
     parser.add_argument("--dual", action="store_true", help="Run a standby station on the next dashboard and API port")
     parser.add_argument("--bedside-port", type=int, default=8080, help="Bedside monitor port")
     beds = parser.add_mutually_exclusive_group()
@@ -179,21 +217,34 @@ def main():
     beds.add_argument("--patients", nargs="+", help="Run bedside nodes with these bed IDs")
     args = parser.parse_args()
 
-    managed_broker = not args.broker
+    if args.demo:
+        os.environ.setdefault("BEDSIDE_STATE_DIR", str(Path.home() / ".local" / "state" / "nurse-station" / "demo"))
+        if not args.broker:
+            # The one-command demo stays local even in a terminal configured for physical Jetsons.
+            for prefix in ("MQTT_", "HIVEMQ_"):
+                for setting in ("HOST", "PORT", "USERNAME", "PASSWORD", "CA_FILE"):
+                    os.environ.pop(prefix + setting, None)
+    else:
+        args.broker = args.broker or mqtt_setting("HOST")
+    managed_broker = not args.broker and not args.bedside
     args.broker = args.broker or "127.0.0.1"
-    local_broker = args.broker in {"127.0.0.1", "localhost", "::1"}
-    args.mqtt_port = args.mqtt_port or int(os.environ.get("HIVEMQ_PORT") or (1884 if local_broker else 8883))
+    local_broker = local_host(args.broker)
+    try:
+        if args.mqtt_port is None:
+            args.mqtt_port = broker_port(args.broker)
+    except ValueError:
+        parser.error("MQTT_PORT must be a number.")
     args.patients = args.patients or ([args.patient_id] if args.patient_id else
                                      ["Bed_1", "Bed_2", "Bed_3"] if args.demo else ["Bed_1"])
     if len(set(args.patients)) != len(args.patients):
         parser.error("Use a unique ID for each Jetson.")
     if args.demo and not local_broker:
-        parser.error("For a remote HiveMQ broker, start each Jetson and station separately with its own credentials.")
+        parser.error("For a remote MQTT broker, start each Jetson and station separately with its own credentials.")
     has_bedside = args.demo or args.bedside
     if has_bedside and not local_broker and len(args.patients) != 1:
-        parser.error("Start one Jetson per remote HiveMQ credential.")
+        parser.error("Start one Jetson per remote MQTT credential.")
     if not 1 <= args.mqtt_port <= 65535:
-        parser.error("HiveMQ port must be within 1–65535.")
+        parser.error("MQTT port must be within 1–65535.")
     if has_bedside and not BEDSIDE.is_dir():
         parser.error("The Bedside requires the jetson_bedside/ folder.")
     if args.bedside and args.dual:
@@ -227,7 +278,7 @@ def main():
         signal.signal(signal.SIGTERM, interrupt)
         try:
             if managed_broker:
-                start_local_hivemq(args.mqtt_port)
+                start_local_mosquitto(shared, args.mqtt_port)
             if has_bedside:
                 start_bedside(shared, args)
             if not args.bedside:
