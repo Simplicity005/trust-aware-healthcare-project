@@ -17,7 +17,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from dashboard import AgentTrustTracker
+from engine import AgentTrustTracker
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "ecg_anomaly.onnx")
@@ -42,7 +42,7 @@ def ensure_setup():
     os.makedirs(BENCH_DIR, exist_ok=True)
     if not os.path.exists(MODEL_PATH):
         raise FileNotFoundError(
-            f"Model '{MODEL_PATH}' not found. Run 'python3 make_model.py' first."
+            f"Model '{MODEL_PATH}' not found. Copy ecg_anomaly.onnx from jetson_bedside/."
         )
 
 

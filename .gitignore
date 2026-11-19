@@ -65,3 +65,9 @@ coverage.xml
 
 # Mosquitto temp logs
 *.log
+
+# Next.js
+node_modules/
+.next/
+*.tsbuildinfo
+next-env.d.ts

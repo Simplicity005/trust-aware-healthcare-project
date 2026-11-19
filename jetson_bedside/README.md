@@ -1,47 +1,19 @@
-# Bedside Node (`jetson_bedside/`) — NVIDIA Jetson Orin
+# Bedside Node
 
-This folder contains **everything that runs at the patient's bed** on an **NVIDIA Jetson Orin** (including its own `requirements.txt` and pre-built `ecg_anomaly.onnx`):
+The Bedside runs the sensor agents, Jetson edge inference, and a local monitor at http://localhost:8080. It uses Python and sends telemetry over MQTT to the Nurse Station.
 
-1. `requirements.txt` — Lightweight Jetson dependencies (`paho-mqtt`, `numpy`, `onnxruntime`).
-2. `ecg_anomaly.onnx` — Pre-built 1D-CNN ECG Arrhythmia detector model (ready to use without needing PyTorch).
-3. `sensor_agents.py` — Streams live ECG, SpO2, heart rate, respiration, EtCO2, IBP, and NIBP data to per-agent MQTT topics for `--patient-id <Bed_ID>`.
-4. `jetson_edge_brain.py` — Runs the `<5 ms` 1D-CNN ECG Arrhythmia AI model (`TensorRT / CUDA / CPU`), triggers instant bedside alarms, checks cross-sensor physiological plausibility, and streams verified summaries to the Nurse Station Laptop.
-5. `start_bedside.sh` — One-command launcher that automatically sets up `venv`, installs `requirements.txt`, and launches the bedside node.
+## Start the Bedside
 
----
+From the repository root, run `./start_bedside.sh` on Linux, macOS, or WSL, or run `start_bedside.bat` on Windows. The launcher starts the sensors and the monitor together.
 
-## Download Only This Folder & Install Requirements on a Jetson Orin
-
-Run this in the Jetson Orin terminal to download `jetson_bedside/` (which includes `requirements.txt` and `ecg_anomaly.onnx`):
+For a Jetson connected to a Nurse Station on the LAN, pass the bed ID and the Nurse Station's MQTT broker address:
 
 ```bash
-curl -L https://github.com/Simplicity005/trust-aware-healthcare-project/archive/refs/heads/main.tar.gz | tar -xz --strip-components=1 trust-aware-healthcare-project-main/jetson_bedside
-cd jetson_bedside
-chmod +x start_bedside.sh
-
-# Optional manual install (start_bedside.sh also runs this automatically):
-python3 -m venv --system-site-packages venv
-source venv/bin/activate
-pip install -r requirements.txt
+./start_bedside.sh --patient-id Bed_1 --broker 192.168.1.50
 ```
 
----
+Replace the address with your MQTT broker's address and use a unique bed ID for each Jetson. For multiple simulated beds on one machine, use `--patients Bed_1 Bed_2 Bed_3`.
 
-## How to Run on Each Jetson Orin
+## Minimal Jetson deployment
 
-Assume the Nurse Station Laptop's IP address on Wi-Fi/LAN is `<LAPTOP_IP>`:
-
-### On Jetson #1 (Patient Bed 1):
-```bash
-./start_bedside.sh --patient-id Bed_1 --broker <LAPTOP_IP>
-```
-
-### On Jetson #2 (Patient Bed 2):
-```bash
-./start_bedside.sh --patient-id Bed_2 --broker <LAPTOP_IP>
-```
-
-### On Jetson #3 (Patient Bed 3):
-```bash
-./start_bedside.sh --patient-id Bed_3 --broker <LAPTOP_IP>
-```
+Keep `jetson_bedside/`, `nurse_station/launch.py`, and `start_bedside.sh` at their repository paths. That includes the prebuilt ECG model, monitor HTML, and Python programs. The shared launcher uses system site packages for a new Bedside virtual environment so the Jetson can reuse its installed ONNX Runtime.
