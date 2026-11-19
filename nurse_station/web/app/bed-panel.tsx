@@ -58,11 +58,16 @@ export function Waveform({ bed }: { bed: Bed }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const bufferRef = useRef<RingBuffer | null>(null);
   const clockRef = useRef<{ offset?: number; sweepOrigin?: number }>({});
-  const red = bed.agents.Agent_ECG.status === "ISOLATED" || Boolean(bed.edge.local_bed_alarm);
+  const ecgRemoved = Boolean(bed.agents.Agent_ECG.removed);
+  const red = ecgRemoved || bed.agents.Agent_ECG.status === "ISOLATED" || Boolean(bed.edge.local_bed_alarm);
   const redRef = useRef(red);
   redRef.current = red;
 
   useEffect(() => {
+    if (ecgRemoved) {
+      bufferRef.current = null;
+      return;
+    }
     const wave = bed.ecg_wave;
     if (!Array.isArray(wave) || !wave.length) return;
     const rate = Number.isInteger(bed.ecg_rate) && (bed.ecg_rate ?? 0) > 0 ? (bed.ecg_rate as number) : 250;
@@ -115,7 +120,7 @@ export function Waveform({ bed }: { bed: Bed }) {
       buffer.stamps[slot] = sample;
     }
     buffer.end = Math.max(buffer.end, end);
-  }, [bed.ecg_wave, bed.ecg_end_ts, bed.ecg_rate]);
+  }, [bed.ecg_wave, bed.ecg_end_ts, bed.ecg_rate, ecgRemoved]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -229,16 +234,17 @@ export function BedCard({ bed, department }: { bed: Bed; department: string }) {
       <dl className="vital-grid">
         {vitals.map((sensor) => {
           const agent = bed.agents[sensor.id];
+          const isRem = Boolean(agent.removed);
           const pct = Math.round(agent.trust * 100);
-          const tone = agent.status === "ISOLATED" ? "red" : agent.status === "SUSPICIOUS" ? "amber" : "green";
+          const tone = isRem || agent.status === "ISOLATED" ? "red" : agent.status === "SUSPICIOUS" ? "amber" : "green";
           return (
             <div key={sensor.id}>
               <dt>
                 <span>{sensor.short}</span>
-                <small className={`vital-trust ${tone}`} title={`${sensor.label} trust: ${pct}%`}>{pct}%</small>
+                <small className={`vital-trust ${tone}`} title={isRem ? `${sensor.label} removed` : `${sensor.label} trust: ${pct}%`}>{isRem ? "0%" : `${pct}%`}</small>
               </dt>
-              <dd className={agent.status === "ISOLATED" ? "red-text" : ""}>
-                {agent.status === "ISOLATED" ? "Isolated" : formatReading(agent.value)}
+              <dd className={isRem || agent.status === "ISOLATED" ? "red-text" : ""}>
+                {isRem ? "Removed" : agent.status === "ISOLATED" ? "Isolated" : formatReading(agent.value)}
               </dd>
             </div>
           );
@@ -256,9 +262,10 @@ export function BedPanel({ bed, onRelease, releasing, logs }: {
 }) {
   const status = bedStatus(bed);
   const ecg = bed.agents.Agent_ECG;
+  const ecgRemoved = Boolean(ecg.removed);
   const ecgPct = Math.round(ecg.trust * 100);
-  const ecgTone = ecg.status === "ISOLATED" ? "red" : ecg.status === "SUSPICIOUS" ? "amber" : "green";
-  const rhythm = ecg.status === "ISOLATED" ? "Signal unreliable" :
+  const ecgTone = ecgRemoved || ecg.status === "ISOLATED" ? "red" : ecg.status === "SUSPICIOUS" ? "amber" : "green";
+  const rhythm = ecgRemoved ? "ECG sensor removed" : ecg.status === "ISOLATED" ? "Signal unreliable" :
     bed.edge.local_bed_alarm ? "Ventricular arrhythmia" : "Normal sinus rhythm";
   const vitals = sensors.slice(1);
 
@@ -278,7 +285,7 @@ export function BedPanel({ bed, onRelease, releasing, logs }: {
       </section>
       <section className="panel chart-panel">
         <div className="section-heading">
-          <h2>ECG lead II <small className={`vital-trust ${ecgTone}`}>{ecgPct}%</small></h2>
+          <h2>ECG lead II <small className={`vital-trust ${ecgTone}`}>{ecgRemoved ? "Removed" : `${ecgPct}%`}</small></h2>
           <span className="secondary">{rhythm}</span>
         </div>
         <Waveform bed={bed} />
@@ -287,18 +294,19 @@ export function BedPanel({ bed, onRelease, releasing, logs }: {
         <dl className="vital-grid detail-vital-grid">
           {vitals.map((sensor) => {
             const agent = bed.agents[sensor.id];
+            const isRem = Boolean(agent.removed);
             const pct = Math.round(agent.trust * 100);
-            const tone = agent.status === "ISOLATED" ? "red" : agent.status === "SUSPICIOUS" ? "amber" : "green";
+            const tone = isRem || agent.status === "ISOLATED" ? "red" : agent.status === "SUSPICIOUS" ? "amber" : "green";
             const reading = formatReading(agent.value);
             return (
               <div key={sensor.id}>
                 <dt>
                   <span>{sensor.short}</span>
-                  <small className={`vital-trust ${tone}`}>{pct}%</small>
+                  <small className={`vital-trust ${tone}`}>{isRem ? "0%" : `${pct}%`}</small>
                 </dt>
-                <dd className={agent.status === "ISOLATED" ? "red-text" : ""}>
-                  {agent.status === "ISOLATED" ? "Isolated" : reading}
-                  {agent.status !== "ISOLATED" && reading !== "—" && sensor.unit && <small className="vital-unit"> {sensor.unit}</small>}
+                <dd className={isRem || agent.status === "ISOLATED" ? "red-text" : ""}>
+                  {isRem ? "Removed" : agent.status === "ISOLATED" ? "Isolated" : reading}
+                  {!isRem && agent.status !== "ISOLATED" && reading !== "—" && sensor.unit && <small className="vital-unit"> {sensor.unit}</small>}
                 </dd>
               </div>
             );

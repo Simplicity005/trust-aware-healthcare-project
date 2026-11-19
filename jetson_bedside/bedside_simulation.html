@@ -42,6 +42,53 @@
       -webkit-font-smoothing: antialiased;
     }
 
+    .auth-gate {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      background: rgba(6, 10, 15, .94);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .auth-gate.hidden {
+      display: none;
+    }
+
+    .auth-box {
+      width: 100%;
+      max-width: 440px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .auth-box h2 {
+      font-size: 20px;
+      font-weight: 800;
+    }
+
+    .auth-box p {
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .auth-box input {
+      width: 100%;
+      background: var(--inner);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 10px 12px;
+      color: var(--text);
+      font: 500 13.5px var(--ui);
+    }
+
     .container {
       max-width: 1200px;
       margin: 0 auto;
@@ -72,6 +119,12 @@
       font-size: 24px;
       font-weight: 800;
       letter-spacing: -.03em;
+    }
+
+    .sub-meta {
+      font-size: 13px;
+      color: var(--muted);
+      margin-top: 3px;
     }
 
     .actions {
@@ -126,6 +179,7 @@
       align-items: center;
       margin-bottom: 14px;
       gap: 10px;
+      flex-wrap: wrap;
     }
 
     .panel-head h2 {
@@ -147,6 +201,11 @@
       border: 1px solid var(--border);
       border-radius: 8px;
       padding: 10px 12px;
+    }
+
+    .live-item.removed {
+      opacity: .6;
+      border-color: #6e3a49;
     }
 
     .live-top {
@@ -174,6 +233,72 @@
     .live-val {
       font: 600 18px/1.3 var(--mono);
       margin-top: 4px;
+    }
+
+    /* Sensor Attach / Remove Grid */
+    .sensor-remove-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(215px, 1fr));
+      gap: 10px;
+    }
+
+    .sensor-slot {
+      background: var(--inner);
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      padding: 12px 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .sensor-slot.is-removed {
+      border-color: #7f424d;
+      background: rgba(65, 35, 45, .35);
+    }
+
+    .sensor-slot-info strong {
+      display: block;
+      font-size: 13.5px;
+    }
+
+    .sensor-slot-info span {
+      font-size: 11.5px;
+      font-family: var(--mono);
+      color: var(--green);
+    }
+
+    .sensor-slot.is-removed .sensor-slot-info span {
+      color: var(--red);
+    }
+
+    .btn-remove {
+      padding: 6px 10px;
+      font-size: 12px;
+      border-color: #7f424d;
+      color: var(--red);
+      background: #2b1b24;
+      white-space: nowrap;
+    }
+
+    .btn-remove:hover {
+      background: #442330;
+      border-color: var(--red);
+    }
+
+    .btn-attach {
+      padding: 6px 10px;
+      font-size: 12px;
+      border-color: #396b59;
+      color: var(--green);
+      background: #142b24;
+      white-space: nowrap;
+    }
+
+    .btn-attach:hover {
+      background: #1c3d33;
+      border-color: var(--green);
     }
 
     .sim-grid {
@@ -266,19 +391,30 @@
 </head>
 
 <body>
+  <!-- Authentication check overlay for this bedside unit -->
+  <div class="auth-gate hidden" id="authGate">
+    <div class="auth-box">
+      <h2>Bedside Simulation Locked</h2>
+      <p id="gateDesc">Please unlock or register this bedside monitor before accessing its simulation controls.</p>
+      <form id="simLoginForm" onsubmit="unlockSim(event)" style="display:grid;gap:10px;">
+        <input id="simPass" type="password" placeholder="Enter bedside password" required />
+        <div id="gateErr" style="color:var(--red);font-size:12px;font-weight:600;"></div>
+        <button type="submit" class="b-ok">Unlock Simulation Page</button>
+      </form>
+      <a class="btn-link" href="/" style="text-align:center;">Go to Bedside Registration / Login Screen &rarr;</a>
+    </div>
+  </div>
+
   <div class="container">
     <header>
       <div class="title-group">
-        <p>Bedside Scenario &amp; Fault Controller</p>
-        <h1>Bedside Simulation &middot; <span id="bedTitle">Bed 1</span></h1>
+        <p>Dedicated Bedside Simulator &middot; Local Unit Only</p>
+        <h1><span id="deptTitle">ICU</span> &middot; <span id="bedTitle">Bed 1</span> &middot; <span id="roomTitle">Room 101</span></h1>
+        <div class="sub-meta" id="patientMeta">Eleanor Vance (F, 64) &mdash; Wi-Fi: Hospital-CriticalCare-5G</div>
       </div>
       <div class="actions">
         <span class="feedback" id="fb">&#10003; Applied</span>
-        <label style="font-size:13px;color:var(--muted);font-weight:600;">
-          Target Bed
-          <select id="bedSelect" onchange="switchBed(this.value)" style="margin-left:6px;"></select>
-        </label>
-        <a class="btn-link" id="monitorLink" href="/" target="_blank" rel="noopener">Open Bedside Monitor &nearr;</a>
+        <a class="btn-link" href="/">Back to Bedside Monitor &nearr;</a>
       </div>
     </header>
 
@@ -292,6 +428,14 @@
 
     <section class="panel">
       <div class="panel-head">
+        <h2>Bedside Sensors &mdash; Connect or Remove Sensors</h2>
+        <span style="font-size:12px;color:var(--muted);">Unplugging a sensor removes its live feed from this bedside monitor.</span>
+      </div>
+      <div class="sensor-remove-grid" id="sensorRemoveGrid"></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
         <h2>Clinical Scenario Presets</h2>
       </div>
       <div class="btns">
@@ -301,7 +445,7 @@
         <button class="b-warn" onclick="preset('hypercapnia')">Hypercapnia (High CO₂)</button>
         <button class="b-bad" onclick="preset('hypotension')">Hypotensive Shock</button>
         <button class="b-warn" onclick="preset('hypertension')">Hypertensive Crisis</button>
-        <button onclick="resetAll()">Reset Defaults</button>
+        <button onclick="resetAll()">Reset All &amp; Reconnect Sensors</button>
       </div>
     </section>
 
@@ -379,8 +523,9 @@
   <script>
     const $ = id => document.getElementById(id);
     const nice = id => (id || 'Bed_1').replace(/_/g, ' ');
-    let bed = new URLSearchParams(window.location.search).get('bed') || null;
-    let loadedBedConfig = null;
+    let bed = null;
+    let configInitialized = false;
+    let removedState = {};
 
     const sensorDefs = [
       { id: 'Agent_ECG', label: 'ECG Lead II', key: 'ecg' },
@@ -388,8 +533,8 @@
       { id: 'Agent_SpO2', label: 'SpO₂', key: 'spo2', unit: '%' },
       { id: 'Agent_EtCO2', label: 'EtCO₂', key: 'co2', unit: 'mmHg' },
       { id: 'Agent_Respiration', label: 'Respiration', key: 'resp', unit: 'br/min' },
-      { id: 'Agent_IBP', label: 'IBP', key: 'ibp', unit: 'mmHg' },
-      { id: 'Agent_NIBP', label: 'NIBP', key: 'nibp', unit: 'mmHg' },
+      { id: 'Agent_IBP', label: 'Invasive BP (IBP)', key: 'ibp', unit: 'mmHg' },
+      { id: 'Agent_NIBP', label: 'Cuff BP (NIBP)', key: 'nibp', unit: 'mmHg' },
       { id: 'Agent_Temperature', label: 'Temperature', key: 'temp', unit: '°C' }
     ];
 
@@ -399,6 +544,29 @@
         <span>Spoof ${s.label}</span>
       </label>
     `).join('');
+
+    function renderSensorRemoveGrid() {
+      $('sensorRemoveGrid').innerHTML = sensorDefs.map(s => {
+        const isRem = Boolean(removedState[s.id]);
+        return `
+          <div class="sensor-slot ${isRem ? 'is-removed' : ''}">
+            <div class="sensor-slot-info">
+              <strong>${s.label}</strong>
+              <span>${isRem ? 'Removed / Unplugged' : 'Connected'}</span>
+            </div>
+            <button type="button" class="${isRem ? 'btn-attach' : 'btn-remove'}" onclick="toggleSensorRemoved('${s.id}')">
+              ${isRem ? '+ Reconnect' : 'Remove sensor'}
+            </button>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function toggleSensorRemoved(agentId) {
+      removedState[agentId] = !removedState[agentId];
+      renderSensorRemoveGrid();
+      send();
+    }
 
     function updateLabels() {
       $('hrLbl').textContent = $('tHr').value + ' bpm';
@@ -427,66 +595,99 @@
       for (const s of sensorDefs) {
         const box = $(`fault_${s.id}`);
         if (box) box.checked = Boolean(chaos[s.id]?.malicious);
+        removedState[s.id] = Boolean(chaos[s.id]?.removed);
       }
+      renderSensorRemoveGrid();
       updateLabels();
     }
 
-    function switchBed(id) {
-      bed = id;
-      loadedBedConfig = null;
-      $('bedTitle').textContent = nice(id);
-      $('monitorLink').href = `/?bed=${encodeURIComponent(id)}`;
-      poll();
+    function applyProfile(profile) {
+      if (!profile) return;
+      bed = profile.patient_id || 'Bed_1';
+      $('deptTitle').textContent = profile.department || 'ICU';
+      $('bedTitle').textContent = profile.bed_label || nice(bed);
+      $('roomTitle').textContent = profile.room || 'Room 101';
+      $('patientMeta').textContent = `${profile.patient_name || ''} · ${profile.diagnosis || ''} · Wi-Fi: ${profile.wifi_ssid || 'Hospital-CriticalCare-5G'}`;
+      document.title = `${profile.department || 'ICU'} · ${profile.bed_label || nice(bed)} Simulation`;
+    }
+
+    async function unlockSim(e) {
+      e.preventDefault();
+      $('gateErr').textContent = '';
+      try {
+        const r = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: $('simPass').value })
+        });
+        const res = await r.json();
+        if (!r.ok || !res.ok) {
+          $('gateErr').textContent = res.error || 'Incorrect password.';
+          return;
+        }
+        $('simPass').value = '';
+        $('authGate').classList.add('hidden');
+        poll();
+      } catch (err) {
+        $('gateErr').textContent = 'Connection error.';
+      }
     }
 
     async function poll() {
       try {
         const r = await fetch('/api/state');
-        if (!r.ok) return;
-        const d = await r.json();
-        const beds = Object.keys(d.beds || {});
-        if (!beds.length) return;
-        const sel = $('bedSelect');
-        if (Array.from(sel.options).map(o => o.value).join() !== beds.join()) {
-          sel.options.length = 0;
-          for (const id of beds) sel.add(new Option(nice(id), id));
+        if (r.status === 401) {
+          const errData = await r.json().catch(() => ({}));
+          if (errData.auth?.profile) applyProfile(errData.auth.profile);
+          $('simLoginForm').style.display = errData.auth?.registered ? 'grid' : 'none';
+          $('gateDesc').textContent = errData.auth?.registered
+            ? 'Enter the password for this bedside unit to unlock its simulation controls.'
+            : 'This bedside unit has not been registered yet. Register its Wi-Fi, Ward, Bed, and Password on the Bedside Monitor first.';
+          $('authGate').classList.remove('hidden');
+          return;
         }
-        if (!bed || !d.beds[bed]) bed = beds[0];
-        if (sel.value !== bed) sel.value = bed;
-        $('bedTitle').textContent = nice(bed);
-        $('monitorLink').href = `/?bed=${encodeURIComponent(bed)}`;
-
-        const b = d.beds[bed];
+        if (!r.ok) return;
+        $('authGate').classList.add('hidden');
+        const d = await r.json();
+        if (d.profile) applyProfile(d.profile);
+        bed = d.patient_id || Object.keys(d.beds || {})[0] || 'Bed_1';
+        const b = d.bed || d.beds?.[bed];
         if (!b) return;
-        if (loadedBedConfig !== bed && b.chaos) {
-          loadedBedConfig = bed;
+
+        if (!configInitialized && b.chaos) {
+          configInitialized = true;
           applyConfigToInputs(b.chaos);
         }
 
         const sensors = b.sensors || {};
         const items = [
-          { label: 'ECG', agent: 'Agent_ECG', val: b.arrhythmia ? 'Arrhythmia' : 'Sinus' },
-          { label: 'HR', agent: 'Agent_HR', val: b.hr != null ? `${b.hr} bpm` : '--' },
-          { label: 'SpO₂', agent: 'Agent_SpO2', val: b.spo2 != null ? `${b.spo2}%` : '--' },
-          { label: 'EtCO₂', agent: 'Agent_EtCO2', val: (sensors.Agent_EtCO2?.value ?? b.co2) != null ? `${sensors.Agent_EtCO2?.value ?? b.co2} mmHg` : '--' },
-          { label: 'Resp', agent: 'Agent_Respiration', val: sensors.Agent_Respiration?.value != null ? `${sensors.Agent_Respiration.value} br/m` : '--' },
-          { label: 'IBP', agent: 'Agent_IBP', val: b.ibp?.sys != null ? `${b.ibp.sys}/${b.ibp.dia}` : '--' },
-          { label: 'NIBP', agent: 'Agent_NIBP', val: b.nibp?.sys != null ? `${b.nibp.sys}/${b.nibp.dia}` : '--' },
-          { label: 'Temp', agent: 'Agent_Temperature', val: Number.isFinite(b.temperature_c) ? `${b.temperature_c.toFixed(1)} °C` : '--' }
+          { label: 'ECG', agent: 'Agent_ECG', val: sensors.Agent_ECG?.removed ? 'Removed' : (b.arrhythmia ? 'Arrhythmia' : 'Sinus') },
+          { label: 'HR', agent: 'Agent_HR', val: sensors.Agent_HR?.removed ? 'Removed' : (b.hr != null ? `${b.hr} bpm` : '--') },
+          { label: 'SpO₂', agent: 'Agent_SpO2', val: sensors.Agent_SpO2?.removed ? 'Removed' : (b.spo2 != null ? `${b.spo2}%` : '--') },
+          { label: 'EtCO₂', agent: 'Agent_EtCO2', val: sensors.Agent_EtCO2?.removed ? 'Removed' : ((sensors.Agent_EtCO2?.value ?? b.co2) != null ? `${sensors.Agent_EtCO2?.value ?? b.co2} mmHg` : '--') },
+          { label: 'Resp', agent: 'Agent_Respiration', val: sensors.Agent_Respiration?.removed ? 'Removed' : (sensors.Agent_Respiration?.value != null ? `${sensors.Agent_Respiration.value} br/m` : '--') },
+          { label: 'IBP', agent: 'Agent_IBP', val: sensors.Agent_IBP?.removed ? 'Removed' : (b.ibp?.sys != null ? `${b.ibp.sys}/${b.ibp.dia}` : '--') },
+          { label: 'NIBP', agent: 'Agent_NIBP', val: sensors.Agent_NIBP?.removed ? 'Removed' : (b.nibp?.sys != null ? `${b.nibp.sys}/${b.nibp.dia}` : '--') },
+          { label: 'Temp', agent: 'Agent_Temperature', val: sensors.Agent_Temperature?.removed ? 'Removed' : (Number.isFinite(b.temperature_c) ? `${b.temperature_c.toFixed(1)} °C` : '--') }
         ];
 
-        $('rhythmStatus').textContent = b.arrhythmia ? 'Ventricular Arrhythmia Alert' : 'Normal Sinus Rhythm';
-        $('rhythmStatus').style.color = b.arrhythmia ? 'var(--red)' : 'var(--green)';
+        $('rhythmStatus').textContent = sensors.Agent_ECG?.removed
+          ? 'ECG Sensor Removed'
+          : b.arrhythmia
+            ? 'Ventricular Arrhythmia Alert'
+            : 'Normal Sinus Rhythm';
+        $('rhythmStatus').style.color = (sensors.Agent_ECG?.removed || b.arrhythmia) ? 'var(--red)' : 'var(--green)';
 
         $('liveStrip').innerHTML = items.map(item => {
           const s = sensors[item.agent] || {};
+          const isRem = Boolean(s.removed || s.connection_status === 'REMOVED');
           const score = Number(s.trust_score ?? 100);
-          const cls = score < 45 ? 'bad' : score < 70 ? 'warn' : '';
+          const cls = isRem || score < 45 ? 'bad' : score < 70 ? 'warn' : '';
           return `
-            <div class="live-item">
+            <div class="live-item ${isRem ? 'removed' : ''}">
               <div class="live-top">
                 <span>${item.label}</span>
-                <span class="live-trust ${cls}">${score.toFixed(0)}%</span>
+                <span class="live-trust ${cls}">${isRem ? 'Removed' : `${score.toFixed(0)}%`}</span>
               </div>
               <div class="live-val">${item.val}</div>
             </div>
@@ -509,8 +710,10 @@
       const overload = $('tOverload').checked;
 
       const sensorFaults = {};
+      const removedSensors = {};
       for (const s of sensorDefs) {
         sensorFaults[s.id] = Boolean($(`fault_${s.id}`)?.checked);
+        removedSensors[s.id] = Boolean(removedState[s.id]);
       }
       if (ec === 'malicious') {
         sensorFaults.Agent_ECG = true;
@@ -521,7 +724,6 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            patient_id: bed || 'Bed_1',
             target_hr: hr,
             target_spo2: sp,
             target_co2: co2,
@@ -532,6 +734,7 @@
             delay_ms: delay,
             drop_rate: drop,
             sensor_faults: sensorFaults,
+            removed_sensors: removedSensors,
             overload_gpu: overload,
             use_relay_b: overload
           })
@@ -564,7 +767,11 @@
         $('tDrop').value = 0;
         $('tDelay').value = 10;
         $('tOverload').checked = false;
-        for (const s of sensorDefs) $(`fault_${s.id}`).checked = false;
+        for (const s of sensorDefs) {
+          $(`fault_${s.id}`).checked = false;
+          removedState[s.id] = false;
+        }
+        renderSensorRemoveGrid();
       }
       send();
     }
@@ -574,7 +781,7 @@
         const r = await fetch('/api/manipulate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ patient_id: bed || 'Bed_1', reset: true })
+          body: JSON.stringify({ reset: true })
         });
         if (r.ok) {
           const data = await r.json();
@@ -585,6 +792,7 @@
       } catch (e) {}
     }
 
+    renderSensorRemoveGrid();
     setInterval(poll, 400);
     poll();
   </script>

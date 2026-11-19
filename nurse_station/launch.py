@@ -176,7 +176,8 @@ def start_bedside(children, args):
     start(children, "Bedside monitor", [
         sys.executable, "jetson_edge_brain.py", *common, "--broker", args.broker, "--web-port", str(args.bedside_port),
     ], cwd=BEDSIDE)
-    print(f"Bedside monitor at http://localhost:{args.bedside_port}", flush=True)
+    for idx, pid in enumerate(patients):
+        print(f"Bedside monitor ({pid}) at http://localhost:{args.bedside_port + idx}", flush=True)
 
 
 def interrupt(_signal, _frame):

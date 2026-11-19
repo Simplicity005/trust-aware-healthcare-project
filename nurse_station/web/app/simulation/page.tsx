@@ -19,6 +19,7 @@ type SimState = {
   drop_rate: number;
   overload_gpu: boolean;
   faults: Record<string, boolean>;
+  removed: Record<string, boolean>;
 };
 
 const DEFAULT_SIM: SimState = {
@@ -33,6 +34,14 @@ const DEFAULT_SIM: SimState = {
   drop_rate: 0,
   overload_gpu: false,
   faults: {
+    Agent_ECG: false,
+    Agent_HR: false,
+    Agent_SpO2: false,
+    Agent_CO2: false,
+    Agent_IBP: false,
+    Agent_NIBP: false,
+  },
+  removed: {
     Agent_ECG: false,
     Agent_HR: false,
     Agent_SpO2: false,
@@ -63,6 +72,14 @@ function simFromChaos(chaos?: BedChaos): SimState {
       Agent_CO2: Boolean(chaos.Agent_CO2?.malicious ?? chaos.Agent_EtCO2?.malicious),
       Agent_IBP: Boolean(chaos.Agent_IBP?.malicious),
       Agent_NIBP: Boolean(chaos.Agent_NIBP?.malicious),
+    },
+    removed: {
+      Agent_ECG: Boolean(chaos.Agent_ECG?.removed),
+      Agent_HR: Boolean(chaos.Agent_HR?.removed),
+      Agent_SpO2: Boolean(chaos.Agent_SpO2?.removed),
+      Agent_CO2: Boolean(chaos.Agent_CO2?.removed ?? chaos.Agent_EtCO2?.removed),
+      Agent_IBP: Boolean(chaos.Agent_IBP?.removed),
+      Agent_NIBP: Boolean(chaos.Agent_NIBP?.removed),
     },
   };
 }
@@ -120,6 +137,7 @@ function SimulationContent() {
           ...next.faults,
           Agent_ECG: next.faults.Agent_ECG || next.ecg_condition === "malicious",
         },
+        removed_sensors: next.removed,
       });
       flashNotice("Updated simulation");
     } catch (failure) {
@@ -156,6 +174,7 @@ function SimulationContent() {
         drop_rate: 0,
         overload_gpu: false,
         faults: { ...DEFAULT_SIM.faults },
+        removed: { ...DEFAULT_SIM.removed },
       },
       arrhythmia: {
         target_hr: 142,
@@ -327,8 +346,9 @@ function SimulationContent() {
               <dl className="vital-grid sim-live-grid">
                 {sensors.map((sensor) => {
                   const agent = activeBed.agents[sensor.id];
+                  const isRem = Boolean(agent.removed);
                   const pct = Math.round(agent.trust * 100);
-                  const tone = agent.status === "ISOLATED" ? "red" : agent.status === "SUSPICIOUS" ? "amber" : "green";
+                  const tone = isRem || agent.status === "ISOLATED" ? "red" : agent.status === "SUSPICIOUS" ? "amber" : "green";
                   const reading = sensor.id === "Agent_ECG"
                     ? (activeBed.edge.local_bed_alarm ? "Arrhythmia" : "Normal sinus")
                     : formatReading(agent.value);
@@ -336,10 +356,10 @@ function SimulationContent() {
                     <div key={sensor.id}>
                       <dt>
                         <span>{sensor.short}</span>
-                        <small className={`vital-trust ${tone}`}>{pct}%</small>
+                        <small className={`vital-trust ${tone}`}>{isRem ? "0%" : `${pct}%`}</small>
                       </dt>
-                      <dd className={agent.status === "ISOLATED" ? "red-text" : ""}>
-                        {agent.status === "ISOLATED" ? "Isolated" : reading}
+                      <dd className={isRem || agent.status === "ISOLATED" ? "red-text" : ""}>
+                        {isRem ? "Removed" : agent.status === "ISOLATED" ? "Isolated" : reading}
                       </dd>
                     </div>
                   );
@@ -437,6 +457,22 @@ function SimulationContent() {
                       <span>Overload Jetson GPU / Reroute via Relay B</span>
                     </label>
                   </div>
+                </div>
+                <div className="sim-subhead">Remove / Disconnect Sensors (Unplugs Sensor Feed)</div>
+                <div className="sim-fault-grid">
+                  {sensors.map((sensor) => (
+                    <label key={`rem-${sensor.id}`} className="sim-checkbox sim-fault-card">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(sim.removed[sensor.id])}
+                        onChange={(e) => {
+                          const nextRemoved = { ...sim.removed, [sensor.id]: e.target.checked };
+                          void applySimulation({ ...sim, removed: nextRemoved });
+                        }}
+                      />
+                      <span>Remove {sensor.short} ({sensor.label})</span>
+                    </label>
+                  ))}
                 </div>
                 <div className="sim-subhead">Per-Sensor Spoofing / Fault Injection (Tests Trust Score Degradation &amp; Isolation)</div>
                 <div className="sim-fault-grid">

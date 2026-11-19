@@ -14,6 +14,7 @@ type Reading = number | string | Pressure | null;
 type Sensor = {
   trust: number;
   status: "TRUSTED" | "SUSPICIOUS" | "ISOLATED";
+  removed?: boolean;
   value: Reading;
   s_l: number;
   s_j: number;
@@ -29,6 +30,7 @@ export type AgentChaos = {
   delay_ms?: number;
   drop_rate?: number;
   malicious?: boolean;
+  removed?: boolean;
   condition?: string;
   target_hr?: number;
   target_spo2?: number;

@@ -61,6 +61,7 @@ class ManipulateAction(BedAction):
     drop_rate: float | None = None
     malicious: bool | None = None
     sensor_faults: dict[str, bool] | None = None
+    removed_sensors: dict[str, bool] | None = None
     overload_gpu: bool | None = None
     use_relay_b: bool | None = None
     reset: bool = False
@@ -225,6 +226,14 @@ def apply_bed_manipulation(body: ManipulateAction, engine):
                         bed.setdefault("Agent_EtCO2", {})["malicious"] = bool(is_mal)
                     elif aid == "Agent_EtCO2":
                         bed.setdefault("Agent_CO2", {})["malicious"] = bool(is_mal)
+        if body.removed_sensors:
+            for aid, is_rem in body.removed_sensors.items():
+                if aid in ALL_SENSOR_AGENTS:
+                    bed.setdefault(aid, {})["removed"] = bool(is_rem)
+                    if aid == "Agent_CO2":
+                        bed.setdefault("Agent_EtCO2", {})["removed"] = bool(is_rem)
+                    elif aid == "Agent_EtCO2":
+                        bed.setdefault("Agent_CO2", {})["removed"] = bool(is_rem)
         if body.overload_gpu is not None or body.use_relay_b is not None:
             ov = bool(body.overload_gpu if body.overload_gpu is not None else body.use_relay_b)
             bed.setdefault("Orin_Link", {})["overload_gpu"] = ov

@@ -505,6 +505,24 @@ class MultiPatientTrustEngine:
                         "latest_vitals": payload.get("latest_vitals", {}),
                         "ip": payload.get("broker", "127.0.0.1"),
                     }
+                    if payload.get("department"):
+                        self.bed_departments[patient_id] = str(payload["department"])
+                    if payload.get("room"):
+                        self.bed_rooms[patient_id] = str(payload["room"])
+                    if payload.get("patient_name") or payload.get("diagnosis"):
+                        self.set_patient_info(
+                            patient_id,
+                            name=payload.get("patient_name"),
+                            diagnosis=payload.get("diagnosis"),
+                        )
+                    if payload.get("auto_admit"):
+                        self.admit_jetson(
+                            patient_id,
+                            department=payload.get("department"),
+                            room_name=payload.get("room"),
+                            patient_name=payload.get("patient_name"),
+                            diagnosis=payload.get("diagnosis"),
+                        )
                 return
 
             # 3. Patient Bed Telemetry
@@ -909,19 +927,25 @@ class MultiPatientTrustEngine:
                 if pid not in self.added_bed_ids:
                     continue
                 bed = self.beds[pid]
+                bed_chaos = chaos_data.get(pid, {})
                 agents_snap = {}
                 for aid, ag in bed.agents.items():
+                    is_rem = bool(bed_chaos.get(aid, {}).get("removed", False))
+                    if aid == "Agent_CO2" and not is_rem:
+                        is_rem = bool(bed_chaos.get("Agent_EtCO2", {}).get("removed", False))
                     agents_snap[aid] = {
-                        "trust": ag.trust_score,
-                        "s_l": round(ag.s_l, 2),
-                        "s_j": round(ag.s_j, 2),
-                        "s_p": round(ag.s_p, 2),
-                        "s_d": round(ag.s_d, 2),
-                        "value": ag.last_value,
-                        "status": ag.status,
+                        "trust": 0.0 if is_rem else ag.trust_score,
+                        "s_l": 0.0 if is_rem else round(ag.s_l, 2),
+                        "s_j": 0.0 if is_rem else round(ag.s_j, 2),
+                        "s_p": 0.0 if is_rem else round(ag.s_p, 2),
+                        "s_d": 0.0 if is_rem else round(ag.s_d, 2),
+                        "value": None if is_rem else ag.last_value,
+                        "status": "ISOLATED" if is_rem else ag.status,
+                        "removed": is_rem,
                         "packets_received": ag.packets_received,
                         "packets_missed": ag.packets_missed,
                     }
+                ecg_removed = agents_snap["Agent_ECG"]["removed"]
                 pinfo = self.get_patient_info(pid)
                 beds_snap[pid] = {
                     "patient_id": pid,
@@ -935,10 +959,10 @@ class MultiPatientTrustEngine:
                     "seconds_since_seen": round(now - bed.last_seen_ts, 1),
                     "agents": agents_snap,
                     "edge": dict(bed.edge_summary),
-                    "ecg_wave": list(bed.latest_ecg_wave),
+                    "ecg_wave": [] if ecg_removed else list(bed.latest_ecg_wave),
                     "ecg_end_ts": bed.latest_ecg_end_ts,
                     "ecg_rate": bed.latest_ecg_rate,
-                    "chaos": chaos_data.get(pid, {}),
+                    "chaos": bed_chaos,
                     "gateway_cpu_inf_ms": bed.gateway_cpu_inf_ms,
                     "compute_mode": "Gateway CPU (Offloaded)" if bed.offload_active else "Jetson Local",
                     "alert_route": bed.active_routing,

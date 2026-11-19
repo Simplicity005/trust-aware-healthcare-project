@@ -4,7 +4,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ICU Bedside Monitor</title>
+  <title>Bedside Monitor</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link
@@ -15,7 +15,7 @@
       --bg: #020403;
       --card: #111720;
       --inner: #0c1117;
-      --border: rgba(255, 255, 255, .07);
+      --border: rgba(255, 255, 255, .08);
       --text: #e4e9e5;
       --muted: #8a96a6;
       --dim: #5d6877;
@@ -42,6 +42,185 @@
       -webkit-font-smoothing: antialiased;
     }
 
+    /* Authentication & Registration Gate */
+    .auth-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      background: radial-gradient(circle at 50% 20%, #101c28, #060a0e 75%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      font-family: var(--ui);
+    }
+
+    .auth-overlay.hidden {
+      display: none;
+    }
+
+    .auth-card {
+      width: 100%;
+      max-width: 540px;
+      background: #111923;
+      border: 1px solid #28384a;
+      border-radius: 14px;
+      padding: 26px 28px;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, .65);
+    }
+
+    .auth-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 99px;
+      background: rgba(52, 211, 153, .12);
+      border: 1px solid rgba(52, 211, 153, .3);
+      color: var(--green);
+      font: 700 11px var(--mono);
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      margin-bottom: 10px;
+    }
+
+    .auth-card h2 {
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: -.02em;
+      color: #fff;
+    }
+
+    .auth-sub {
+      font-size: 13px;
+      color: var(--muted);
+      margin-top: 4px;
+      line-height: 1.45;
+    }
+
+    .auth-tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      background: #0b1118;
+      padding: 4px;
+      border-radius: 9px;
+      border: 1px solid #223040;
+      margin: 18px 0;
+    }
+
+    .auth-tab {
+      background: transparent;
+      border: 0;
+      color: var(--muted);
+      padding: 8px 12px;
+      border-radius: 6px;
+      font: 700 12.5px var(--ui);
+      cursor: pointer;
+      transition: .15s;
+    }
+
+    .auth-tab.active {
+      background: #1c2a3a;
+      color: #fff;
+    }
+
+    .auth-form {
+      display: grid;
+      gap: 12px;
+    }
+
+    .auth-form.hidden {
+      display: none;
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .field {
+      display: grid;
+      gap: 5px;
+    }
+
+    .field label {
+      font-size: 11.5px;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+
+    .field input,
+    .field select {
+      width: 100%;
+      background: #0c1219;
+      border: 1px solid #2b3c4e;
+      border-radius: 7px;
+      padding: 9px 11px;
+      color: #fff;
+      font: 500 13.5px var(--ui);
+      outline: none;
+    }
+
+    .field input:focus,
+    .field select:focus {
+      border-color: var(--green);
+    }
+
+    .unit-summary {
+      background: #0c1219;
+      border: 1px solid #243342;
+      border-radius: 9px;
+      padding: 12px 14px;
+      display: grid;
+      gap: 4px;
+    }
+
+    .unit-summary strong {
+      font-size: 15px;
+      color: #fff;
+    }
+
+    .unit-summary span {
+      font-size: 12.5px;
+      color: var(--muted);
+    }
+
+    .auth-error {
+      background: rgba(248, 113, 113, .12);
+      border: 1px solid rgba(248, 113, 113, .35);
+      color: var(--red);
+      padding: 9px 12px;
+      border-radius: 7px;
+      font-size: 12.5px;
+      font-weight: 600;
+      display: none;
+    }
+
+    .auth-error.show {
+      display: block;
+    }
+
+    .auth-submit {
+      background: var(--green);
+      color: #082019;
+      border: 0;
+      border-radius: 8px;
+      padding: 11px 16px;
+      font: 800 13.5px var(--ui);
+      cursor: pointer;
+      margin-top: 4px;
+      transition: .15s;
+    }
+
+    .auth-submit:hover {
+      background: #6ee7b7;
+    }
+
+    /* Monitor Layout */
     .wrap {
       max-width: none;
       height: 100vh;
@@ -61,11 +240,20 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
+      gap: 10px;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
     }
 
     h1 {
       font: 700 15px/1 ui-monospace, Menlo, monospace;
       color: #e8e4a0;
+      white-space: nowrap;
     }
 
     h1 span {
@@ -74,24 +262,36 @@
       font-weight: 500;
     }
 
+    .patient-chip {
+      font: 600 11.5px ui-monospace, Menlo, monospace;
+      color: #cbd5cf;
+      padding: 3px 8px;
+      background: #1b221e;
+      border: 1px solid #354039;
+      border-radius: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .wifi-chip {
+      font: 600 10px ui-monospace, Menlo, monospace;
+      color: #63e494;
+      padding: 3px 7px;
+      background: rgba(52, 211, 153, .1);
+      border: 1px solid rgba(52, 211, 153, .28);
+      border-radius: 2px;
+      white-space: nowrap;
+    }
+
     .right {
       display: flex;
       gap: 8px;
       align-items: center;
     }
 
-    select {
-      border-radius: 2px;
-      padding: 4px 8px;
-      background: #1b221e;
-      color: #e6e9e5;
-      border: 1px solid var(--border);
-      font: 600 12px var(--ui);
-      outline: none;
-      cursor: pointer;
-    }
-
-    .sim-link {
+    .sim-link,
+    .lock-btn {
       border-radius: 2px;
       padding: 5px 9px;
       background: #1b221e;
@@ -101,10 +301,12 @@
       text-decoration: none;
       text-transform: uppercase;
       letter-spacing: .04em;
+      cursor: pointer;
       transition: .15s;
     }
 
-    .sim-link:hover {
+    .sim-link:hover,
+    .lock-btn:hover {
       background: #25302a;
       border-color: #63e494;
       color: #fff;
@@ -387,6 +589,11 @@
         font-size: 12px;
       }
 
+      .patient-chip,
+      .wifi-chip {
+        display: none;
+      }
+
       .grid {
         display: grid;
         grid-template-columns: 1fr;
@@ -412,12 +619,111 @@
 </head>
 
 <body>
+  <!-- Bedside Security & Provisioning Gate -->
+  <div class="auth-overlay" id="authOverlay">
+    <div class="auth-card">
+      <div class="auth-badge">Isolated Bedside Node &middot; Loopback Protected</div>
+      <h2 id="authHeading">Provision &amp; Unlock Bedside Monitor</h2>
+      <p class="auth-sub">This monitor is isolated to a single hospital bed and cannot view or control other beds on the network.</p>
+
+      <div class="auth-tabs">
+        <button type="button" class="auth-tab active" id="tabRegisterBtn" onclick="switchAuthTab('register')">Register / Setup Bed</button>
+        <button type="button" class="auth-tab" id="tabLoginBtn" onclick="switchAuthTab('login')">Bedside Login</button>
+      </div>
+
+      <div class="auth-error" id="authError"></div>
+
+      <!-- Registration Form -->
+      <form class="auth-form" id="registerForm" onsubmit="submitRegister(event)">
+        <div class="form-grid">
+          <div class="field">
+            <label for="regWifi">Hospital Wi-Fi Network (SSID)</label>
+            <input id="regWifi" name="wifi_ssid" value="Hospital-CriticalCare-5G" required />
+          </div>
+          <div class="field">
+            <label for="regWifiPass">Wi-Fi Security Key</label>
+            <input id="regWifiPass" type="password" value="icu-wpa2-enterprise" required />
+          </div>
+        </div>
+
+        <div class="form-grid">
+          <div class="field">
+            <label for="regDept">Ward / Department</label>
+            <select id="regDept" name="department" required>
+              <option value="ICU">ICU &mdash; Intensive Care Unit</option>
+              <option value="CCU">CCU &mdash; Coronary Care Unit</option>
+              <option value="NCU">NCU &mdash; Neurological Care Unit</option>
+              <option value="NICU">NICU &mdash; Neonatal ICU</option>
+              <option value="PICU">PICU &mdash; Pediatric ICU</option>
+              <option value="SICU">SICU &mdash; Surgical ICU</option>
+              <option value="Trauma / ER">Trauma / ER</option>
+              <option value="General Ward">General Ward</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="regBed">Bed Identifier</label>
+            <input id="regBed" name="patient_id" value="Bed_1" placeholder="e.g. Bed_1" required />
+          </div>
+        </div>
+
+        <div class="form-grid">
+          <div class="field">
+            <label for="regRoom">Room Location</label>
+            <input id="regRoom" name="room" value="Room 101" placeholder="e.g. Room 101" required />
+          </div>
+          <div class="field">
+            <label for="regBroker">Nurse Station Broker IP</label>
+            <input id="regBroker" name="broker" value="127.0.0.1" required />
+          </div>
+        </div>
+
+        <div class="form-grid">
+          <div class="field">
+            <label for="regPatient">Patient Name</label>
+            <input id="regPatient" name="patient_name" value="Eleanor Vance (F, 64)" required />
+          </div>
+          <div class="field">
+            <label for="regDiag">Clinical Diagnosis</label>
+            <input id="regDiag" name="diagnosis" value="Acute Myocardial Infarction / Post-CABG" required />
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="regPassword">Set Bedside Access Password</label>
+          <input id="regPassword" type="password" placeholder="Set password for this bedside monitor" required minlength="3" />
+        </div>
+
+        <button type="submit" class="auth-submit">Connect Wi-Fi, Register Bed &amp; Start Monitor</button>
+      </form>
+
+      <!-- Login Form -->
+      <form class="auth-form hidden" id="loginForm" onsubmit="submitLogin(event)">
+        <div class="unit-summary">
+          <strong id="loginUnitTitle">ICU &middot; Bed 1 &middot; Room 101</strong>
+          <span id="loginUnitPatient">Eleanor Vance (F, 64)</span>
+          <span id="loginUnitWifi">Wi-Fi: Hospital-CriticalCare-5G (Connected)</span>
+        </div>
+
+        <div class="field">
+          <label for="loginPassword">Bedside Access Password</label>
+          <input id="loginPassword" type="password" placeholder="Enter bedside password to unlock" required />
+        </div>
+
+        <button type="submit" class="auth-submit">Unlock Bedside Monitor</button>
+      </form>
+    </div>
+  </div>
+
   <div class="wrap">
     <header>
-      <h1>ICU<span>&middot;</span><b id="bedTitle" style="font-weight:800">Bed 1</b></h1>
+      <div class="header-left">
+        <h1><span id="deptTitle" style="color:#e8e4a0;margin:0;font-weight:700">ICU</span><span>&middot;</span><b id="bedTitle" style="font-weight:800">Bed 1</b><span>&middot;</span><span id="roomTitle" style="color:#cbd5cf;margin:0">Room 101</span></h1>
+        <span class="patient-chip" id="patientTitle">Eleanor Vance (F, 64)</span>
+        <span class="wifi-chip" id="wifiTitle">Wi-Fi: Hospital-CriticalCare-5G</span>
+      </div>
       <div class="right">
-        <select id="bedSelect" style="display:none" onchange="switchBed(this.value)"></select>
         <a class="sim-link" id="simLink" href="/bedside_simulation.html" target="_blank" rel="noopener">Open simulation tab</a>
+        <button type="button" class="lock-btn" onclick="lockMonitor()">Lock monitor</button>
         <div class="status s-ok" id="overall">Stable</div>
       </div>
     </header>
@@ -558,11 +864,12 @@
   </div>
 
   <script>
-    let bed = new URLSearchParams(window.location.search).get('bed') || null;
+    let bed = null;
+    let authenticated = false;
     let alarm = false, fetching = false;
     let serverOffset, sweepOrigin;
     const $ = id => document.getElementById(id);
-    const nice = id => id.replace(/_/g, ' ');
+    const nice = id => (id || 'Bed_1').replace(/_/g, ' ');
     const playbackDelay = 0.8;
     const traceBuffers = new Map();
     const traceDefs = [
@@ -580,19 +887,131 @@
       return { ...trace, canvas, ctx: canvas.getContext('2d'), status };
     });
 
-    function updateSimLink() {
-      const link = $('simLink');
-      if (link && bed) {
-        link.href = `/bedside_simulation.html?bed=${encodeURIComponent(bed)}`;
+    function showAuthError(msg) {
+      const el = $('authError');
+      if (!msg) {
+        el.classList.remove('show');
+        el.textContent = '';
+      } else {
+        el.textContent = msg;
+        el.classList.add('show');
       }
     }
 
-    function switchBed(id) {
-      bed = id;
-      alarm = false;
-      $('bedTitle').textContent = nice(id);
-      updateSimLink();
-      poll();
+    function switchAuthTab(tab) {
+      showAuthError('');
+      const isReg = tab === 'register';
+      $('tabRegisterBtn').classList.toggle('active', isReg);
+      $('tabLoginBtn').classList.toggle('active', !isReg);
+      $('registerForm').classList.toggle('hidden', !isReg);
+      $('loginForm').classList.toggle('hidden', isReg);
+    }
+
+    function applyProfileToUI(profile) {
+      if (!profile) return;
+      bed = profile.patient_id || 'Bed_1';
+      $('deptTitle').textContent = profile.department || 'ICU';
+      $('bedTitle').textContent = profile.bed_label || nice(bed);
+      $('roomTitle').textContent = profile.room || 'Room 101';
+      $('patientTitle').textContent = profile.patient_name || `Patient ${nice(bed)}`;
+      $('wifiTitle').textContent = `Wi-Fi: ${profile.wifi_ssid || 'Hospital-CriticalCare-5G'}`;
+      document.title = `${profile.department || 'ICU'} · ${profile.bed_label || nice(bed)} Bedside Monitor`;
+
+      // Pre-fill auth forms
+      $('regWifi').value = profile.wifi_ssid || 'Hospital-CriticalCare-5G';
+      $('regDept').value = profile.department || 'ICU';
+      $('regBed').value = profile.patient_id || 'Bed_1';
+      $('regRoom').value = profile.room || 'Room 101';
+      $('regBroker').value = profile.broker || '127.0.0.1';
+      $('regPatient').value = profile.patient_name || `Patient ${nice(bed)}`;
+      $('regDiag').value = profile.diagnosis || 'Observation & Standard Telemetry';
+
+      $('loginUnitTitle').textContent = `${profile.department || 'ICU'} · ${profile.bed_label || nice(bed)} · ${profile.room || 'Room 101'}`;
+      $('loginUnitPatient').textContent = `${profile.patient_name || ''} — ${profile.diagnosis || ''}`;
+      $('loginUnitWifi').textContent = `Wi-Fi: ${profile.wifi_ssid || 'Hospital-CriticalCare-5G'} (Connected)`;
+    }
+
+    async function checkAuthStatus() {
+      try {
+        const r = await fetch('/api/auth/status');
+        if (!r.ok) return;
+        const status = await r.json();
+        applyProfileToUI(status.profile);
+        authenticated = Boolean(status.authenticated);
+        if (authenticated) {
+          $('authOverlay').classList.add('hidden');
+          poll();
+        } else {
+          $('authOverlay').classList.remove('hidden');
+          switchAuthTab(status.registered ? 'login' : 'register');
+        }
+      } catch (e) {}
+    }
+
+    async function submitRegister(e) {
+      e.preventDefault();
+      showAuthError('');
+      const payload = {
+        wifi_ssid: $('regWifi').value.trim(),
+        department: $('regDept').value,
+        patient_id: $('regBed').value.trim(),
+        room: $('regRoom').value.trim(),
+        broker: $('regBroker').value.trim(),
+        patient_name: $('regPatient').value.trim(),
+        diagnosis: $('regDiag').value.trim(),
+        password: $('regPassword').value
+      };
+      try {
+        const r = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const res = await r.json();
+        if (!r.ok || !res.ok) {
+          showAuthError(res.error || 'Registration failed.');
+          return;
+        }
+        applyProfileToUI(res.profile);
+        authenticated = true;
+        $('authOverlay').classList.add('hidden');
+        poll();
+      } catch (err) {
+        showAuthError('Could not connect to bedside service.');
+      }
+    }
+
+    async function submitLogin(e) {
+      e.preventDefault();
+      showAuthError('');
+      try {
+        const r = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: $('loginPassword').value })
+        });
+        const res = await r.json();
+        if (!r.ok || !res.ok) {
+          showAuthError(res.error || 'Incorrect password.');
+          return;
+        }
+        applyProfileToUI(res.profile);
+        authenticated = true;
+        $('loginPassword').value = '';
+        $('authOverlay').classList.add('hidden');
+        poll();
+      } catch (err) {
+        showAuthError('Could not connect to bedside service.');
+      }
+    }
+
+    async function lockMonitor() {
+      try {
+        await fetch('/api/auth/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      } catch (e) {}
+      authenticated = false;
+      $('authOverlay').classList.remove('hidden');
+      switchAuthTab('login');
     }
 
     const resizeObserver = new ResizeObserver(entries => {
@@ -620,6 +1039,10 @@
       const traces = traceBuffers.get(bedId);
       for (const { agent, seconds } of traceDefs) {
         const sensor = state.sensors?.[agent];
+        if (sensor?.removed || sensor?.connection_status === 'REMOVED') {
+          traces.delete(agent);
+          continue;
+        }
         const wave = sensor?.waveform;
         const rate = sensor?.sample_rate_hz ?? 250;
         const timestamp = sensor?.waveform_end_ts ?? sensor?.sent_ts;
@@ -671,6 +1094,8 @@
       }
     }
 
+    let latestSensors = {};
+
     function draw(now) {
       const ratio = window.devicePixelRatio || 1;
       const time = now / 1000 + serverOffset - playbackDelay;
@@ -679,10 +1104,18 @@
         const width = canvas.width / ratio, height = canvas.height / ratio;
         ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
         drawGrid(ctx, width, height, seconds);
+        const sensorInfo = latestSensors[agent];
+        const isRemoved = sensorInfo?.removed || sensorInfo?.connection_status === 'REMOVED';
         const buffer = traceBuffers.get(bed)?.get(agent);
-        const text = !buffer ? 'Waiting for signal' : time - buffer.end / buffer.rate > 0.5 ? 'Signal interrupted' : '';
+        const text = isRemoved
+          ? 'Sensor removed'
+          : !buffer
+            ? 'Waiting for signal'
+            : time - buffer.end / buffer.rate > 0.5
+              ? 'Signal interrupted'
+              : '';
         if (status.textContent !== text) status.textContent = text;
-        if (!buffer || !Number.isFinite(time)) continue;
+        if (isRemoved || !buffer || !Number.isFinite(time)) continue;
 
         const sweptSeconds = ((time - sweepOrigin) % seconds + seconds) % seconds;
         const start = time - sweptSeconds;
@@ -733,6 +1166,11 @@
         const el = $(`trust_${agent}`);
         if (!el) continue;
         const sensor = b.sensors?.[agent] || {};
+        if (sensor.removed || sensor.connection_status === 'REMOVED') {
+          el.className = 'trust-pct low';
+          el.textContent = 'Removed';
+          continue;
+        }
         const link = sensor.connection_status === 'CONNECTED';
         const score = Number(sensor.trust_score || 0);
         const cls = !link ? 'off' : score < 45 ? 'low' : score < 70 ? 'warn' : '';
@@ -742,7 +1180,7 @@
     }
 
     async function poll() {
-      if (fetching) return;
+      if (!authenticated || fetching) return;
       fetching = true;
       const requestedAt = performance.now();
       const controller = new AbortController();
@@ -750,24 +1188,26 @@
       try {
         const r = await fetch('/api/state', { signal: controller.signal });
         const receivedAt = performance.now();
-        if (!r.ok) return;
-        const d = await r.json(), beds = Object.keys(d.beds || {}); if (!beds.length) return;
-        const sel = $('bedSelect');
-        sel.style.display = beds.length > 1 ? '' : 'none';
-        if (Array.from(sel.options).map(option => option.value).join() !== beds.join()) {
-          sel.options.length = 0;
-          for (const id of beds) sel.add(new Option(nice(id), id));
+        if (r.status === 401) {
+          authenticated = false;
+          $('authOverlay').classList.remove('hidden');
+          return;
         }
+        if (!r.ok) return;
+        const d = await r.json();
+        if (d.profile) applyProfileToUI(d.profile);
+        bed = d.patient_id || Object.keys(d.beds || {})[0] || 'Bed_1';
+        const b = d.bed || d.beds?.[bed];
+        if (!b) return;
+
         syncClock(d.server_time ?? Date.now() / 1000, requestedAt, receivedAt);
-        for (const id of beds) appendWaveforms(id, d.beds[id]);
-        if (!bed || !d.beds[bed]) bed = beds[0];
-        if (sel.value !== bed) sel.value = bed;
-        $('bedTitle').textContent = nice(bed);
-        updateSimLink();
-        const b = d.beds[bed]; if (!b) return;
+        latestSensors = b.sensors || {};
+        appendWaveforms(bed, b);
 
         const sensors = b.sensors || {};
-        const available = agent => sensors[agent]?.connection_status !== 'DISCONNECTED';
+        const available = agent => sensors[agent]?.connection_status === 'CONNECTED' && !sensors[agent]?.removed;
+        const isRemoved = agent => Boolean(sensors[agent]?.removed || sensors[agent]?.connection_status === 'REMOVED');
+
         const hr = available('Agent_HR') ? b.hr : null;
         const sp = available('Agent_SpO2') ? b.spo2 : null;
         const resp = available('Agent_Respiration') ? sensors.Agent_Respiration?.value : null;
@@ -796,23 +1236,44 @@
         $('ibpMap').textContent = ibpMap;
         $('nibp').innerHTML = `${nibpStr}<small>mmHg</small>`;
 
-        if (!Number.isFinite(hr)) set($('hrTag'), 'tag t-warn', 'Unavailable'); else if (hr > 100) set($('hrTag'), 'tag t-warn', 'Fast'); else if (hr < 60) set($('hrTag'), 'tag t-warn', 'Slow'); else set($('hrTag'), 'tag t-ok', 'Normal');
-        if (!Number.isFinite(sp)) set($('spTag'), 'tag t-warn', 'Unavailable'); else if (sp < 90) set($('spTag'), 'tag t-bad', 'Critical'); else if (sp < 95) set($('spTag'), 'tag t-warn', 'Low'); else set($('spTag'), 'tag t-ok', 'Normal');
-        if (!Number.isFinite(co2)) set($('co2Tag'), 'tag t-warn', 'Unavailable'); else if (co2 > 50) set($('co2Tag'), 'tag t-bad', 'High'); else if (co2 < 30) set($('co2Tag'), 'tag t-warn', 'Low'); else set($('co2Tag'), 'tag t-ok', 'Normal');
-        if (resp !== null && resp !== undefined) set($('respTag'), 'tag t-ok', `${resp} br/min`); else set($('respTag'), 'tag t-warn', 'Unavailable');
-        if (!Number.isFinite(temp)) set($('tempTag'), 'tag t-warn', 'Unavailable');
+        if (isRemoved('Agent_HR')) set($('hrTag'), 'tag t-bad', 'Removed');
+        else if (!Number.isFinite(hr)) set($('hrTag'), 'tag t-warn', 'Unavailable');
+        else if (hr > 100) set($('hrTag'), 'tag t-warn', 'Fast');
+        else if (hr < 60) set($('hrTag'), 'tag t-warn', 'Slow');
+        else set($('hrTag'), 'tag t-ok', 'Normal');
+
+        if (isRemoved('Agent_SpO2')) set($('spTag'), 'tag t-bad', 'Removed');
+        else if (!Number.isFinite(sp)) set($('spTag'), 'tag t-warn', 'Unavailable');
+        else if (sp < 90) set($('spTag'), 'tag t-bad', 'Critical');
+        else if (sp < 95) set($('spTag'), 'tag t-warn', 'Low');
+        else set($('spTag'), 'tag t-ok', 'Normal');
+
+        if (isRemoved('Agent_EtCO2')) set($('co2Tag'), 'tag t-bad', 'Removed');
+        else if (!Number.isFinite(co2)) set($('co2Tag'), 'tag t-warn', 'Unavailable');
+        else if (co2 > 50) set($('co2Tag'), 'tag t-bad', 'High');
+        else if (co2 < 30) set($('co2Tag'), 'tag t-warn', 'Low');
+        else set($('co2Tag'), 'tag t-ok', 'Normal');
+
+        if (isRemoved('Agent_Respiration')) set($('respTag'), 'tag t-bad', 'Removed');
+        else if (resp !== null && resp !== undefined) set($('respTag'), 'tag t-ok', `${resp} br/min`);
+        else set($('respTag'), 'tag t-warn', 'Unavailable');
+
+        if (isRemoved('Agent_Temperature')) set($('tempTag'), 'tag t-bad', 'Removed');
+        else if (!Number.isFinite(temp)) set($('tempTag'), 'tag t-warn', 'Unavailable');
         else if (sensors.Agent_Temperature?.valid === false) set($('tempTag'), 'tag t-warn', 'Check probe');
         else set($('tempTag'), 'tag t-ok', 'Live');
 
         const sysVal = Number.isFinite(ibpSys) ? ibpSys : NaN;
         const mapVal = Number.isFinite(ibpMapValue) ? ibpMapValue : NaN;
-        if (!Number.isFinite(sysVal)) set($('ibpTag'), 'tag t-warn', 'Unavailable');
+        if (isRemoved('Agent_IBP')) set($('ibpTag'), 'tag t-bad', 'Removed');
+        else if (!Number.isFinite(sysVal)) set($('ibpTag'), 'tag t-warn', 'Unavailable');
         else if (mapVal < 65 || sysVal < 90) set($('ibpTag'), 'tag t-bad', 'Hypotensive');
         else if (sysVal > 160) set($('ibpTag'), 'tag t-warn', 'Hypertensive');
         else set($('ibpTag'), 'tag t-ok', 'Normotensive');
 
         const nSys = Number.isFinite(nibpSys) ? nibpSys : NaN;
-        if (!Number.isFinite(nSys)) set($('nibpTag'), 'tag t-warn', 'Unavailable');
+        if (isRemoved('Agent_NIBP')) set($('nibpTag'), 'tag t-bad', 'Removed');
+        else if (!Number.isFinite(nSys)) set($('nibpTag'), 'tag t-warn', 'Unavailable');
         else if (nSys < 90) set($('nibpTag'), 'tag t-warn', 'Low');
         else if (nSys > 160) set($('nibpTag'), 'tag t-warn', 'High');
         else set($('nibpTag'), 'tag t-ok', 'Normal');
@@ -825,8 +1286,8 @@
         const arr = hasEcg && !art && (Boolean(b.arrhythmia) || c === 'arrhythmia' || v > .2);
         alarm = arr;
 
-        set($('ecgTag'), 'tag ' + (arr ? 't-bad' : art || !hasEcg ? 't-warn' : 't-ok'),
-          arr ? 'Arrhythmia' : art ? 'Irregular signal' : hasEcg ? 'Normal rhythm' : 'Unavailable');
+        set($('ecgTag'), 'tag ' + (isRemoved('Agent_ECG') || arr ? 't-bad' : art || !hasEcg ? 't-warn' : 't-ok'),
+          isRemoved('Agent_ECG') ? 'Removed' : arr ? 'Arrhythmia' : art ? 'Irregular signal' : hasEcg ? 'Normal rhythm' : 'Unavailable');
 
         let o, tagc, tagt, title, desc, col;
         if (arr) { o = ['status s-bad', 'Critical']; tagc = 't-bad'; tagt = 'Needs attention'; title = 'Arrhythmia detected'; desc = 'Abnormal ventricular rhythm on the ECG. Please assess the patient immediately.'; col = '248,113,113' }
@@ -835,7 +1296,7 @@
         else if (co2 > 52) { o = ['status s-warn', 'Hypercapnia']; tagc = 't-warn'; tagt = 'Warning'; title = 'High End-Tidal CO2'; desc = `EtCO2 is elevated (${co2} mmHg). Risk of respiratory depression/acidosis.`; col = '251,191,36' }
         else if (art) { o = ['status s-warn', 'Check leads']; tagc = 't-warn'; tagt = 'Check'; title = 'Unclear ECG signal'; desc = 'The ECG trace is erratic. Check that electrodes are attached properly.'; col = '251,191,36' }
         else if (Number.isFinite(hr) && (hr > 130 || hr < 45)) { o = ['status s-warn', 'Warning']; tagc = 't-warn'; tagt = 'Warning'; title = hr > 130 ? 'Heart rate very high' : 'Heart rate very low'; desc = `Heart rate is ${hr} bpm, outside the safe range. Please assess the patient.`; col = '251,191,36' }
-        else if (!hasEcg || ![hr, sp, co2, mapVal].every(Number.isFinite)) { o = ['status s-warn', 'Signal unavailable']; tagc = 't-warn'; tagt = 'Incomplete readings'; title = 'Waiting for sensor data'; desc = 'One or more signals are unavailable.'; col = '251,191,36' }
+        else if (!hasEcg || ![hr, sp, co2, mapVal].every(Number.isFinite)) { o = ['status s-warn', 'Sensor removed']; tagc = 't-warn'; tagt = 'Incomplete readings'; title = 'Sensor disconnected'; desc = 'One or more bedside sensors are removed or unavailable.'; col = '251,191,36' }
         else { o = ['status s-ok', 'Stable']; tagc = 't-ok'; tagt = 'Healthy'; title = 'Patient is healthy'; desc = 'Heart rhythm, oxygen level, EtCO2, and blood pressure are all within normal limits.'; col = '' }
         $('overall').className = o[0]; $('overall').textContent = o[1];
         set($('condTag'), 'tag ' + tagc, tagt); $('condTitle').textContent = title; $('condDesc').textContent = desc;
@@ -851,7 +1312,7 @@
 
     requestAnimationFrame(draw);
     setInterval(poll, 250);
-    poll();
+    checkAuthStatus();
   </script>
 </body>
 

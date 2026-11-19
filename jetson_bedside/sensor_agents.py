@@ -203,6 +203,10 @@ class SensorAgentThread(threading.Thread):
                 if self.agent_id == "Agent_EtCO2":
                     settings = {**config.get("Agent_CO2", {}), **settings}
 
+                if bool(settings.get("removed", False)):
+                    self.stop_event.wait(PUBLISH_INTERVAL_SECONDS)
+                    continue
+
                 if random.random() >= float(settings.get("drop_rate", 0.0)):
                     frame = self.simulation.sample(config)
                     sent_ts = time.time()
