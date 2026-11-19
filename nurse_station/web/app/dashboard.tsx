@@ -2,13 +2,13 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import Admission, { type Action } from "./admission";
 import { Badge, BedCard, BedPanel, EventLog } from "./bed-panel";
 import RoomDirectory from "./room-directory";
 import { formatReading, type Bed, type Device, type Snapshot, wardURL } from "./telemetry";
 
-export const requestAction: Action = async (operation, data) => {
+const requestAction: Action = async (operation, data) => {
   const response = await fetch(`/api/${operation}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -21,9 +21,8 @@ export const requestAction: Action = async (operation, data) => {
   }
   return result;
 };
-const probe = () => requestAction("probe", {});
 
-export function useTelemetry() {
+function useTelemetry() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [connection, setConnection] = useState<"connecting" | "live" | "reconnecting">("connecting");
 
@@ -52,11 +51,12 @@ export function useTelemetry() {
   return { snapshot, connection };
 }
 
-function Directory({ snapshot, selected, live, openAdmission }: {
+function Directory({ snapshot, selected, live, onFailover, busy }: {
   snapshot: Snapshot;
   selected?: Bed;
   live: boolean;
-  openAdmission: () => void;
+  onFailover: () => void;
+  busy: boolean;
 }) {
   const { ha } = snapshot;
 
@@ -72,10 +72,15 @@ function Directory({ snapshot, selected, live, openAdmission }: {
     <div className="sidebar-directory">
       <h2>Room directory</h2>
       <RoomDirectory snapshot={snapshot} selectedId={selected?.patient_id} live={live} />
-      {snapshot.unadded_jetsons.length > 0 && <button className="button sidebar-button" onClick={openAdmission}>
-        Unassigned devices ({snapshot.unadded_jetsons.length})
-      </button>}
     </div>
+    {(Object.keys(ha.peers).length > 0 || ha.failover_simulated || ha.failover_triggered) &&
+      <div className="station-tools"><details>
+        <summary>High availability</summary>
+        <div className="tool-content">
+          {Object.values(ha.peers).map((peer) => <p key={peer.station_id}>{peer.station_id.replaceAll("_", " ")} · {peer.role}</p>)}
+          <button type="button" className="button sidebar-button" disabled={busy || !live} onClick={onFailover}>Test failover / switch role</button>
+        </div>
+      </details></div>}
   </>;
 }
 
@@ -83,7 +88,6 @@ export default function Dashboard() {
   const params = useSearchParams();
   const { snapshot, connection } = useTelemetry();
   const [admission, setAdmission] = useState(false);
-  const [scanDeadline, setScanDeadline] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const allBeds = Object.values(snapshot?.beds || {});
@@ -94,16 +98,6 @@ export default function Dashboard() {
   const department = snapshot?.departments.find(([code]) => code === requestedDepartment)?.[0] || "";
   const visibleBeds = department ? allBeds.filter((bed) => bed.department === department) : allBeds;
   const emergencies = allBeds.filter((bed) => bed.emergency.length > 0);
-
-  const toggleScan = useCallback((active: boolean) => setScanDeadline(active ? Date.now() + 150_000 : null), []);
-  function openAdmission() {
-    setAdmission(true);
-    toggleScan(true);
-  }
-  function closeAdmission() {
-    setAdmission(false);
-    toggleScan(false);
-  }
 
   async function runAction(
     operation: string,
@@ -126,7 +120,7 @@ export default function Dashboard() {
     const data = { department: assignedDepartment, room, patient_id: device.patient_id };
     void runAction("admit", data, ({ patient_id }) => {
       if (patient_id) window.history.pushState(null, "", wardURL(assignedDepartment, patient_id));
-      closeAdmission();
+      setAdmission(false);
     });
   }
 
@@ -135,7 +129,8 @@ export default function Dashboard() {
     void runAction("release", { patient_id: bed.patient_id }, () => window.history.pushState(null, "", wardURL(department)));
   }
 
-  const connectionLabel = connection === "live" ? "Live telemetry" : connection === "connecting" ? "Connecting" : "Reconnecting";
+  const live = connection === "live" && snapshot?.broker_connected === true;
+  const connectionLabel = connection === "live" ? (live ? "HiveMQ connected" : "HiveMQ disconnected") : connection === "connecting" ? "Connecting" : "Reconnecting";
 
   return (
     <div className="dashboard">
@@ -143,26 +138,23 @@ export default function Dashboard() {
       <aside className="sidebar">
         <Link className="brand" href="/" prefetch={false}>
           <span className="brand-icon" aria-hidden="true">+</span>
-          <span>Nurse Station<small>Trust-Aware Healthcare</small></span>
+          <span>Nurse Station</span>
         </Link>
-        {snapshot && <Directory snapshot={snapshot} selected={selected} live={connection === "live"}
-          openAdmission={openAdmission} />}
+        {snapshot && <Directory snapshot={snapshot} selected={selected} live={live}
+          busy={busy} onFailover={() => void runAction("failover", {})} />}
       </aside>
       <main id="content" className="main">
         <header className="topbar">
           <div>
-            <p className="room-label">{selected ? `${selected.department} · ${selected.room_only}` : "Central monitoring"}</p>
-            <h1>{selected ? "Bed dashboard" : department ? `${department} overview` : "Ward overview"}</h1>
+            {selected && <p className="room-label">{selected.department} · {selected.room_only}</p>}
+            <h1>{selected ? "Bed dashboard" : department ? `${department} overview` : "Central Dashboard"}</h1>
           </div>
           <div className="header-actions">
-            <span role="status"><Badge tone={connection === "live" ? "green" : "amber"}>{connectionLabel}</Badge></span>
-            <Link className="button" href={selected ? `/simulation?bed=${encodeURIComponent(selected.patient_id)}` : "/simulation"} target="_blank" rel="noopener noreferrer">
-              Open simulation tab
-            </Link>
-            <button className="button" disabled={!snapshot} onClick={openAdmission}>{scanDeadline ? "Rescan now" : "Rescan LAN"}</button>
-            <button className="button button-primary" disabled={!snapshot} onClick={admission ? closeAdmission : openAdmission}>
-              {admission ? "Close admission" : `+ Add new bed${snapshot?.unadded_jetsons.length ? ` (${snapshot.unadded_jetsons.length})` : ""}`}
-            </button>
+            <span role="status"><Badge tone={live ? "green" : "amber"}>{connectionLabel}</Badge></span>
+            {!!snapshot?.unadded_jetsons.length &&
+              <button className="button" onClick={() => setAdmission(!admission)}>
+                {admission ? "Close readmission" : `Readmit bed (${snapshot.unadded_jetsons.length})`}
+              </button>}
           </div>
         </header>
 
@@ -174,8 +166,7 @@ export default function Dashboard() {
         </div>}
 
         {snapshot && <>
-          {admission && <Admission snapshot={snapshot} scanDeadline={scanDeadline} onScan={toggleScan} probe={probe}
-            onClose={closeAdmission} onAdmit={admit} busy={busy} />}
+          {admission && snapshot.unadded_jetsons.length > 0 && <Admission snapshot={snapshot} onAdmit={admit} busy={busy} />}
           <nav className="departments" aria-label="Hospital departments">
             <Link className="filter" aria-current={!department && !selectedId ? "page" : undefined} href="/" prefetch={false}>All wards <span>{allBeds.length}</span></Link>
             {snapshot.departments.map(([code, name]) => <Link className="filter" key={code} title={name} prefetch={false}
@@ -209,7 +200,7 @@ export default function Dashboard() {
             <section aria-labelledby="bed-overview">
               <div className="section-heading standalone-heading"><h2 id="bed-overview">Bed telemetry</h2></div>
               <div className="bed-grid">{visibleBeds.map((bed) => <BedCard bed={bed} department={department} key={bed.patient_id} />)}</div>
-              {!visibleBeds.length && <p className="panel empty">No beds are assigned to this ward.</p>}
+              {!visibleBeds.length && <p className="panel empty">{allBeds.length ? "No beds are assigned to this ward." : "Register a patient on a Jetson to begin monitoring."}</p>}
             </section>
             <EventLog title="Station activity" entries={snapshot.global_alert_log} />
           </>}

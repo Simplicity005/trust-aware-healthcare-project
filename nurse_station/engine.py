@@ -23,14 +23,15 @@ try:
     import onnxruntime as ort
 except ImportError:
     ort = None
-import paho.mqtt.client as mqtt
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-BEDSIDE_DIR = os.path.join(os.path.dirname(BASE_DIR), "jetson_bedside")
-if BEDSIDE_DIR not in sys.path:
-    sys.path.insert(0, BEDSIDE_DIR)
-from patient_simulation import PatientSimulation, SAMPLE_RATE, WINDOW_SAMPLES
+sys.path.insert(0, os.path.dirname(BASE_DIR))
+from hivemq_connection import (
+    DEPARTMENTS as HOSPITAL_DEPARTMENTS, broker_host as default_host,
+    broker_port as default_port, mqtt_client, valid_device_id,
+)
 
+SAMPLE_RATE = 250
 MODEL_FILE = os.path.join(BASE_DIR, "ecg_anomaly.onnx")
 AGENT_IDS = ["Agent_ECG", "Agent_SpO2", "Agent_HR", "Agent_CO2", "Agent_IBP", "Agent_NIBP"]
 AGENT_LABELS = {
@@ -40,48 +41,6 @@ AGENT_LABELS = {
     "Agent_CO2": "EtCO2 Capnography",
     "Agent_IBP": "Invasive Arterial BP",
     "Agent_NIBP": "Non-Invasive Cuff BP",
-}
-HOSPITAL_DEPARTMENTS = [
-    ("ICU", "Intensive Care Unit"),
-    ("CCU", "Coronary Care Unit"),
-    ("NCU", "Neurological Care Unit"),
-    ("NICU", "Neonatal Intensive Care Unit"),
-    ("PICU", "Pediatric Intensive Care Unit"),
-    ("SICU", "Surgical Intensive Care Unit"),
-    ("Trauma / ER", "Emergency & Trauma"),
-    ("General Ward", "General & Step-Down Ward"),
-]
-BEDSIDE_CHAOS_FILE = os.path.join(os.path.dirname(BASE_DIR), "jetson_bedside", "chaos.json")
-CHAOS_FILE = os.environ.get("NURSE_CHAOS_FILE") or (
-    BEDSIDE_CHAOS_FILE if os.path.isfile(BEDSIDE_CHAOS_FILE) else os.path.join(BASE_DIR, "chaos.json")
-)
-
-DEFAULT_PATIENTS = {
-    "Bed_1": {
-        "name": "Eleanor Vance (F, 64)",
-        "diagnosis": "Acute Myocardial Infarction / Post-CABG",
-        "admitted": "Nov 17, 08:30",
-    },
-    "Bed_2": {
-        "name": "Arthur Pendelton (M, 71)",
-        "diagnosis": "Severe ARDS & Sepsis Protocol",
-        "admitted": "Nov 17, 11:15",
-    },
-    "Bed_3": {
-        "name": "Sarah Jenkins (F, 42)",
-        "diagnosis": "Traumatic Brain Injury / ICP Monitor",
-        "admitted": "Nov 17, 14:00",
-    },
-    "Bed_4": {
-        "name": "Michael Chang (M, 55)",
-        "diagnosis": "Post-Cardiac Arrest / Hypothermia Protocol",
-        "admitted": "Nov 18, 02:45",
-    },
-    "Bed_5": {
-        "name": "Elena Rostova (F, 29)",
-        "diagnosis": "Major Polytrauma & Hemorrhagic Shock",
-        "admitted": "Nov 18, 06:10",
-    },
 }
 
 
@@ -104,7 +63,7 @@ class AgentTrustTracker:
         self.last_seq = None
         self.last_rx_time = time.time()
         self.last_value = None
-        self.ecg_wave = [0.0] * 250
+        self.ecg_wave = []
 
         self.s_l = 1.0
         self.s_j = 1.0
@@ -265,29 +224,10 @@ class PatientBedMonitor:
         self.patient_id = patient_id
         self.last_seen_ts = time.time()
         self.last_mqtt_ts = 0.0
-        self.simulation = PatientSimulation(patient_id)
         self.agents = {aid: AgentTrustTracker(aid) for aid in AGENT_IDS}
-        self.edge_summary = {
-            "patient_id": patient_id,
-            "inf_ms": 0.28,
-            "exec_provider": "CUDA / Orin GPU",
-            "arrhythmia_prob": 0.02,
-            "local_bed_alarm": False,
-            "sensor_conflict": False,
-            "latest_vitals": {
-                "hr": 75,
-                "spo2": 98,
-                "co2": 38,
-                "ibp": {"sys": 120, "dia": 80, "map": 93, "formatted": "120/80 (93)"},
-                "nibp": {"sys": 120, "dia": 80, "map": 93, "formatted": "120/80"},
-                "ecg_variance": 0.04,
-            },
-            "routing_path": "primary",
-            "timestamp": time.time(),
-        }
-        initial_frame = self.simulation.sample({})
-        self.latest_ecg_wave = initial_frame.waveforms.get("Agent_ECG") or self._default_ecg_wave()
-        self.latest_ecg_end_ts = initial_frame.end_ts
+        self.edge_summary = {"patient_id": patient_id, "latest_vitals": {}}
+        self.latest_ecg_wave = []
+        self.latest_ecg_end_ts = 0
         self.latest_ecg_rate = SAMPLE_RATE
         self.gateway_cpu_inf_ms = 0.0
         self.active_routing = "Primary Direct Link"
@@ -295,28 +235,16 @@ class PatientBedMonitor:
         self.trust_history = deque(maxlen=60)
         self.alert_log = deque(maxlen=15)
 
-    @staticmethod
-    def _default_ecg_wave():
-        t = np.linspace(0, 1, 250)
-        ecg = (
-            0.15 * np.exp(-((t - 0.20) ** 2) / (2 * 0.025 ** 2))
-            - 0.15 * np.exp(-((t - 0.35) ** 2) / (2 * 0.010 ** 2))
-            + 1.25 * np.exp(-((t - 0.40) ** 2) / (2 * 0.012 ** 2))
-            - 0.25 * np.exp(-((t - 0.45) ** 2) / (2 * 0.012 ** 2))
-            + 0.30 * np.exp(-((t - 0.65) ** 2) / (2 * 0.040 ** 2))
-        )
-        return np.round(ecg, 4).tolist()
-
 
 class MultiPatientTrustEngine:
-    def __init__(self, broker_host=None, broker_port=1883):
+    def __init__(self, broker_host=None, broker_port=None):
         self.lock = threading.RLock()
-        self.broker_host = broker_host or os.environ.get("MQTT_BROKER", "127.0.0.1")
-        self.broker_port = int(os.environ.get("MQTT_PORT", broker_port))
+        self.broker_host = broker_host or default_host()
+        self.broker_port = broker_port or default_port(self.broker_host)
 
         self.beds = {}
-        self.added_bed_ids = {"Bed_1", "Bed_2", "Bed_3"}
-        self.bed_patients = dict(DEFAULT_PATIENTS)
+        self.added_bed_ids = set()
+        self.bed_patients = {}
         self.discovered_jetsons = {}
         self.global_alert_log = deque(maxlen=30)
         self.stop_event = threading.Event()
@@ -363,17 +291,9 @@ class MultiPatientTrustEngine:
             except Exception as e:
                 print(f"[DASHBOARD] CPU fallback load warning: {e}")
 
-        # Initialize default beds so initial ward display is populated
-        for b in ["Bed_1", "Bed_2", "Bed_3"]:
-            self._get_or_create_bed(b)
-
         # MQTT Connection
         self.client = None
         self._init_mqtt()
-
-        # Background simulator for admitted beds without physical hardware
-        self.sim_thread = threading.Thread(target=self._run_background_synthesizer, daemon=True)
-        self.sim_thread.start()
 
         # HA Heartbeat thread
         self.hb_thread = threading.Thread(target=self._run_heartbeat_broadcaster, daemon=True)
@@ -384,7 +304,6 @@ class MultiPatientTrustEngine:
         if self.client:
             self.client.disconnect()
             self.client.loop_stop()
-        self.sim_thread.join()
         self.hb_thread.join()
 
     def get_patient_info(self, pid):
@@ -392,8 +311,8 @@ class MultiPatientTrustEngine:
             return self.bed_patients[pid]
         return {
             "name": f"Patient {pid}",
-            "diagnosis": "Observation & Standard Telemetry",
-            "admitted": "Nov 18, 08:00",
+            "diagnosis": "",
+            "admitted": time.strftime("%b %d, %H:%M"),
         }
 
     def set_patient_info(self, pid, name=None, diagnosis=None, admitted=None):
@@ -429,10 +348,7 @@ class MultiPatientTrustEngine:
 
     def _init_mqtt(self):
         cid = f"NurseStation_{self.station_id}_{os.getpid()}_{random.randint(100, 999)}"
-        if hasattr(mqtt, "CallbackAPIVersion"):
-            self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=cid)
-        else:
-            self.client = mqtt.Client(client_id=cid)
+        self.client = mqtt_client(cid, self.broker_host, self.broker_port)
 
         self.client.on_connect = self._on_connect
         self.client.on_message = self._on_message
@@ -451,7 +367,7 @@ class MultiPatientTrustEngine:
         client.subscribe("hospital/+/sensors/#")
         client.subscribe("hospital/+/edge/summary")
         client.subscribe("hospital/+/alerts/#")
-        client.subscribe("hospital/discovery/announce")
+        client.subscribe("hospital/+/registration", qos=1)
         client.subscribe("hospital/nurse_stations/heartbeat")
         client.subscribe("hospital/nurse_stations/failover")
         self.probe_network_for_jetsons()
@@ -491,103 +407,73 @@ class MultiPatientTrustEngine:
                         self.global_alert_log.appendleft(entry)
                 return
 
-            # 2. Jetson Edge Discovery announcements
-            if topic == "hospital/discovery/announce":
-                patient_id = payload.get("patient_id", "Unknown_Jetson")
+            if len(parts) < 3 or parts[0] != "hospital":
+                return
+            patient_id = parts[1]
+            if not valid_device_id(patient_id) or payload.get("patient_id") != patient_id:
+                return
+            if parts[2:] == ["registration"]:
+                registration = payload.get("registration_id")
+                department, room, name = (payload.get(key) for key in ("department", "room", "patient_name"))
+                if (not isinstance(registration, str) or not registration or department not in dict(HOSPITAL_DEPARTMENTS)
+                        or not isinstance(room, str) or not room.strip() or not isinstance(name, str) or not name.strip()):
+                    return
                 with self.lock:
+                    prior = self.discovered_jetsons.get(patient_id, {})
                     self.discovered_jetsons[patient_id] = {
-                        "patient_id": patient_id,
-                        "device_model": payload.get("device_model", "NVIDIA Jetson Orin"),
-                        "exec_provider": payload.get("exec_provider", "CUDA / Orin GPU"),
-                        "first_seen_ts": recv_ts,
+                        "patient_id": patient_id, "registration_id": registration,
+                        "device_model": "Jetson", "exec_provider": payload.get("exec_provider", ""),
                         "last_seen_ts": recv_ts,
-                        "packet_count": 1,
-                        "latest_vitals": payload.get("latest_vitals", {}),
-                        "ip": payload.get("broker", "127.0.0.1"),
                     }
-                    if payload.get("department"):
-                        self.bed_departments[patient_id] = str(payload["department"])
-                    if payload.get("room"):
-                        self.bed_rooms[patient_id] = str(payload["room"])
-                    if payload.get("patient_name") or payload.get("diagnosis"):
-                        self.set_patient_info(
-                            patient_id,
-                            name=payload.get("patient_name"),
-                            diagnosis=payload.get("diagnosis"),
-                        )
-                    if payload.get("auto_admit"):
-                        self.admit_jetson(
-                            patient_id,
-                            department=payload.get("department"),
-                            room_name=payload.get("room"),
-                            patient_name=payload.get("patient_name"),
-                            diagnosis=payload.get("diagnosis"),
-                        )
+                    # A periodic announcement repairs late joins without undoing a nurse's release.
+                    if registration != prior.get("registration_id"):
+                        self.beds.pop(patient_id, None)
+                        self.bed_patients.pop(patient_id, None)
+                        self.admit_jetson(patient_id, department, room, name, payload.get("diagnosis"))
                 return
 
-            # 3. Patient Bed Telemetry
-            if len(parts) >= 3 and parts[0] == "hospital":
-                patient_id = parts[1]
-
-                # Update discovery registry
-                with self.lock:
-                    if patient_id not in self.discovered_jetsons:
-                        self.discovered_jetsons[patient_id] = {
-                            "patient_id": patient_id,
-                            "device_model": "NVIDIA Jetson Orin",
-                            "exec_provider": "CUDA / Orin GPU",
-                            "first_seen_ts": recv_ts,
-                            "last_seen_ts": recv_ts,
-                            "packet_count": 1,
-                            "latest_vitals": {},
-                            "ip": "127.0.0.1",
-                        }
+            with self.lock:
+                if patient_id not in self.added_bed_ids:
+                    return
+                if patient_id in self.discovered_jetsons:
+                    self.discovered_jetsons[patient_id]["last_seen_ts"] = recv_ts
+                if "sensors" in parts:
+                    self._handle_sensor_packet(patient_id, payload, recv_ts)
+                elif parts[-1] == "summary":
+                    bed = self._get_or_create_bed(patient_id)
+                    bed.last_seen_ts = recv_ts
+                    bed.last_mqtt_ts = recv_ts
+                    bed.edge_summary = payload
+                    ecg_sensor = (payload.get("sensors") or {}).get("Agent_ECG") or {}
+                    summary_wave = ecg_sensor.get("waveform") or payload.get("ecg_wave")
+                    summary_ts = float(
+                        ecg_sensor.get("waveform_end_ts")
+                        or ecg_sensor.get("sent_ts")
+                        or payload.get("timestamp")
+                        or recv_ts
+                    )
+                    if isinstance(summary_wave, list) and len(summary_wave) == 250 and summary_ts >= bed.latest_ecg_end_ts:
+                        bed.latest_ecg_wave = summary_wave
+                        bed.latest_ecg_end_ts = summary_ts
+                        bed.latest_ecg_rate = int(ecg_sensor.get("sample_rate_hz") or SAMPLE_RATE)
+                    if payload.get("routing_path") == "relay_b":
+                        bed.active_routing = "Relay Path B (Rerouted)"
+                        bed.offload_active = True
                     else:
-                        dev = self.discovered_jetsons[patient_id]
-                        dev["last_seen_ts"] = recv_ts
-                        dev["packet_count"] += 1
-
-                    # If nurse has not admitted this bed yet, do not mix into active ICU ward
-                    if patient_id not in self.added_bed_ids:
-                        return
-
-                    if "sensors" in parts:
-                        self._handle_sensor_packet(patient_id, payload, recv_ts)
-                    elif parts[-1] == "summary":
-                        bed = self._get_or_create_bed(patient_id)
-                        bed.last_seen_ts = recv_ts
-                        bed.last_mqtt_ts = recv_ts
-                        bed.edge_summary = payload
-                        ecg_sensor = (payload.get("sensors") or {}).get("Agent_ECG") or {}
-                        summary_wave = ecg_sensor.get("waveform") or payload.get("ecg_wave")
-                        summary_ts = float(
-                            ecg_sensor.get("waveform_end_ts")
-                            or ecg_sensor.get("sent_ts")
-                            or payload.get("timestamp")
-                            or recv_ts
-                        )
-                        if isinstance(summary_wave, list) and len(summary_wave) == 250 and summary_ts >= bed.latest_ecg_end_ts:
-                            bed.latest_ecg_wave = summary_wave
-                            bed.latest_ecg_end_ts = summary_ts
-                            bed.latest_ecg_rate = int(ecg_sensor.get("sample_rate_hz") or SAMPLE_RATE)
-                        if payload.get("routing_path") == "relay_b":
-                            bed.active_routing = "Relay Path B (Rerouted)"
-                            bed.offload_active = True
-                        else:
-                            bed.active_routing = "Primary Direct Link"
-                            bed.offload_active = False
-                    elif "alerts" in parts:
-                        bed = self._get_or_create_bed(patient_id)
-                        route_label = "Relay Path B" if "relay_b" in topic else "Primary Link"
-                        prob = payload.get("arrhythmia_prob", 0.0) * 100.0
-                        inf_ms = payload.get("inf_ms", 0.0)
-                        ts_str = time.strftime("%H:%M:%S", time.localtime(recv_ts))
-                        entry = (
-                            f"[{ts_str}] [{patient_id}] CRITICAL ARRHYTHMIA DETECTED "
-                            f"({prob:.1f}%) via {route_label} [{inf_ms:.2f} ms]"
-                        )
-                        bed.alert_log.appendleft(entry)
-                        self.global_alert_log.appendleft(entry)
+                        bed.active_routing = "Primary Direct Link"
+                        bed.offload_active = False
+                elif "alerts" in parts:
+                    bed = self._get_or_create_bed(patient_id)
+                    route_label = "Relay Path B" if "relay_b" in topic else "Primary Link"
+                    prob = payload.get("arrhythmia_prob", 0.0) * 100.0
+                    inf_ms = payload.get("inf_ms", 0.0)
+                    ts_str = time.strftime("%H:%M:%S", time.localtime(recv_ts))
+                    entry = (
+                        f"[{ts_str}] [{patient_id}] CRITICAL ARRHYTHMIA DETECTED "
+                        f"({prob:.1f}%) via {route_label} [{inf_ms:.2f} ms]"
+                    )
+                    bed.alert_log.appendleft(entry)
+                    self.global_alert_log.appendleft(entry)
         except Exception as e:
             print(f"[DASHBOARD] Message handling error: {e}")
 
@@ -646,8 +532,6 @@ class MultiPatientTrustEngine:
             bed.last_mqtt_ts = recv_ts
 
     def _get_or_create_bed(self, patient_id):
-        if not patient_id:
-            patient_id = "Bed_1"
         if patient_id not in self.beds:
             self.beds[patient_id] = PatientBedMonitor(patient_id)
         self.beds[patient_id].last_seen_ts = time.time()
@@ -707,146 +591,10 @@ class MultiPatientTrustEngine:
                 entry = f"[{time.strftime('%H:%M:%S')}] [HA TEST] Manual override: {self.station_id} promoted to PRIMARY LEADER."
                 self.global_alert_log.appendleft(entry)
 
-    def _run_background_synthesizer(self):
-        step = 0
-        last_logged_alarm = {}
-        while not self.stop_event.wait(0.40):
-            step += 1
-            now = time.time()
-
-            # Read chaos.json if present to keep bedside and nurse station 100% synchronized
-            chaos_data = {}
-            if os.path.exists(CHAOS_FILE):
-                try:
-                    with open(CHAOS_FILE, "r", encoding="utf-8") as f:
-                        chaos_data = json.load(f)
-                except Exception:
-                    pass
-
-            with self.lock:
-                for pid in list(self.added_bed_ids):
-                    bed = self._get_or_create_bed(pid)
-                    # If live physical MQTT packets arrived within 2.0 seconds, let physical hardware drive
-                    if (now - bed.last_mqtt_ts) <= 2.0:
-                        continue
-
-                    # Otherwise, synchronize from chaos.json (bedside simulator state)
-                    bed_cfg = chaos_data.get(pid, {})
-                    vitals_cfg = bed_cfg.get("vitals", {})
-                    ecg_condition = vitals_cfg.get("ecg_condition") or bed_cfg.get("Agent_ECG", {}).get("condition", "normal")
-
-                    orin_cfg = bed_cfg.get("Orin_Link", {})
-                    use_relay_b = orin_cfg.get("use_relay_b", False)
-                    overload_gpu = orin_cfg.get("overload_gpu", False)
-
-                    frame = bed.simulation.sample(bed_cfg)
-                    is_arrhythmia = (ecg_condition == "arrhythmia")
-                    if is_arrhythmia:
-                        arrhythmia_prob = 0.98
-                        local_bed_alarm = True
-                        if now - last_logged_alarm.get(pid, 0) > 10.0:
-                            entry = (
-                                f"[{time.strftime('%H:%M:%S')}] [{pid}] CRITICAL ARRHYTHMIA DETECTED (98.0%) "
-                                f"via Primary Link [0.28 ms]"
-                            )
-                            bed.alert_log.appendleft(entry)
-                            self.global_alert_log.appendleft(entry)
-                            last_logged_alarm[pid] = now
-                    else:
-                        arrhythmia_prob = 0.02
-                        local_bed_alarm = False
-
-                    # Sensor Byzantine spoofing from chaos.json
-                    ecg_mal = bed_cfg.get("Agent_ECG", {}).get("malicious", False) or (ecg_condition == "malicious")
-                    sp_mal = bed_cfg.get("Agent_SpO2", {}).get("malicious", False)
-                    hr_mal = bed_cfg.get("Agent_HR", {}).get("malicious", False)
-                    co2_mal = bed_cfg.get("Agent_CO2", {}).get("malicious", False) or bed_cfg.get("Agent_EtCO2", {}).get("malicious", False)
-                    ibp_mal = bed_cfg.get("Agent_IBP", {}).get("malicious", False)
-                    nibp_mal = bed_cfg.get("Agent_NIBP", {}).get("malicious", False)
-
-                    if ecg_mal:
-                        times = frame.end_ts + np.arange(1 - WINDOW_SAMPLES, 1) / SAMPLE_RATE
-                        noise = 2.1 * np.sin(2 * np.pi * 27 * times) + 1.65 * np.sin(2 * np.pi * 43 * times)
-                        wave_list = np.round(noise, 4).tolist()
-                    else:
-                        wave_list = frame.waveforms["Agent_ECG"]
-                    bed.latest_ecg_wave = wave_list
-                    bed.latest_ecg_end_ts = frame.end_ts
-                    bed.latest_ecg_rate = SAMPLE_RATE
-
-                    hr_val = 240 if hr_mal else int(frame.readings["Agent_HR"])
-                    spo2_val = 42 if sp_mal else int(frame.readings["Agent_SpO2"])
-                    co2_val = 95 if co2_mal else int(frame.readings["Agent_EtCO2"])
-                    ibp_reading = frame.readings["Agent_IBP"]
-                    sys_val = 310 if ibp_mal else int(ibp_reading["systolic"])
-                    dia_val = 20 if ibp_mal else int(ibp_reading["diastolic"])
-                    map_val = int(round((sys_val + 2 * dia_val) / 3))
-
-                    cuff_reading = frame.readings.get("Agent_NIBP") or ibp_reading
-                    nibp_sys = 290 if nibp_mal else int(cuff_reading["systolic"])
-                    nibp_dia = 25 if nibp_mal else int(cuff_reading["diastolic"])
-                    nibp_map = int(round((nibp_sys + 2 * nibp_dia) / 3))
-
-                    ibp_val = {"sys": sys_val, "dia": dia_val, "map": map_val, "formatted": f"{sys_val}/{dia_val} ({map_val})"}
-                    nibp_val = {"sys": nibp_sys, "dia": nibp_dia, "map": nibp_map, "formatted": f"{nibp_sys}/{nibp_dia}"}
-                    var_val = float(np.var(wave_list))
-
-                    if use_relay_b:
-                        bed.active_routing = "Relay Path B (Rerouted)"
-                        bed.offload_active = True
-                        bed.gateway_cpu_inf_ms = 4.2
-                    else:
-                        bed.active_routing = "Primary Direct Link"
-                        bed.offload_active = False
-                        bed.gateway_cpu_inf_ms = 0.0
-
-                    inf_val = 18.5 if overload_gpu else round(0.22 + float(np.random.uniform(0.01, 0.06)), 2)
-
-                    bed.edge_summary["latest_vitals"] = {
-                        "hr": hr_val,
-                        "spo2": spo2_val,
-                        "co2": co2_val,
-                        "ibp": ibp_val,
-                        "nibp": nibp_val,
-                        "ecg_variance": round(var_val, 4),
-                    }
-                    bed.edge_summary["inf_ms"] = inf_val
-                    bed.edge_summary["arrhythmia_prob"] = arrhythmia_prob
-                    bed.edge_summary["local_bed_alarm"] = local_bed_alarm
-
-                    bed.agents["Agent_ECG"].update(
-                        seq=step, sent_ts=now - 0.01, recv_ts=now, value=round(var_val, 4), ecg_wave=wave_list
-                    )
-                    bed.agents["Agent_SpO2"].update(seq=step, sent_ts=now - 0.01, recv_ts=now, value=spo2_val)
-                    bed.agents["Agent_HR"].update(seq=step, sent_ts=now - 0.01, recv_ts=now, value=hr_val)
-                    bed.agents["Agent_CO2"].update(seq=step, sent_ts=now - 0.01, recv_ts=now, value=co2_val)
-                    bed.agents["Agent_IBP"].update(seq=step, sent_ts=now - 0.01, recv_ts=now, value=ibp_val)
-                    bed.agents["Agent_NIBP"].update(seq=step, sent_ts=now - 0.01, recv_ts=now, value=nibp_val)
-                    bed.last_seen_ts = now
-
-                    if step % 3 == 0:
-                        bed.trust_history.append(
-                            {
-                                "time": time.strftime("%H:%M:%S", time.localtime(now)),
-                                "Agent_ECG": bed.agents["Agent_ECG"].trust_score,
-                                "Agent_SpO2": bed.agents["Agent_SpO2"].trust_score,
-                                "Agent_HR": bed.agents["Agent_HR"].trust_score,
-                                "Agent_CO2": bed.agents["Agent_CO2"].trust_score,
-                                "Agent_IBP": bed.agents["Agent_IBP"].trust_score,
-                                "Agent_NIBP": bed.agents["Agent_NIBP"].trust_score,
-                            }
-                        )
-
     def probe_network_for_jetsons(self):
-        if self.client:
-            try:
-                self.client.publish(
-                    "hospital/discovery/probe",
-                    json.dumps({"action": "probe", "timestamp": time.time()}),
-                    qos=1,
-                )
-            except Exception:
-                pass
+        with self.lock:
+            for pid in self.discovered_jetsons:
+                self.client.publish(f"hospital/{pid}/control/probe", "{}", qos=1)
 
     def admit_jetson(self, patient_id, department=None, room_name=None, patient_name=None, diagnosis=None):
         with self.lock:
@@ -874,10 +622,11 @@ class MultiPatientTrustEngine:
                 cur = self.get_patient_info(patient_id)
                 self.bed_patients[patient_id] = {
                     "name": patient_name or cur.get("name", f"Patient {patient_id}"),
-                    "diagnosis": diagnosis or cur.get("diagnosis", "Observation & Standard Telemetry"),
-                    "admitted": cur.get("admitted", time.strftime("Nov %d, %H:%M")),
+                    "diagnosis": diagnosis or cur.get("diagnosis", ""),
+                    "admitted": cur.get("admitted", time.strftime("%b %d, %H:%M")),
                 }
-            self._get_or_create_bed(patient_id)
+            bed = self._get_or_create_bed(patient_id)
+            bed.last_seen_ts = self.discovered_jetsons[patient_id]["last_seen_ts"]
             dept_lbl = self.get_bed_department(patient_id)
             rm_lbl = self.get_bed_room(patient_id)
             p_lbl = self.get_patient_info(patient_id)["name"]
@@ -893,16 +642,6 @@ class MultiPatientTrustEngine:
             entry = f"[{time.strftime('%H:%M:%S')}] [WARD ADMISSION] {p_lbl} ({patient_id}) admitted to {dept_lbl} ({rm_lbl})."
             self.global_alert_log.appendleft(entry)
 
-    def admit_simulated_jetson(self, department, room_name=None):
-        with self.lock:
-            reserved = self.added_bed_ids | self.discovered_jetsons.keys()
-            index = 1
-            while f"Bed_{index}" in reserved:
-                index += 1
-            patient_id = f"Bed_{index}"
-            self.admit_jetson(patient_id, department=department, room_name=room_name)
-            return patient_id
-
     def release_jetson(self, patient_id):
         with self.lock:
             if patient_id in self.added_bed_ids:
@@ -914,25 +653,17 @@ class MultiPatientTrustEngine:
 
     def snapshot(self):
         now = time.time()
-        chaos_data = {}
-        if os.path.exists(CHAOS_FILE):
-            try:
-                with open(CHAOS_FILE, "r", encoding="utf-8") as f:
-                    chaos_data = json.load(f)
-            except Exception:
-                pass
         with self.lock:
             beds_snap = {}
             for pid in sorted(self.beds.keys()):
                 if pid not in self.added_bed_ids:
                     continue
                 bed = self.beds[pid]
-                bed_chaos = chaos_data.get(pid, {})
+                sensors = bed.edge_summary.get("sensors") or {}
                 agents_snap = {}
                 for aid, ag in bed.agents.items():
-                    is_rem = bool(bed_chaos.get(aid, {}).get("removed", False))
-                    if aid == "Agent_CO2" and not is_rem:
-                        is_rem = bool(bed_chaos.get("Agent_EtCO2", {}).get("removed", False))
+                    sensor = "Agent_EtCO2" if aid == "Agent_CO2" else aid
+                    is_rem = bool(sensors.get(sensor, {}).get("removed"))
                     agents_snap[aid] = {
                         "trust": 0.0 if is_rem else ag.trust_score,
                         "s_l": 0.0 if is_rem else round(ag.s_l, 2),
@@ -950,19 +681,18 @@ class MultiPatientTrustEngine:
                 beds_snap[pid] = {
                     "patient_id": pid,
                     "patient_name": pinfo.get("name", f"Patient {pid}"),
-                    "diagnosis": pinfo.get("diagnosis", "Observation & Telemetry"),
-                    "admitted": pinfo.get("admitted", "Nov 18, 08:00"),
+                    "diagnosis": pinfo.get("diagnosis", ""),
+                    "admitted": pinfo.get("admitted", time.strftime("%b %d, %H:%M")),
                     "department": self.get_bed_department(pid),
                     "room_only": self.get_bed_room(pid),
                     "room": f"{self.get_bed_department(pid)} · {self.get_bed_room(pid)}",
                     "online": (now - bed.last_seen_ts) <= 8.0,
                     "seconds_since_seen": round(now - bed.last_seen_ts, 1),
                     "agents": agents_snap,
-                    "edge": dict(bed.edge_summary),
+                    "edge": {k: v for k, v in bed.edge_summary.items() if k != "sensors"},
                     "ecg_wave": [] if ecg_removed else list(bed.latest_ecg_wave),
                     "ecg_end_ts": bed.latest_ecg_end_ts,
                     "ecg_rate": bed.latest_ecg_rate,
-                    "chaos": bed_chaos,
                     "gateway_cpu_inf_ms": bed.gateway_cpu_inf_ms,
                     "compute_mode": "Gateway CPU (Offloaded)" if bed.offload_active else "Jetson Local",
                     "alert_route": bed.active_routing,
@@ -991,6 +721,7 @@ class MultiPatientTrustEngine:
 
             return {
                 "server_time": now,
+                "broker_connected": self.client.is_connected(),
                 "beds": beds_snap,
                 "bed_directory": [
                     {"patient_id": pid, "number": str(number), "department": self.get_bed_department(pid),

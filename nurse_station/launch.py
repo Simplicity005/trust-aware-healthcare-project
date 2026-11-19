@@ -7,7 +7,6 @@ import os
 from pathlib import Path
 import shutil
 import signal
-import socket
 import subprocess
 import sys
 import time
@@ -83,14 +82,6 @@ def prepare_web(parser):
     return node
 
 
-def listening(host, port):
-    try:
-        with socket.create_connection((host, port), timeout=0.4):
-            return True
-    except OSError:
-        return False
-
-
 def start(children, label, command, cwd=STATION, env=None):
     options = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if IS_WINDOWS else {"start_new_session": True}
     child = subprocess.Popen(command, cwd=cwd, env=env, **options)
@@ -127,30 +118,19 @@ def stop(children):
                 print(f"Could not stop {label} (PID {child.pid}): {error}", file=sys.stderr, flush=True)
 
 
-def start_broker(children, host, port, required):
-    if host not in {"127.0.0.1", "localhost", "::1"} or listening(host, port):
-        return
-    mosquitto = shutil.which("mosquitto")
-    if not mosquitto:
-        if required:
-            raise RuntimeError("Install Mosquitto or use --broker to connect to an existing MQTT broker.")
-        print("Mosquitto was not found. The station will use its local simulated feeds until MQTT is available.", flush=True)
-        return
-    broker = start(children, "Mosquitto", [mosquitto, "-p", str(port)])
-    for _ in range(30):
-        if broker.poll() is not None:
-            raise RuntimeError(f"Mosquitto exited with code {broker.returncode} while opening port {port}.")
-        if listening(host, port):
-            return
-        time.sleep(0.1)
-    raise RuntimeError(f"Mosquitto did not start on {host}:{port}.")
+def start_local_hivemq(port):
+    docker = shutil.which("docker")
+    if not docker:
+        raise RuntimeError("Install Docker with Compose for local HiveMQ, or set HIVEMQ_HOST to your HiveMQ broker.")
+    subprocess.run([docker, "compose", "-f", str(ROOT / "compose.yaml"), "up", "-d"],
+                   env={**os.environ, "HIVEMQ_PORT": str(port)}, check=True)
 
 
 def start_station(children, node, args, station_id, port, api_port):
     environment = {
         **os.environ,
-        "MQTT_BROKER": args.broker,
-        "MQTT_PORT": str(args.mqtt_port),
+        "HIVEMQ_HOST": args.broker,
+        "HIVEMQ_PORT": str(args.mqtt_port),
         "NURSE_STATION_ID": station_id,
         "NURSE_STATION_PORT": str(port),
     }
@@ -166,18 +146,13 @@ def start_station(children, node, args, station_id, port, api_port):
 
 
 def start_bedside(children, args):
-    patients = args.patients or (
-        ["Bed_1", "Bed_2", "Bed_3"] if args.demo and args.patient_id is None else [args.patient_id or "Bed_1"]
-    )
-    common = ["--patients", *patients, "--port", str(args.mqtt_port)]
-    start(children, "Bedside sensors", [
-        sys.executable, "sensor_agents.py", *common, "--primary-broker", args.broker, "--backup-broker", args.broker,
-    ], cwd=BEDSIDE)
-    start(children, "Bedside monitor", [
-        sys.executable, "jetson_edge_brain.py", *common, "--broker", args.broker, "--web-port", str(args.bedside_port),
-    ], cwd=BEDSIDE)
-    for idx, pid in enumerate(patients):
-        print(f"Bedside monitor ({pid}) at http://localhost:{args.bedside_port + idx}", flush=True)
+    for index, device_id in enumerate(args.patients):
+        port = args.bedside_port + index
+        start(children, f"Bedside {device_id}", [
+            sys.executable, "jetson_edge_brain.py", "--patient-id", device_id, "--broker", args.broker,
+            "--port", str(args.mqtt_port), "--web-port", str(port),
+        ], cwd=BEDSIDE)
+        print(f"{device_id} at http://127.0.0.1:{port}", flush=True)
 
 
 def interrupt(_signal, _frame):
@@ -192,10 +167,11 @@ def main():
     parser.add_argument("--port", type=int, default=int(os.environ.get("NURSE_STATION_PORT", "8501")),
                         help="Nurse Station dashboard port")
     parser.add_argument("--station-id", default=os.environ.get("NURSE_STATION_ID", "Nurse_Station_1"))
-    parser.add_argument("--host", default="0.0.0.0", help="Dashboard bind address")
+    parser.add_argument("--host", choices=("127.0.0.1", "localhost", "::1"), default="127.0.0.1",
+                        help="Local Nurse Station dashboard address")
     parser.add_argument("--api-port", type=int, default=None, help="Local API port, defaults to 9501 or 9502")
-    parser.add_argument("--broker", default=os.environ.get("MQTT_BROKER", "127.0.0.1"))
-    parser.add_argument("--mqtt-port", type=int, default=int(os.environ.get("MQTT_PORT", "1883")))
+    parser.add_argument("--broker", default=os.environ.get("HIVEMQ_HOST"), help="Existing HiveMQ hostname")
+    parser.add_argument("--mqtt-port", type=int, default=None, help="HiveMQ listener port")
     parser.add_argument("--dual", action="store_true", help="Run a standby station on the next dashboard and API port")
     parser.add_argument("--bedside-port", type=int, default=8080, help="Bedside monitor port")
     beds = parser.add_mutually_exclusive_group()
@@ -203,7 +179,21 @@ def main():
     beds.add_argument("--patients", nargs="+", help="Run bedside nodes with these bed IDs")
     args = parser.parse_args()
 
+    managed_broker = not args.broker
+    args.broker = args.broker or "127.0.0.1"
+    local_broker = args.broker in {"127.0.0.1", "localhost", "::1"}
+    args.mqtt_port = args.mqtt_port or int(os.environ.get("HIVEMQ_PORT") or (1884 if local_broker else 8883))
+    args.patients = args.patients or ([args.patient_id] if args.patient_id else
+                                     ["Bed_1", "Bed_2", "Bed_3"] if args.demo else ["Bed_1"])
+    if len(set(args.patients)) != len(args.patients):
+        parser.error("Use a unique ID for each Jetson.")
+    if args.demo and not local_broker:
+        parser.error("For a remote HiveMQ broker, start each Jetson and station separately with its own credentials.")
     has_bedside = args.demo or args.bedside
+    if has_bedside and not local_broker and len(args.patients) != 1:
+        parser.error("Start one Jetson per remote HiveMQ credential.")
+    if not 1 <= args.mqtt_port <= 65535:
+        parser.error("HiveMQ port must be within 1–65535.")
     if has_bedside and not BEDSIDE.is_dir():
         parser.error("The Bedside requires the jetson_bedside/ folder.")
     if args.bedside and args.dual:
@@ -216,8 +206,8 @@ def main():
     if args.dual:
         ports.extend([args.port + 1, api_port + 1])
     if has_bedside:
-        ports.append(args.bedside_port)
-    if args.broker in {"127.0.0.1", "localhost", "::1"}:
+        ports.extend(range(args.bedside_port, args.bedside_port + len(args.patients)))
+    if local_broker:
         ports.append(args.mqtt_port)
     if len(set(ports)) != len(ports) or any(port < 1 or port > 65535 for port in ports):
         parser.error("Dashboard, API, local broker, and bedside ports must be distinct and within 1–65535.")
@@ -236,7 +226,8 @@ def main():
         stations = {}
         signal.signal(signal.SIGTERM, interrupt)
         try:
-            start_broker(shared, args.broker, args.mqtt_port, required=has_bedside)
+            if managed_broker:
+                start_local_hivemq(args.mqtt_port)
             if has_bedside:
                 start_bedside(shared, args)
             if not args.bedside:
@@ -265,7 +256,7 @@ def main():
             stop(shared + [child for processes in stations.values() for child in processes])
     except KeyboardInterrupt:
         return 0
-    except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
+    except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
         print(error, file=sys.stderr)
         return 1
 

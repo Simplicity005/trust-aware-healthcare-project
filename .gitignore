@@ -63,7 +63,7 @@ coverage.xml
 *.swp
 *.swo
 
-# Mosquitto temp logs
+# Runtime logs
 *.log
 
 # Next.js

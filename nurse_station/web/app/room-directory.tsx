@@ -6,9 +6,6 @@ function occupiedBedStatus(bed: Bed, live: boolean) {
   const status = bedStatus(bed);
   if (bed.online && bed.emergency.length) return status;
   if (status.tone !== "green") return { ...status, tone: "amber" };
-  if (Object.values(bed.agents).some((sensor) => !sensor.packets_received)) {
-    return { label: "Awaiting sensor data", tone: "amber" };
-  }
   return status;
 }
 

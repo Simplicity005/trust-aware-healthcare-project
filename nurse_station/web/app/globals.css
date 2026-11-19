@@ -1,10 +1,10 @@
 :root {
   color-scheme: dark;
-  --background: #0b111a;
-  --sidebar: #101824;
-  --panel: #141e2b;
-  --panel-dark: #101925;
-  --border: #28384a;
+  --background: #090c10;
+  --sidebar: #101418;
+  --panel: #151b21;
+  --panel-dark: #10151b;
+  --border: #303942;
   --text: #ecf2f8;
   --secondary: #a5b5c7;
   --mint: #80e5bd;
@@ -13,7 +13,7 @@
   --blue: #91c8ff;
   --font-heading: "Urbanist", "Open Sans", system-ui, sans-serif;
   --font-body: "Open Sans", system-ui, sans-serif;
-  --mono: "Urbanist", "IBM Plex Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
 }
 
 * {
@@ -402,9 +402,9 @@ a.bed-number:hover {
   align-items: center;
   gap: .42rem;
   padding: .15rem .53rem;
-  border: 1px solid color-mix(in srgb, currentColor 27%, transparent);
+  border: 1px solid #3c4b55;
   border-radius: 1rem;
-  background: color-mix(in srgb, currentColor 8%, transparent);
+  background: #171f25;
   font-size: .8rem;
   font-weight: 650;
   line-height: 1.5;
@@ -652,109 +652,6 @@ a.bed-number:hover {
   grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
 }
 
-.sim-page {
-  max-width: 85rem;
-}
-
-.sim-layout {
-  display: grid;
-  gap: 1rem;
-}
-
-.sim-section {
-  padding: 1.05rem;
-}
-
-.inline-label {
-  display: inline-flex;
-  align-items: center;
-  gap: .55rem;
-}
-
-.sim-live-grid {
-  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
-}
-
-.sim-controls-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
-  gap: .75rem;
-}
-
-.sim-box {
-  background: var(--panel-dark);
-  border: 1px solid var(--border);
-  border-radius: .45rem;
-  padding: .75rem .85rem;
-  display: grid;
-  gap: .55rem;
-}
-
-.sim-box-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  font-size: .875rem;
-  font-weight: 600;
-}
-
-.sim-box-head strong {
-  font: 600 .875rem var(--mono);
-  color: var(--blue);
-}
-
-.sim-box input[type="range"] {
-  width: 100%;
-  padding: 0;
-  border: 0;
-  accent-color: var(--mint);
-}
-
-.sim-checkbox {
-  display: flex;
-  align-items: center;
-  gap: .55rem;
-  color: var(--text);
-  cursor: pointer;
-}
-
-.sim-checkbox input[type="checkbox"] {
-  width: 1rem;
-  height: 1rem;
-  accent-color: var(--red);
-  cursor: pointer;
-}
-
-.sim-subhead {
-  margin: 1rem 0 .6rem;
-  font-size: .8rem;
-  font-weight: 650;
-  color: var(--secondary);
-  text-transform: uppercase;
-  letter-spacing: .04em;
-}
-
-.sim-fault-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(13.5rem, 1fr));
-  gap: .6rem;
-}
-
-.sim-fault-card {
-  background: var(--panel-dark);
-  border: 1px solid var(--border);
-  border-radius: .45rem;
-  padding: .6rem .75rem;
-}
-
-.sim-admit-form {
-  display: grid;
-  grid-template-columns: 1fr 1fr auto;
-  align-items: end;
-  gap: .7rem;
-  margin-top: .75rem;
-}
-
 .log ul {
   list-style: none;
   padding: 0;
@@ -952,7 +849,7 @@ select {
   border: 1px solid #405267;
   border-radius: .43rem;
   padding: .47rem .62rem;
-  background: #101925;
+  background: #10151b;
   color: var(--text);
 }
 
@@ -966,7 +863,7 @@ select {
 }
 
 select option {
-  background: #101925;
+  background: #10151b;
   color: var(--text);
 }
 
@@ -1047,7 +944,6 @@ select option {
   border: 2px solid #df7b8b;
   border-radius: .55rem;
   padding: .76rem .9rem;
-  box-shadow: 0 6px 24px #0007;
   animation: alarm-pulse 1.6s ease-in-out infinite alternate;
 }
 

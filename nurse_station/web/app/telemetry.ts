@@ -26,43 +26,6 @@ type Sensor = {
 
 type Vitals = { hr?: Reading; spo2?: Reading; co2?: Reading; ibp?: Reading };
 
-export type AgentChaos = {
-  delay_ms?: number;
-  drop_rate?: number;
-  malicious?: boolean;
-  removed?: boolean;
-  condition?: string;
-  target_hr?: number;
-  target_spo2?: number;
-  target_co2?: number;
-  target_sys?: number;
-  target_dia?: number;
-};
-
-export type BedChaos = {
-  vitals?: {
-    target_hr?: number;
-    target_spo2?: number;
-    target_co2?: number;
-    target_etco2?: number;
-    target_respiration?: number;
-    target_sys?: number;
-    target_dia?: number;
-    ecg_condition?: string;
-  };
-  Orin_Link?: {
-    overload_gpu?: boolean;
-    use_relay_b?: boolean;
-  };
-  Agent_ECG?: AgentChaos;
-  Agent_HR?: AgentChaos;
-  Agent_SpO2?: AgentChaos;
-  Agent_CO2?: AgentChaos;
-  Agent_EtCO2?: AgentChaos;
-  Agent_IBP?: AgentChaos;
-  Agent_NIBP?: AgentChaos;
-};
-
 export type Bed = {
   patient_id: string;
   patient_name: string;
@@ -83,7 +46,6 @@ export type Bed = {
   ecg_wave: number[];
   ecg_end_ts?: number;
   ecg_rate?: number;
-  chaos?: BedChaos;
   history: (Record<SensorId, number> & { time: string })[];
   compute_mode: string;
   gateway_cpu_inf_ms: number;
@@ -100,11 +62,11 @@ export type Device = {
   room: string;
   online: boolean;
   seconds_since_seen: number;
-  latest_vitals: Vitals;
 };
 
 export type Snapshot = {
   server_time?: number;
+  broker_connected: boolean;
   beds: Record<string, Bed>;
   bed_directory: { patient_id: string; number: string; department: string; room: string }[];
   departments: [string, string][];
@@ -127,6 +89,7 @@ export function bedStatus(bed: Bed) {
   const agents = Object.values(bed.agents);
   if (agents.some((agent) => agent.status === "ISOLATED")) return { label: "Sensor isolated", tone: "red" };
   if (agents.some((agent) => agent.status === "SUSPICIOUS")) return { label: "Degraded", tone: "amber" };
+  if (agents.some((agent) => !agent.packets_received)) return { label: "Awaiting readings", tone: "amber" };
   if (bed.compute_mode !== "Jetson Local") return { label: "Offloaded", tone: "amber" };
   return { label: "Stable", tone: "green" };
 }

@@ -1,0 +1,5 @@
+services:
+  hivemq:
+    image: hivemq/hivemq-ce:2026.5
+    ports:
+      - "127.0.0.1:${HIVEMQ_PORT:-1884}:1883"

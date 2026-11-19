@@ -5,11 +5,6 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Bedside Monitor</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link
-    href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
-    rel="stylesheet">
   <style>
     :root {
       --bg: #020403;
@@ -47,13 +42,15 @@
       position: fixed;
       inset: 0;
       z-index: 100;
-      background: radial-gradient(circle at 50% 20%, #101c28, #060a0e 75%);
+      background: #090c10;
       display: flex;
       align-items: center;
       justify-content: center;
       padding: 20px;
       font-family: var(--ui);
     }
+
+    .auth-overlay:not(.hidden) ~ .wrap { display: none; }
 
     .auth-overlay.hidden {
       display: none;
@@ -66,7 +63,8 @@
       border: 1px solid #28384a;
       border-radius: 14px;
       padding: 26px 28px;
-      box-shadow: 0 24px 60px rgba(0, 0, 0, .65);
+      max-height: calc(100dvh - 40px);
+      overflow-y: auto;
     }
 
     .auth-badge {
@@ -515,7 +513,7 @@
       pointer-events: none;
       z-index: 20;
       transition: opacity .15s;
-      box-shadow: 0 10px 30px rgba(0, 0, 0, .5);
+
     }
 
     .info:hover .tip,
@@ -622,30 +620,11 @@
   <!-- Bedside Security & Provisioning Gate -->
   <div class="auth-overlay" id="authOverlay">
     <div class="auth-card">
-      <div class="auth-badge">Isolated Bedside Node &middot; Loopback Protected</div>
-      <h2 id="authHeading">Provision &amp; Unlock Bedside Monitor</h2>
-      <p class="auth-sub">This monitor is isolated to a single hospital bed and cannot view or control other beds on the network.</p>
-
-      <div class="auth-tabs">
-        <button type="button" class="auth-tab active" id="tabRegisterBtn" onclick="switchAuthTab('register')">Register / Setup Bed</button>
-        <button type="button" class="auth-tab" id="tabLoginBtn" onclick="switchAuthTab('login')">Bedside Login</button>
-      </div>
-
+      <h2 id="authHeading">Register bedside</h2>
       <div class="auth-error" id="authError"></div>
 
       <!-- Registration Form -->
       <form class="auth-form" id="registerForm" onsubmit="submitRegister(event)">
-        <div class="form-grid">
-          <div class="field">
-            <label for="regWifi">Hospital Wi-Fi Network (SSID)</label>
-            <input id="regWifi" name="wifi_ssid" value="Hospital-CriticalCare-5G" required />
-          </div>
-          <div class="field">
-            <label for="regWifiPass">Wi-Fi Security Key</label>
-            <input id="regWifiPass" type="password" value="icu-wpa2-enterprise" required />
-          </div>
-        </div>
-
         <div class="form-grid">
           <div class="field">
             <label for="regDept">Ward / Department</label>
@@ -662,48 +641,38 @@
           </div>
           <div class="field">
             <label for="regBed">Bed Identifier</label>
-            <input id="regBed" name="patient_id" value="Bed_1" placeholder="e.g. Bed_1" required />
+            <input id="regBed" name="patient_id" readonly />
           </div>
         </div>
 
         <div class="form-grid">
           <div class="field">
             <label for="regRoom">Room Location</label>
-            <input id="regRoom" name="room" value="Room 101" placeholder="e.g. Room 101" required />
-          </div>
-          <div class="field">
-            <label for="regBroker">Nurse Station Broker IP</label>
-            <input id="regBroker" name="broker" value="127.0.0.1" required />
+            <input id="regRoom" name="room" placeholder="e.g. Room 101" required />
           </div>
         </div>
 
         <div class="form-grid">
           <div class="field">
             <label for="regPatient">Patient Name</label>
-            <input id="regPatient" name="patient_name" value="Eleanor Vance (F, 64)" required />
+            <input id="regPatient" name="patient_name" required />
           </div>
           <div class="field">
             <label for="regDiag">Clinical Diagnosis</label>
-            <input id="regDiag" name="diagnosis" value="Acute Myocardial Infarction / Post-CABG" required />
+            <input id="regDiag" name="diagnosis" placeholder="Optional" />
           </div>
         </div>
 
         <div class="field">
           <label for="regPassword">Set Bedside Access Password</label>
-          <input id="regPassword" type="password" placeholder="Set password for this bedside monitor" required minlength="3" />
+          <input id="regPassword" type="password" placeholder="Set password for this bedside monitor" required minlength="8" />
         </div>
 
-        <button type="submit" class="auth-submit">Connect Wi-Fi, Register Bed &amp; Start Monitor</button>
+        <button type="submit" class="auth-submit">Register and start monitoring</button>
       </form>
 
       <!-- Login Form -->
       <form class="auth-form hidden" id="loginForm" onsubmit="submitLogin(event)">
-        <div class="unit-summary">
-          <strong id="loginUnitTitle">ICU &middot; Bed 1 &middot; Room 101</strong>
-          <span id="loginUnitPatient">Eleanor Vance (F, 64)</span>
-          <span id="loginUnitWifi">Wi-Fi: Hospital-CriticalCare-5G (Connected)</span>
-        </div>
-
         <div class="field">
           <label for="loginPassword">Bedside Access Password</label>
           <input id="loginPassword" type="password" placeholder="Enter bedside password to unlock" required />
@@ -717,14 +686,13 @@
   <div class="wrap">
     <header>
       <div class="header-left">
-        <h1><span id="deptTitle" style="color:#e8e4a0;margin:0;font-weight:700">ICU</span><span>&middot;</span><b id="bedTitle" style="font-weight:800">Bed 1</b><span>&middot;</span><span id="roomTitle" style="color:#cbd5cf;margin:0">Room 101</span></h1>
-        <span class="patient-chip" id="patientTitle">Eleanor Vance (F, 64)</span>
-        <span class="wifi-chip" id="wifiTitle">Wi-Fi: Hospital-CriticalCare-5G</span>
+        <h1><span id="deptTitle" style="color:#e8e4a0;margin:0;font-weight:700"></span><span>&middot;</span><b id="bedTitle" style="font-weight:800"></b><span>&middot;</span><span id="roomTitle" style="color:#cbd5cf;margin:0"></span></h1>
+        <span class="patient-chip" id="patientTitle"></span>
       </div>
       <div class="right">
-        <a class="sim-link" id="simLink" href="/bedside_simulation.html" target="_blank" rel="noopener">Open simulation tab</a>
+        <a class="sim-link" id="simLink" href="/simulation" target="_blank" rel="noopener">Simulation</a>
         <button type="button" class="lock-btn" onclick="lockMonitor()">Lock monitor</button>
-        <div class="status s-ok" id="overall">Stable</div>
+        <div class="status s-warn" id="overall">Waiting</div>
       </div>
     </header>
 
@@ -732,7 +700,7 @@
       <section class="tile c8">
         <div class="head">
           <div class="lbl">ECG &middot; Lead II</div>
-          <span class="tag t-ok" id="ecgTag">Normal rhythm</span>
+          <span class="tag t-warn" id="ecgTag">Waiting</span>
         </div>
         <div class="trace-row" style="--trace-color:#45e985">
           <span class="trace-label">ECG LEAD II <small id="trust_Agent_ECG" class="trust-pct">--%</small> <small>6 s sweep</small></span>
@@ -762,9 +730,9 @@
         </div>
         <div class="cond">
           <div class="cond-card" id="condCard">
-            <span class="tag t-ok" id="condTag">Healthy</span>
-            <div class="cond-title" id="condTitle">Patient is healthy</div>
-            <div class="cond-desc" id="condDesc">Heart rhythm, heart rate and oxygen level are all within normal limits.</div>
+            <span class="tag t-warn" id="condTag">Waiting</span>
+            <div class="cond-title" id="condTitle">Awaiting readings</div>
+            <div class="cond-desc" id="condDesc"></div>
           </div>
         </div>
       </section>
@@ -775,7 +743,7 @@
             <span id="trust_Agent_HR" class="trust-pct">--%</span>
             <span class="info" tabindex="0">i<span class="tip">Beats per minute. Normal resting adult range is 60&ndash;100.</span></span>
           </div>
-          <span class="tag t-ok" id="hrTag">Normal</span>
+          <span class="tag t-warn" id="hrTag">Waiting</span>
         </div>
         <div class="vital-body">
           <div class="big" id="hr" style="color:#45e985">--<small>bpm</small></div>
@@ -789,7 +757,7 @@
             <span id="trust_Agent_SpO2" class="trust-pct">--%</span>
             <span class="info" tabindex="0">i<span class="tip">SpO2: percentage of oxygen carried in the blood. 95&ndash;100% is normal; below 90% is concerning.</span></span>
           </div>
-          <span class="tag t-ok" id="spTag">Normal</span>
+          <span class="tag t-warn" id="spTag">Waiting</span>
         </div>
         <div class="vital-body">
           <div class="big" id="sp" style="color:#f0dc36">--<small>%</small></div>
@@ -803,7 +771,7 @@
             <span id="trust_Agent_EtCO2" class="trust-pct">--%</span>
             <span class="info" tabindex="0">i<span class="tip">EtCO2 capnography. Normal physiological range is 35&ndash;45 mmHg. Indicates ventilation and perfusion.</span></span>
           </div>
-          <span class="tag t-ok" id="co2Tag">Normal</span>
+          <span class="tag t-warn" id="co2Tag">Waiting</span>
         </div>
         <div class="vital-body">
           <div class="big" id="co2" style="color:#f29a42">--<small>mmHg</small></div>
@@ -817,7 +785,7 @@
             <span id="trust_Agent_IBP" class="trust-pct">--%</span>
             <span class="info" tabindex="0">i<span class="tip">Continuous arterial line catheter. Displays Systolic/Diastolic and Mean Arterial Pressure (MAP).</span></span>
           </div>
-          <span class="tag t-ok" id="ibpTag">Normal</span>
+          <span class="tag t-warn" id="ibpTag">Waiting</span>
         </div>
         <div class="vital-body">
           <div class="big" id="ibp" style="color:#f472b6">--<small>mmHg</small></div>
@@ -831,7 +799,7 @@
             <span id="trust_Agent_NIBP" class="trust-pct">--%</span>
             <span class="info" tabindex="0">i<span class="tip">Periodic pneumatic brachial arm cuff. Displays Systolic / Diastolic pressure.</span></span>
           </div>
-          <span class="tag t-ok" id="nibpTag">Normal</span>
+          <span class="tag t-warn" id="nibpTag">Waiting</span>
         </div>
         <div class="vital-body">
           <div class="big" id="nibp" style="color:#e8e9df">--<small>mmHg</small></div>
@@ -863,6 +831,7 @@
     </main>
   </div>
 
+  <script src="/bedside-api.js"></script>
   <script>
     let bed = null;
     let authenticated = false;
@@ -901,8 +870,7 @@
     function switchAuthTab(tab) {
       showAuthError('');
       const isReg = tab === 'register';
-      $('tabRegisterBtn').classList.toggle('active', isReg);
-      $('tabLoginBtn').classList.toggle('active', !isReg);
+      $('authHeading').textContent = isReg ? 'Register bedside' : 'Unlock bedside';
       $('registerForm').classList.toggle('hidden', !isReg);
       $('loginForm').classList.toggle('hidden', isReg);
     }
@@ -910,30 +878,18 @@
     function applyProfileToUI(profile) {
       if (!profile) return;
       bed = profile.patient_id || 'Bed_1';
-      $('deptTitle').textContent = profile.department || 'ICU';
-      $('bedTitle').textContent = profile.bed_label || nice(bed);
-      $('roomTitle').textContent = profile.room || 'Room 101';
-      $('patientTitle').textContent = profile.patient_name || `Patient ${nice(bed)}`;
-      $('wifiTitle').textContent = `Wi-Fi: ${profile.wifi_ssid || 'Hospital-CriticalCare-5G'}`;
-      document.title = `${profile.department || 'ICU'} · ${profile.bed_label || nice(bed)} Bedside Monitor`;
-
-      // Pre-fill auth forms
-      $('regWifi').value = profile.wifi_ssid || 'Hospital-CriticalCare-5G';
-      $('regDept').value = profile.department || 'ICU';
-      $('regBed').value = profile.patient_id || 'Bed_1';
-      $('regRoom').value = profile.room || 'Room 101';
-      $('regBroker').value = profile.broker || '127.0.0.1';
-      $('regPatient').value = profile.patient_name || `Patient ${nice(bed)}`;
-      $('regDiag').value = profile.diagnosis || 'Observation & Standard Telemetry';
-
-      $('loginUnitTitle').textContent = `${profile.department || 'ICU'} · ${profile.bed_label || nice(bed)} · ${profile.room || 'Room 101'}`;
-      $('loginUnitPatient').textContent = `${profile.patient_name || ''} — ${profile.diagnosis || ''}`;
-      $('loginUnitWifi').textContent = `Wi-Fi: ${profile.wifi_ssid || 'Hospital-CriticalCare-5G'} (Connected)`;
+      $('regBed').value = bed;
+      if (!profile.room) return;
+      $('deptTitle').textContent = profile.department;
+      $('bedTitle').textContent = nice(bed);
+      $('roomTitle').textContent = profile.room;
+      $('patientTitle').textContent = profile.patient_name;
+      document.title = `${profile.department} · ${nice(bed)} Bedside Monitor`;
     }
 
     async function checkAuthStatus() {
       try {
-        const r = await fetch('/api/auth/status');
+        const r = await bedsideRequest('/api/auth/status');
         if (!r.ok) return;
         const status = await r.json();
         applyProfileToUI(status.profile);
@@ -952,17 +908,15 @@
       e.preventDefault();
       showAuthError('');
       const payload = {
-        wifi_ssid: $('regWifi').value.trim(),
         department: $('regDept').value,
         patient_id: $('regBed').value.trim(),
         room: $('regRoom').value.trim(),
-        broker: $('regBroker').value.trim(),
         patient_name: $('regPatient').value.trim(),
         diagnosis: $('regDiag').value.trim(),
         password: $('regPassword').value
       };
       try {
-        const r = await fetch('/api/auth/register', {
+        const r = await bedsideRequest('/api/auth/register', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
@@ -972,6 +926,8 @@
           showAuthError(res.error || 'Registration failed.');
           return;
         }
+        localStorage.setItem("bedside-session", res.token);
+        $('regPassword').value = '';
         applyProfileToUI(res.profile);
         authenticated = true;
         $('authOverlay').classList.add('hidden');
@@ -985,7 +941,7 @@
       e.preventDefault();
       showAuthError('');
       try {
-        const r = await fetch('/api/auth/login', {
+        const r = await bedsideRequest('/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ password: $('loginPassword').value })
@@ -995,6 +951,8 @@
           showAuthError(res.error || 'Incorrect password.');
           return;
         }
+        localStorage.setItem("bedside-session", res.token);
+        $('regPassword').value = '';
         applyProfileToUI(res.profile);
         authenticated = true;
         $('loginPassword').value = '';
@@ -1007,8 +965,9 @@
 
     async function lockMonitor() {
       try {
-        await fetch('/api/auth/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        await bedsideRequest('/api/auth/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
       } catch (e) {}
+      localStorage.removeItem("bedside-session");
       authenticated = false;
       $('authOverlay').classList.remove('hidden');
       switchAuthTab('login');
@@ -1186,10 +1145,11 @@
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 2500);
       try {
-        const r = await fetch('/api/state', { signal: controller.signal });
+        const r = await bedsideRequest('/api/state', { signal: controller.signal });
         const receivedAt = performance.now();
         if (r.status === 401) {
           authenticated = false;
+          switchAuthTab('login');
           $('authOverlay').classList.remove('hidden');
           return;
         }
@@ -1296,8 +1256,8 @@
         else if (co2 > 52) { o = ['status s-warn', 'Hypercapnia']; tagc = 't-warn'; tagt = 'Warning'; title = 'High End-Tidal CO2'; desc = `EtCO2 is elevated (${co2} mmHg). Risk of respiratory depression/acidosis.`; col = '251,191,36' }
         else if (art) { o = ['status s-warn', 'Check leads']; tagc = 't-warn'; tagt = 'Check'; title = 'Unclear ECG signal'; desc = 'The ECG trace is erratic. Check that electrodes are attached properly.'; col = '251,191,36' }
         else if (Number.isFinite(hr) && (hr > 130 || hr < 45)) { o = ['status s-warn', 'Warning']; tagc = 't-warn'; tagt = 'Warning'; title = hr > 130 ? 'Heart rate very high' : 'Heart rate very low'; desc = `Heart rate is ${hr} bpm, outside the safe range. Please assess the patient.`; col = '251,191,36' }
-        else if (!hasEcg || ![hr, sp, co2, mapVal].every(Number.isFinite)) { o = ['status s-warn', 'Sensor removed']; tagc = 't-warn'; tagt = 'Incomplete readings'; title = 'Sensor disconnected'; desc = 'One or more bedside sensors are removed or unavailable.'; col = '251,191,36' }
-        else { o = ['status s-ok', 'Stable']; tagc = 't-ok'; tagt = 'Healthy'; title = 'Patient is healthy'; desc = 'Heart rhythm, oxygen level, EtCO2, and blood pressure are all within normal limits.'; col = '' }
+        else if (!hasEcg || ![hr, sp, co2, mapVal].every(Number.isFinite)) { o = ['status s-warn', 'Incomplete readings']; tagc = 't-warn'; tagt = 'Incomplete readings'; title = 'Sensor disconnected'; desc = 'One or more bedside sensors are removed or unavailable.'; col = '251,191,36' }
+        else { o = ['status s-ok', 'Stable']; tagc = 't-ok'; tagt = 'Stable'; title = 'No active alerts'; desc = ''; col = '' }
         $('overall').className = o[0]; $('overall').textContent = o[1];
         set($('condTag'), 'tag ' + tagc, tagt); $('condTitle').textContent = title; $('condDesc').textContent = desc;
         const cc = $('condCard'); cc.style.background = col ? `rgba(${col},.08)` : ''; cc.style.borderColor = col ? `rgba(${col},.3)` : '';

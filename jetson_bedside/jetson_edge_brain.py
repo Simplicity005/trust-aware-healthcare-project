@@ -13,16 +13,21 @@ import time
 import json
 import hmac
 import signal
-import random
+import copy
+from pathlib import Path
+from tempfile import NamedTemporaryFile
+from urllib.parse import parse_qs, urlsplit
 import hashlib
 import secrets
 import argparse
 import threading
-from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import numpy as np
-import paho.mqtt.client as mqtt
-from patient_simulation import SAMPLE_RATE, SENSOR_AGENT_IDS, WAVEFORM_KEYS
+from sensor_agents import SensorAgentThread
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from hivemq_connection import DEPARTMENTS, broker_host, broker_port, mqtt_client, valid_device_id
+from patient_simulation import PatientSimulation, SAMPLE_RATE, SENSOR_AGENT_IDS, WAVEFORM_KEYS
 from trust_evaluator import AgentTrustTracker
 
 try:
@@ -31,35 +36,9 @@ except ImportError:
     ort = None
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CHAOS_FILE = os.path.join(BASE_DIR, "chaos.json")
 DEFAULT_MODEL = os.path.join(BASE_DIR, "ecg_anomaly.onnx")
 BEDSIDE_HTML_FILE = os.path.join(BASE_DIR, "bedside_monitor.html")
 BEDSIDE_SIM_HTML_FILE = os.path.join(BASE_DIR, "bedside_simulation.html")
-CHAOS_LOCK = threading.Lock()
-
-DEFAULT_BED_PROFILES = {
-    "Bed_1": {
-        "department": "ICU",
-        "room": "Room 101",
-        "patient_name": "Eleanor Vance (F, 64)",
-        "diagnosis": "Acute Myocardial Infarction / Post-CABG",
-        "wifi_ssid": "Hospital-CriticalCare-5G",
-    },
-    "Bed_2": {
-        "department": "CCU",
-        "room": "Room 201",
-        "patient_name": "Arthur Pendelton (M, 71)",
-        "diagnosis": "Severe ARDS & Sepsis Protocol",
-        "wifi_ssid": "Hospital-CriticalCare-5G",
-    },
-    "Bed_3": {
-        "department": "NCU",
-        "room": "Room 301",
-        "patient_name": "Sarah Jenkins (F, 42)",
-        "diagnosis": "Traumatic Brain Injury / ICP Monitor",
-        "wifi_ssid": "Hospital-CriticalCare-5G",
-    },
-}
 
 
 def load_bedside_html():
@@ -103,133 +82,65 @@ def default_bed_chaos():
     }
 
 
-def read_patient_chaos(patient_id="Bed_1"):
-    if not os.path.exists(CHAOS_FILE):
-        return default_bed_chaos()
-    try:
-        with CHAOS_LOCK:
-            with open(CHAOS_FILE, "r") as f:
-                data = json.load(f)
-        if patient_id in data and isinstance(data[patient_id], dict):
-            base = default_bed_chaos()
-            for k, v in data[patient_id].items():
-                if k in base and isinstance(v, dict):
-                    base[k].update(v)
-                elif k in base:
-                    base[k] = v
-            return base
-        if "Agent_ECG" in data:
-            base = default_bed_chaos()
-            for k, v in data.items():
-                if k in base and isinstance(v, dict):
-                    base[k].update(v)
-                elif k in base:
-                    base[k] = v
-            return base
-        return default_bed_chaos()
-    except Exception:
-        return default_bed_chaos()
-
-
-def write_patient_chaos(patient_id, bed_chaos):
-    try:
-        with CHAOS_LOCK:
-            current = {}
-            if os.path.exists(CHAOS_FILE):
-                try:
-                    with open(CHAOS_FILE, "r") as f:
-                        current = json.load(f)
-                except Exception:
-                    current = {}
-            if "Agent_ECG" in current:
-                current = {"Bed_1": current}
-            current[patient_id] = bed_chaos
-            tmp_path = CHAOS_FILE + f".tmp.{random.randint(1000, 9999)}"
-            with open(tmp_path, "w") as f:
-                json.dump(current, f, indent=2)
-            os.replace(tmp_path, CHAOS_FILE)
-        return True
-    except Exception:
-        return False
-
-
-def update_chaos_file(new_data, patient_id=None):
-    if patient_id:
-        cfg = read_patient_chaos(patient_id)
-        for k, v in new_data.items():
-            if k in cfg and isinstance(v, dict):
-                cfg[k].update(v)
-            else:
-                cfg[k] = v
-        write_patient_chaos(patient_id, cfg)
-    else:
-        for pid in ["Bed_1", "Bed_2", "Bed_3"]:
-            cfg = read_patient_chaos(pid)
-            for k, v in new_data.items():
-                if k in cfg and isinstance(v, dict):
-                    cfg[k].update(v)
-                else:
-                    cfg[k] = v
-            write_patient_chaos(pid, cfg)
-
-
 class BedsideAuthController:
-    """Manages per-bedside registration (Wi-Fi, Bed ID, Ward, Room, Password) and session tokens."""
+    """Own the login and durable registration of exactly one local unit."""
 
     def __init__(self, brain, web_port):
         self.brain = brain
         self.web_port = web_port
-        self.cookie_name = f"bedside_session_{web_port}"
         self.lock = threading.Lock()
         self.registered = False
-        self.password_salt = b""
-        self.password_hash = b""
         self.sessions = set()
+        directory = Path(os.environ.get("BEDSIDE_STATE_DIR") or Path.home() / ".local" / "state" / "nurse-station")
+        self.record = directory / f"{brain.patient_id}.json"
+
+    def restore(self):
+        if self.record.exists():
+            self.activate(json.loads(self.record.read_text(encoding="utf-8")))
+
+    def activate(self, record):
+        self.password_salt = bytes.fromhex(record["salt"])
+        self.password_hash = bytes.fromhex(record["hash"])
+        self.brain.start(record["profile"], record["registration_id"])
+        self.registered = True
 
     def _hash_password(self, password, salt):
         return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 120_000)
 
     def register(self, payload):
-        password = str(payload.get("password") or "").strip()
-        if len(password) < 3:
-            raise ValueError("Password must be at least 3 characters.")
-
-        raw_bed = str(payload.get("patient_id") or self.brain.patient_id).strip()
-        if not raw_bed:
-            raw_bed = self.brain.patient_id
-        # Normalize "1" or "Bed 1" -> "Bed_1"
-        if raw_bed.isdigit():
-            patient_id = f"Bed_{raw_bed}"
-        else:
-            patient_id = raw_bed.replace(" ", "_")
-
-        department = str(payload.get("department") or self.brain.department).strip() or "ICU"
-        room = str(payload.get("room") or self.brain.room).strip() or "Room 101"
-        patient_name = str(payload.get("patient_name") or self.brain.patient_name).strip() or f"Patient {patient_id}"
-        diagnosis = str(payload.get("diagnosis") or self.brain.diagnosis).strip() or "Observation & Standard Telemetry"
-        wifi_ssid = str(payload.get("wifi_ssid") or self.brain.wifi_ssid).strip() or "Hospital-CriticalCare-5G"
-        broker = str(payload.get("broker") or self.brain.broker).strip() or self.brain.broker
-
+        password = payload.get("password")
+        if not isinstance(password, str) or len(password) < 8:
+            raise ValueError("Use a bedside password of at least 8 characters.")
+        if payload.get("patient_id", self.brain.patient_id) != self.brain.patient_id:
+            raise ValueError("The device ID is fixed by the launcher.")
+        profile = {}
+        for key in ("department", "room", "patient_name", "diagnosis"):
+            value = payload.get(key, "")
+            if not isinstance(value, str) or len(value) > 256:
+                raise ValueError(f"Enter a valid {key.replace('_', ' ')}.")
+            profile[key] = value.strip()
+        if profile["department"] not in dict(DEPARTMENTS) or not profile["room"] or not profile["patient_name"]:
+            raise ValueError("Enter the patient, room and department.")
         salt = secrets.token_bytes(16)
-        pw_hash = self._hash_password(password, salt)
-        token = secrets.token_urlsafe(32)
-
+        record = {"profile": profile, "registration_id": secrets.token_hex(16), "salt": salt.hex(),
+                  "hash": self._hash_password(password, salt).hex()}
         with self.lock:
-            self.password_salt = salt
-            self.password_hash = pw_hash
-            self.registered = True
-            self.sessions = {token}
-
-        self.brain.update_registration(
-            patient_id=patient_id,
-            department=department,
-            room=room,
-            patient_name=patient_name,
-            diagnosis=diagnosis,
-            wifi_ssid=wifi_ssid,
-            broker=broker,
-        )
-        return token
+            if self.registered:
+                raise ValueError("This device is already registered.")
+            self.record.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            with NamedTemporaryFile(mode="w", encoding="utf-8", dir=self.record.parent, delete=False) as output:
+                temporary = Path(output.name)
+                json.dump(record, output)
+            try:
+                os.link(temporary, self.record)
+            except FileExistsError:
+                raise ValueError("This device is already registered.") from None
+            finally:
+                temporary.unlink(missing_ok=True)
+            self.activate(record)
+            token = secrets.token_urlsafe(32)
+            self.sessions.add(token)
+            return token
 
     def login(self, password):
         with self.lock:
@@ -244,10 +155,7 @@ class BedsideAuthController:
 
     def logout(self, token=None):
         with self.lock:
-            if token:
-                self.sessions.discard(token)
-            else:
-                self.sessions.clear()
+            self.sessions.discard(token)
 
     def is_authenticated(self, token):
         if not token:
@@ -263,64 +171,68 @@ class BedsideAuthController:
             "registered": reg,
             "authenticated": authed,
             "web_port": self.web_port,
-            "profile": self.brain.get_profile(),
+            "profile": self.brain.get_profile() if authed else {"patient_id": self.brain.patient_id},
         }
 
 
-def make_bedside_handler(brain, auth_ctrl, meta_info):
+def make_bedside_handler(brain, auth_ctrl):
     class BedsideMonitorHandler(BaseHTTPRequestHandler):
         def log_message(self, format, *args):
             return
 
         def _get_session_token(self):
-            raw_cookie = self.headers.get("Cookie", "")
-            if raw_cookie:
-                cookie = SimpleCookie()
-                try:
-                    cookie.load(raw_cookie)
-                    if auth_ctrl.cookie_name in cookie:
-                        return cookie[auth_ctrl.cookie_name].value
-                except Exception:
-                    pass
             auth_header = self.headers.get("Authorization", "")
             if auth_header.startswith("Bearer "):
                 return auth_header.removeprefix("Bearer ").strip()
             return None
 
-        def _send_json(self, obj, code=200, set_cookie=None, clear_cookie=False):
+        def _send_json(self, obj, code=200):
             payload = json.dumps(obj).encode("utf-8")
             self.send_response(code)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Cache-Control", "no-store")
-            if set_cookie:
-                self.send_header(
-                    "Set-Cookie",
-                    f"{auth_ctrl.cookie_name}={set_cookie}; Path=/; HttpOnly; SameSite=Strict",
-                )
-            elif clear_cookie:
-                self.send_header(
-                    "Set-Cookie",
-                    f"{auth_ctrl.cookie_name}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict",
-                )
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
 
+        def local_request(self):
+            host = self.headers.get("Host", "")
+            allowed = {f"localhost:{auth_ctrl.web_port}", f"127.0.0.1:{auth_ctrl.web_port}"}
+            origin = self.headers.get("Origin")
+            if host not in allowed or (origin and origin != f"http://{host}"):
+                self._send_json({"error": "Local bedside access only"}, code=403)
+                return False
+            query = parse_qs(urlsplit(self.path).query)
+            if any(value != brain.patient_id for key in ("bed", "patient_id") for value in query.get(key, [])):
+                self._send_json({"error": "Unknown bed"}, code=404)
+                return False
+            return True
+
         def do_GET(self):
+            if not self.local_request():
+                return
             path_only = self.path.split("?", 1)[0]
             token = self._get_session_token()
 
+            if path_only == "/bedside-api.js":
+                body = Path(BASE_DIR, "bedside-api.js").read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/javascript; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
             if path_only == "/api/auth/status":
                 self._send_json(auth_ctrl.status_payload(token))
                 return
 
-            if self.path.startswith("/api/state"):
+            if path_only == "/api/state":
                 if not auth_ctrl.is_authenticated(token):
                     self._send_json({"error": "Authentication required", "auth": auth_ctrl.status_payload(token)}, code=401)
                     return
 
                 pid = brain.patient_id
-                chaos = read_patient_chaos(pid)
+                chaos = brain.get_config()
                 sensors_snap = brain.get_sensor_snapshot()
                 with brain.lock:
                     bed_state = {
@@ -347,13 +259,13 @@ def make_bedside_handler(brain, auth_ctrl, meta_info):
                         "packets": brain.packets_processed,
                         "ecg_wave": [] if sensors_snap["Agent_ECG"]["removed"] else (brain.latest_ecg_wave[-250:] if brain.latest_ecg_wave else []),
                         "sensors": sensors_snap,
-                        "sensor_links": brain.sensor_links,
+                        "sensor_links": copy.deepcopy(brain.sensor_links),
                         "chaos": chaos,
                     }
                 self._send_json(
                     {
                         "broker": f"{brain.broker}:{brain.port}",
-                        "provider": meta_info.get("provider", "CUDAExecutionProvider"),
+                        "provider": brain.active_provider,
                         "server_time": time.time(),
                         "patient_id": pid,
                         "profile": brain.get_profile(),
@@ -361,33 +273,48 @@ def make_bedside_handler(brain, auth_ctrl, meta_info):
                         "beds": {pid: bed_state},
                     }
                 )
-            elif self.path.startswith("/api/chaos"):
+            elif path_only == "/api/chaos":
                 if not auth_ctrl.is_authenticated(token):
                     self._send_json({"error": "Authentication required"}, code=401)
                     return
-                self._send_json(read_patient_chaos(brain.patient_id))
+                self._send_json(brain.get_config())
             elif path_only in ("/bedside_simulation.html", "/bedside_simulation", "/simulation"):
                 body = load_bedside_sim_html().encode("utf-8")
                 self.send_response(200)
+                self.send_header("Content-Security-Policy", "frame-ancestors 'none'")
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Cache-Control", "no-store")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
-            else:
+            elif path_only in ("/", "/bedside_monitor.html"):
                 body = load_bedside_html().encode("utf-8")
                 self.send_response(200)
+                self.send_header("Content-Security-Policy", "frame-ancestors 'none'")
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Cache-Control", "no-store")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
 
+            else:
+                self.send_error(404)
+
         def do_POST(self):
+            if not self.local_request():
+                return
+            if self.headers.get_content_type() != "application/json":
+                self._send_json({"error": "Expected application/json"}, code=415)
+                return
             try:
                 length = int(self.headers.get("Content-Length", "0"))
+                if not 0 <= length <= 65536:
+                    self._send_json({"error": "Invalid request size"}, code=413)
+                    return
                 raw = self.rfile.read(length).decode("utf-8") if length > 0 else "{}"
                 data = json.loads(raw)
+                if not isinstance(data, dict):
+                    raise ValueError("Expected an object")
             except Exception:
                 self._send_json({"ok": False, "error": "Invalid JSON"}, code=400)
                 return
@@ -395,12 +322,15 @@ def make_bedside_handler(brain, auth_ctrl, meta_info):
             path_only = self.path.split("?", 1)[0]
             token = self._get_session_token()
 
+            if data.get("patient_id", brain.patient_id) != brain.patient_id:
+                self._send_json({"error": "Unknown bed"}, code=404)
+                return
+
             if path_only == "/api/auth/register":
                 try:
                     new_token = auth_ctrl.register(data)
                     self._send_json(
                         {"ok": True, "token": new_token, **auth_ctrl.status_payload(new_token)},
-                        set_cookie=new_token,
                     )
                 except ValueError as err:
                     self._send_json({"ok": False, "error": str(err)}, code=400)
@@ -411,7 +341,6 @@ def make_bedside_handler(brain, auth_ctrl, meta_info):
                     new_token = auth_ctrl.login(data.get("password", ""))
                     self._send_json(
                         {"ok": True, "token": new_token, **auth_ctrl.status_payload(new_token)},
-                        set_cookie=new_token,
                     )
                 except ValueError as err:
                     self._send_json({"ok": False, "error": str(err)}, code=401)
@@ -419,32 +348,38 @@ def make_bedside_handler(brain, auth_ctrl, meta_info):
 
             if path_only == "/api/auth/logout":
                 auth_ctrl.logout(token)
-                self._send_json({"ok": True, **auth_ctrl.status_payload(None)}, clear_cookie=True)
+                self._send_json({"ok": True, **auth_ctrl.status_payload(None)})
                 return
 
             if not auth_ctrl.is_authenticated(token):
                 self._send_json({"ok": False, "error": "Authentication required"}, code=401)
                 return
 
-            # Strict isolation: always operate ONLY on this bedside server's bound patient_id
-            pid = brain.patient_id
+            try:
+                with brain.lock:
+                    self.update_simulation(path_only, data)
+            except (TypeError, ValueError, OverflowError):
+                self._send_json({"error": "Invalid simulation settings"}, code=400)
 
-            if self.path.startswith("/api/chaos/reset"):
+        def update_simulation(self, path_only, data):
+            if path_only == "/api/chaos/reset":
                 clean = default_bed_chaos()
-                write_patient_chaos(pid, clean)
+                brain.set_config(clean)
                 self._send_json({"ok": True, "chaos": clean})
-            elif self.path.startswith("/api/chaos"):
+            elif path_only == "/api/chaos":
                 chaos_cfg = data.get("chaos", default_bed_chaos())
-                write_patient_chaos(pid, chaos_cfg)
+                if not isinstance(chaos_cfg, dict) or not all(isinstance(v, dict) for v in chaos_cfg.values()):
+                    raise ValueError("Expected sensor settings")
+                brain.set_config(chaos_cfg)
                 self._send_json({"ok": True, "chaos": chaos_cfg})
-            elif self.path.startswith("/api/manipulate") or self.path.startswith("/api/vitals"):
+            elif path_only in ("/api/manipulate", "/api/vitals"):
                 if data.get("reset"):
                     clean = default_bed_chaos()
-                    write_patient_chaos(pid, clean)
+                    brain.set_config(clean)
                     self._send_json({"ok": True, "chaos": clean})
                     return
 
-                chaos = read_patient_chaos(pid)
+                chaos = brain.get_config()
                 if "vitals" not in chaos:
                     chaos["vitals"] = {}
 
@@ -507,7 +442,7 @@ def make_bedside_handler(brain, auth_ctrl, meta_info):
                     chaos.setdefault("Orin_Link", {})["overload_gpu"] = ov
                     chaos.setdefault("Orin_Link", {})["use_relay_b"] = ov
 
-                write_patient_chaos(pid, chaos)
+                brain.set_config(chaos)
                 self._send_json({"ok": True, "chaos": chaos})
             else:
                 self._send_json({"ok": False}, code=404)
@@ -515,11 +450,12 @@ def make_bedside_handler(brain, auth_ctrl, meta_info):
     return BedsideMonitorHandler
 
 
-def start_bedside_web_server(brain, meta_info, web_port=8080, web_host="127.0.0.1"):
+def start_bedside_web_server(brain, web_port=8080, web_host="127.0.0.1"):
     auth_ctrl = BedsideAuthController(brain, web_port)
-    handler_cls = make_bedside_handler(brain, auth_ctrl, meta_info)
+    handler_cls = make_bedside_handler(brain, auth_ctrl)
     try:
         server = ThreadingHTTPServer((web_host, web_port), handler_cls)
+        auth_ctrl.restore()
         server.daemon_threads = True
         t = threading.Thread(target=server.serve_forever, daemon=True)
         t.start()
@@ -543,13 +479,10 @@ class JetsonEdgeBrain:
         self.active_provider = active_provider
         self.input_name = self.session.get_inputs()[0].name if self.session else "ecg_input"
 
-        defaults = DEFAULT_BED_PROFILES.get(patient_id, {})
-        digits = "".join(filter(str.isdigit, patient_id)) or "1"
-        self.department = defaults.get("department", "ICU")
-        self.room = defaults.get("room", f"Room 10{digits}")
-        self.patient_name = defaults.get("patient_name", f"Patient {patient_id}")
-        self.diagnosis = defaults.get("diagnosis", "Observation & Standard Telemetry")
-        self.wifi_ssid = defaults.get("wifi_ssid", "Hospital-CriticalCare-5G")
+        self.department = self.room = self.patient_name = self.diagnosis = ""
+        self.registration_id = None
+        self.config = default_bed_chaos()
+        self.workers = []
 
         self.latest_hr = None
         self.latest_spo2 = None
@@ -591,8 +524,8 @@ class JetsonEdgeBrain:
             for agent_id in SENSOR_AGENT_IDS
         }
         self.sensor_links["Agent_CO2"] = self.sensor_links["Agent_EtCO2"]
-        self.lock = threading.Lock()
-        self.client = None
+        self.lock = threading.RLock()
+        self.client = mqtt_client(f"Jetson-{patient_id}", broker, port)
 
     def get_profile(self):
         with self.lock:
@@ -603,106 +536,63 @@ class JetsonEdgeBrain:
                 "room": self.room,
                 "patient_name": self.patient_name,
                 "diagnosis": self.diagnosis,
-                "wifi_ssid": self.wifi_ssid,
                 "broker": self.broker,
                 "web_port": self.web_port,
             }
 
-    def update_registration(self, patient_id, department, room, patient_name, diagnosis, wifi_ssid, broker):
+    def get_config(self):
         with self.lock:
-            old_pid = self.patient_id
-            self.patient_id = patient_id
-            self.department = department
-            self.room = room
-            self.patient_name = patient_name
-            self.diagnosis = diagnosis
-            self.wifi_ssid = wifi_ssid
-            self.broker = broker
+            return copy.deepcopy(self.config)
 
-        if self.client and old_pid != patient_id:
-            try:
-                self.client.unsubscribe(f"hospital/{old_pid}/sensors/#")
-                self.client.unsubscribe(f"hospital/{old_pid}/control/#")
-                self.client.subscribe(f"hospital/{patient_id}/sensors/#")
-                self.client.subscribe(f"hospital/{patient_id}/control/#")
-            except Exception:
-                pass
-        self.send_discovery_announcement(auto_admit=True)
+    def set_config(self, config):
+        with self.lock:
+            self.config = copy.deepcopy(config)
 
-    def start(self):
-        cid = f"Jetson_Edge_Brain_{self.patient_id}_{os.getpid()}_{random.randint(100, 999)}"
-        if hasattr(mqtt, "CallbackAPIVersion"):
-            self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=cid)
-        else:
-            self.client = mqtt.Client(client_id=cid)
+    def start(self, profile, registration_id):
+        with self.lock:
+            self.department = profile["department"]
+            self.room = profile["room"]
+            self.patient_name = profile["patient_name"]
+            self.diagnosis = profile["diagnosis"]
+            self.registration_id = registration_id
         self.client.on_connect = self._on_connect
         self.client.on_message = self._on_message
-        try:
-            self.client.connect(self.broker, self.port, keepalive=60)
-            self.client.loop_start()
-        except Exception as e:
-            print(f"[EDGE BRAIN:{self.patient_id}] Warning: Could not connect to broker {self.broker}:{self.port}: {e}")
-
-        self.pub_thread = threading.Thread(target=self._run_summary_loop, daemon=True)
-        self.pub_thread.start()
+        self.client.connect_async(self.broker, self.port, keepalive=60)
+        self.client.loop_start()
+        simulation = PatientSimulation(self.patient_id)
+        self.workers = [SensorAgentThread(self.patient_id, aid, simulation, self.get_config,
+                                          self.deliver_sample, self.stop_event) for aid in SENSOR_AGENT_IDS]
+        self.workers.append(threading.Thread(target=self._run_summary_loop, daemon=True))
+        for worker in self.workers:
+            worker.start()
 
     def stop(self):
         self.stop_event.set()
-        if self.client:
-            try:
-                self.client.loop_stop()
-                self.client.disconnect()
-            except Exception:
-                pass
+        for worker in self.workers:
+            worker.join(timeout=2)
+        if self.registration_id:
+            self.client.disconnect()
+            self.client.loop_stop()
 
     def _on_connect(self, client, userdata, flags, rc, properties=None):
-        print(f"[EDGE BRAIN:{self.patient_id}] Connected to MQTT broker {self.broker}:{self.port}")
-        self.client.subscribe(f"hospital/{self.patient_id}/sensors/#")
-        self.client.subscribe(f"hospital/{self.patient_id}/control/#")
-        self.client.subscribe("hospital/control/#")
-        self.client.subscribe("hospital/discovery/probe")
+        if rc != 0:
+            print(f"[{self.patient_id}] HiveMQ rejected the connection: {rc}", flush=True)
+            return
+        client.subscribe(f"hospital/{self.patient_id}/control/#")
         self.send_discovery_announcement()
 
-    def send_discovery_announcement(self, auto_admit=False):
-        if not self.client:
-            return
-        try:
-            with self.lock:
-                hr = self.latest_hr
-                spo2 = self.latest_spo2
-                co2 = self.latest_co2
-                ibp = self.latest_ibp
-                nibp = self.latest_nibp
-                ecg_var = self.latest_ecg_var
-                profile = {
-                    "department": self.department,
-                    "room": self.room,
-                    "patient_name": self.patient_name,
-                    "diagnosis": self.diagnosis,
-                    "wifi_ssid": self.wifi_ssid,
-                    "web_port": self.web_port,
-                    "auto_admit": auto_admit,
-                }
-            announcement = {
-                "patient_id": self.patient_id,
-                "device_model": "NVIDIA Jetson Orin",
-                "exec_provider": self.active_provider,
-                "broker": f"{self.broker}:{self.port}",
-                "timestamp": time.time(),
-                "status": "ready",
-                **profile,
-                "latest_vitals": {
-                    "hr": hr,
-                    "spo2": spo2,
-                    "co2": co2,
-                    "ibp": ibp,
-                    "nibp": nibp,
-                    "ecg_variance": ecg_var,
-                },
-            }
-            self.client.publish("hospital/discovery/announce", json.dumps(announcement), qos=1)
-        except Exception:
-            pass
+    def send_discovery_announcement(self):
+        self.client.publish(f"hospital/{self.patient_id}/registration", json.dumps({
+            "patient_id": self.patient_id, "registration_id": self.registration_id,
+            "department": self.department, "room": self.room, "patient_name": self.patient_name,
+            "diagnosis": self.diagnosis, "exec_provider": self.active_provider,
+        }), qos=1)
+
+    def deliver_sample(self, packet):
+        self.process_sensor(packet)
+        if self.client.is_connected():
+            topic = f"hospital/{self.patient_id}/sensors/{packet['agent_id']}"
+            self.client.publish(topic, json.dumps(packet))
 
     def _track_link(self, agent_id, payload, now):
         if agent_id not in self.sensor_links:
@@ -724,48 +614,49 @@ class JetsonEdgeBrain:
         info["loss_pct"] = round((info["lost"] / total) * 100.0, 1)
 
     def get_sensor_snapshot(self):
-        bed_chaos = read_patient_chaos(self.patient_id)
-        snapshot = {}
-        for agent_id, sensor in self.latest_sensors.items():
-            is_removed = bool(bed_chaos.get(agent_id, {}).get("removed", False))
-            if agent_id == "Agent_EtCO2" and not is_removed:
-                is_removed = bool(bed_chaos.get("Agent_CO2", {}).get("removed", False))
+        with self.lock:
+            bed_chaos = self.config
+            snapshot = {}
+            for agent_id, sensor in self.latest_sensors.items():
+                is_removed = bool(bed_chaos.get(agent_id, {}).get("removed", False))
+                if agent_id == "Agent_EtCO2" and not is_removed:
+                    is_removed = bool(bed_chaos.get("Agent_CO2", {}).get("removed", False))
 
-            if is_removed:
+                if is_removed:
+                    snapshot[agent_id] = {
+                        "value": None,
+                        "reading": {},
+                        "waveform": [],
+                        "seq": sensor.get("seq"),
+                        "sent_ts": sensor.get("sent_ts"),
+                        "valid": False,
+                        "removed": True,
+                        "trust_score": 0.0,
+                        "signal_quality": 0,
+                        "connection_status": "REMOVED",
+                        "reliability_level": "REMOVED",
+                        "sensor_health": "REMOVED",
+                        "age_ms": None,
+                    }
+                    continue
+
+                tracker = self.trust_trackers[agent_id]
+                reliability = tracker.evaluate_status()
+                connected = reliability != "DISCONNECTED"
+                valid = bool(tracker.validity_window and tracker.validity_window[-1] > 0)
+                quality_score = min(tracker.s_l, tracker.s_j, tracker.s_p, tracker.s_d) if connected and valid else 0.0
+                signal_quality = round(float(np.clip(quality_score, 0.0, 1.0)) * 100)
                 snapshot[agent_id] = {
-                    "value": None,
-                    "reading": {},
-                    "waveform": [],
-                    "seq": sensor.get("seq"),
-                    "sent_ts": sensor.get("sent_ts"),
-                    "valid": False,
-                    "removed": True,
-                    "trust_score": 0.0,
-                    "signal_quality": 0,
-                    "connection_status": "REMOVED",
-                    "reliability_level": "REMOVED",
-                    "sensor_health": "REMOVED",
-                    "age_ms": None,
+                    **sensor,
+                    "removed": False,
+                    "trust_score": round(tracker.trust_score * 100, 1),
+                    "signal_quality": signal_quality,
+                    "connection_status": "CONNECTED" if connected else "DISCONNECTED",
+                    "reliability_level": reliability,
+                    "sensor_health": "HEALTHY" if connected and valid else "DEGRADED" if connected else "DISCONNECTED",
+                    "age_ms": round((time.time() - tracker.last_rx_time) * 1000) if tracker.last_rx_time else None,
                 }
-                continue
-
-            tracker = self.trust_trackers[agent_id]
-            reliability = tracker.evaluate_status()
-            connected = reliability != "DISCONNECTED"
-            valid = bool(tracker.validity_window and tracker.validity_window[-1] > 0)
-            quality_score = min(tracker.s_l, tracker.s_j, tracker.s_p, tracker.s_d) if connected and valid else 0.0
-            signal_quality = round(float(np.clip(quality_score, 0.0, 1.0)) * 100)
-            snapshot[agent_id] = {
-                **sensor,
-                "removed": False,
-                "trust_score": round(tracker.trust_score * 100, 1),
-                "signal_quality": signal_quality,
-                "connection_status": "CONNECTED" if connected else "DISCONNECTED",
-                "reliability_level": reliability,
-                "sensor_health": "HEALTHY" if connected and valid else "DEGRADED" if connected else "DISCONNECTED",
-                "age_ms": round((time.time() - tracker.last_rx_time) * 1000) if tracker.last_rx_time else None,
-            }
-        return snapshot
+            return snapshot
 
     def _run_inference(self, ecg_wave, overload_gpu=False):
         t0 = time.perf_counter()
@@ -796,10 +687,9 @@ class JetsonEdgeBrain:
             topic = msg.topic
             payload = json.loads(msg.payload.decode("utf-8"))
 
-            if topic == "hospital/discovery/probe":
+            if topic == f"hospital/{self.patient_id}/control/probe":
                 self.send_discovery_announcement()
                 return
-
             if topic == f"hospital/{self.patient_id}/control/admit":
                 with self.lock:
                     if payload.get("department"):
@@ -814,25 +704,14 @@ class JetsonEdgeBrain:
                     self.force_offload = bool(payload.get("offload", False))
                 return
 
-            if topic == f"hospital/{self.patient_id}/control/chaos":
-                update_chaos_file(payload, patient_id=self.patient_id)
-                return
+        except (TypeError, ValueError) as error:
+            print(f"[{self.patient_id}] Invalid control message: {error}")
 
-            if topic == "hospital/control/chaos":
-                update_chaos_file(payload)
-                return
-
-            topic_agent_id = payload.get("agent_id", "")
-            agent_id = "Agent_EtCO2" if topic_agent_id == "Agent_CO2" else topic_agent_id
-            if agent_id not in self.trust_trackers:
-                return
-            valid_topics = {f"hospital/{self.patient_id}/sensors/{agent_id}"}
-            if agent_id == "Agent_EtCO2":
-                valid_topics.add(f"hospital/{self.patient_id}/sensors/Agent_CO2")
-            if topic not in valid_topics:
-                return
-
-            bed_chaos = read_patient_chaos(self.patient_id)
+    def process_sensor(self, payload):
+        try:
+            now = time.time()
+            agent_id = payload["agent_id"]
+            bed_chaos = self.get_config()
             if bool(bed_chaos.get(agent_id, {}).get("removed", False)):
                 return
 
@@ -993,13 +872,13 @@ class JetsonEdgeBrain:
     def _run_summary_loop(self):
         loop_cnt = 0
         while not self.stop_event.is_set():
-            time.sleep(0.40)
+            if self.stop_event.wait(0.40):
+                break
             loop_cnt += 1
+            if not self.client.is_connected():
+                continue
             if loop_cnt % 10 == 0:
                 self.send_discovery_announcement()
-
-            if not self.client:
-                continue
 
             sensors_snap = self.get_sensor_snapshot()
             with self.lock:
@@ -1062,9 +941,8 @@ def create_shared_onnx_session(model_path):
 def main():
     parser = argparse.ArgumentParser(description="Bedside GPU Edge Brain & Isolated Local Bedside Monitor")
     parser.add_argument("--patient-id", type=str, default="Bed_1", help="Primary Patient ID")
-    parser.add_argument("--patients", nargs="+", default=None, help="Optional multi-patient list (e.g. Bed_1 Bed_2)")
-    parser.add_argument("--broker", type=str, default="127.0.0.1", help="MQTT broker address")
-    parser.add_argument("--port", type=int, default=1883, help="MQTT broker port")
+    parser.add_argument("--broker", type=str, default=broker_host(), help="HiveMQ hostname")
+    parser.add_argument("--port", type=int, default=None, help="HiveMQ port")
     parser.add_argument("--web-port", type=int, default=8080, help="Base Local Bedside Monitor Web UI port")
     parser.add_argument(
         "--web-host",
@@ -1075,42 +953,17 @@ def main():
     parser.add_argument("--model", type=str, default=DEFAULT_MODEL, help="Path to ecg_anomaly.onnx")
     args = parser.parse_args()
 
-    patient_list = args.patients if args.patients else [args.patient_id]
+    if args.web_host != "127.0.0.1":
+        parser.error("Bedside pages are available only on local loopback.")
+    args.port = args.port or broker_port(args.broker)
+    if not valid_device_id(args.patient_id):
+        parser.error("Choose a unique device ID using letters, numbers, underscores or hyphens.")
     session, active_provider = create_shared_onnx_session(args.model)
-
-    print("=" * 66)
-    print("NVIDIA Jetson Orin - Bedside GPU Edge Brain Active")
-    print(f"Patient Nodes:     {patient_list}")
-    print(f"MQTT Gateway:      {args.broker}:{args.port}")
-    print(f"Bind Host:         {args.web_host} (isolated from external Wi-Fi peers)")
-    print(f"HTML Template:     {BEDSIDE_HTML_FILE}")
-    print(f"Inference Engine:  {active_provider}")
-    print("=" * 66)
-
-    engines = []
-    web_servers = []
-    for idx, pid in enumerate(patient_list):
-        unit_port = args.web_port + idx
-        brain = JetsonEdgeBrain(
-            patient_id=pid,
-            broker=args.broker,
-            port=args.port,
-            session=session,
-            active_provider=active_provider,
-            web_port=unit_port,
-        )
-        brain.start()
-        engines.append(brain)
-
-        meta = {
-            "broker": f"{args.broker}:{args.port}",
-            "provider": active_provider,
-            "patient_id": pid,
-            "web_port": unit_port,
-        }
-        srv = start_bedside_web_server(brain, meta, web_port=unit_port, web_host=args.web_host)
-        if srv:
-            web_servers.append(srv)
+    brain = JetsonEdgeBrain(args.patient_id, args.broker, args.port, session, active_provider, args.web_port)
+    server = start_bedside_web_server(brain, web_port=args.web_port, web_host=args.web_host)
+    if server is None:
+        raise SystemExit(f"Could not start {args.patient_id} on port {args.web_port}")
+    print(f"[{args.patient_id}] HiveMQ {args.broker}:{args.port} · {active_provider}", flush=True)
 
     stop_event = threading.Event()
 
@@ -1124,13 +977,9 @@ def main():
     while not stop_event.is_set():
         time.sleep(0.5)
 
-    for brain in engines:
-        brain.stop()
-    for srv in web_servers:
-        try:
-            srv.shutdown()
-        except Exception:
-            pass
+    server.shutdown()
+    server.server_close()
+    brain.stop()
 
 
 if __name__ == "__main__":

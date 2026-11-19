@@ -5,17 +5,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Bedside Simulation Control</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link
-    href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
-    rel="stylesheet">
   <style>
     :root {
-      --bg: #0b111a;
-      --card: #141e2b;
-      --inner: #101925;
-      --border: #28384a;
+      --bg: #090c10;
+      --card: #151b21;
+      --inner: #10151b;
+      --border: #303942;
       --text: #ecf2f8;
       --muted: #a5b5c7;
       --dim: #738498;
@@ -46,12 +41,14 @@
       position: fixed;
       inset: 0;
       z-index: 100;
-      background: rgba(6, 10, 15, .94);
+      background: #080c10;
       display: flex;
       align-items: center;
       justify-content: center;
       padding: 20px;
     }
+
+    .auth-gate:not(.hidden) ~ .container { display: none; }
 
     .auth-gate.hidden {
       display: none;
@@ -255,7 +252,7 @@
 
     .sensor-slot.is-removed {
       border-color: #7f424d;
-      background: rgba(65, 35, 45, .35);
+      background: #271c22;
     }
 
     .sensor-slot-info strong {
@@ -392,7 +389,7 @@
 
 <body>
   <!-- Authentication check overlay for this bedside unit -->
-  <div class="auth-gate hidden" id="authGate">
+  <div class="auth-gate" id="authGate">
     <div class="auth-box">
       <h2>Bedside Simulation Locked</h2>
       <p id="gateDesc">Please unlock or register this bedside monitor before accessing its simulation controls.</p>
@@ -401,16 +398,16 @@
         <div id="gateErr" style="color:var(--red);font-size:12px;font-weight:600;"></div>
         <button type="submit" class="b-ok">Unlock Simulation Page</button>
       </form>
-      <a class="btn-link" href="/" style="text-align:center;">Go to Bedside Registration / Login Screen &rarr;</a>
+      <a class="btn-link" href="/" style="text-align:center;">Open bedside monitor</a>
     </div>
   </div>
 
   <div class="container">
     <header>
       <div class="title-group">
-        <p>Dedicated Bedside Simulator &middot; Local Unit Only</p>
-        <h1><span id="deptTitle">ICU</span> &middot; <span id="bedTitle">Bed 1</span> &middot; <span id="roomTitle">Room 101</span></h1>
-        <div class="sub-meta" id="patientMeta">Eleanor Vance (F, 64) &mdash; Wi-Fi: Hospital-CriticalCare-5G</div>
+        <p>Bedside simulation</p>
+        <h1><span id="deptTitle"></span> &middot; <span id="bedTitle"></span> &middot; <span id="roomTitle"></span></h1>
+        <div class="sub-meta" id="patientMeta"></div>
       </div>
       <div class="actions">
         <span class="feedback" id="fb">&#10003; Applied</span>
@@ -421,7 +418,7 @@
     <section class="panel" aria-label="Live telemetry preview">
       <div class="panel-head">
         <h2>Live Patient Readings &amp; Trust Scores</h2>
-        <span id="rhythmStatus" style="font:600 12px var(--mono);color:var(--green)">Normal rhythm</span>
+        <span id="rhythmStatus" style="font:600 12px var(--mono);color:var(--green)">Waiting for ECG</span>
       </div>
       <div class="live-strip" id="liveStrip"></div>
     </section>
@@ -520,6 +517,7 @@
     </section>
   </div>
 
+  <script src="/bedside-api.js"></script>
   <script>
     const $ = id => document.getElementById(id);
     const nice = id => (id || 'Bed_1').replace(/_/g, ' ');
@@ -604,10 +602,11 @@
     function applyProfile(profile) {
       if (!profile) return;
       bed = profile.patient_id || 'Bed_1';
-      $('deptTitle').textContent = profile.department || 'ICU';
+      if (!profile.room) return;
+      $('deptTitle').textContent = profile.department;
       $('bedTitle').textContent = profile.bed_label || nice(bed);
-      $('roomTitle').textContent = profile.room || 'Room 101';
-      $('patientMeta').textContent = `${profile.patient_name || ''} · ${profile.diagnosis || ''} · Wi-Fi: ${profile.wifi_ssid || 'Hospital-CriticalCare-5G'}`;
+      $('roomTitle').textContent = profile.room;
+      $('patientMeta').textContent = `${[profile.patient_name, profile.diagnosis].filter(Boolean).join(' · ')}`;
       document.title = `${profile.department || 'ICU'} · ${profile.bed_label || nice(bed)} Simulation`;
     }
 
@@ -615,7 +614,7 @@
       e.preventDefault();
       $('gateErr').textContent = '';
       try {
-        const r = await fetch('/api/auth/login', {
+        const r = await bedsideRequest('/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ password: $('simPass').value })
@@ -625,6 +624,7 @@
           $('gateErr').textContent = res.error || 'Incorrect password.';
           return;
         }
+        localStorage.setItem("bedside-session", res.token);
         $('simPass').value = '';
         $('authGate').classList.add('hidden');
         poll();
@@ -635,14 +635,14 @@
 
     async function poll() {
       try {
-        const r = await fetch('/api/state');
+        const r = await bedsideRequest('/api/state');
         if (r.status === 401) {
           const errData = await r.json().catch(() => ({}));
           if (errData.auth?.profile) applyProfile(errData.auth.profile);
           $('simLoginForm').style.display = errData.auth?.registered ? 'grid' : 'none';
           $('gateDesc').textContent = errData.auth?.registered
             ? 'Enter the password for this bedside unit to unlock its simulation controls.'
-            : 'This bedside unit has not been registered yet. Register its Wi-Fi, Ward, Bed, and Password on the Bedside Monitor first.';
+            : 'This bedside unit has not been registered yet. Register the patient on the bedside monitor first.';
           $('authGate').classList.remove('hidden');
           return;
         }
@@ -661,7 +661,7 @@
 
         const sensors = b.sensors || {};
         const items = [
-          { label: 'ECG', agent: 'Agent_ECG', val: sensors.Agent_ECG?.removed ? 'Removed' : (b.arrhythmia ? 'Arrhythmia' : 'Sinus') },
+          { label: 'ECG', agent: 'Agent_ECG', val: sensors.Agent_ECG?.removed ? 'Removed' : (!b.ecg_wave?.length ? 'Waiting' : b.arrhythmia ? 'Arrhythmia' : 'Receiving') },
           { label: 'HR', agent: 'Agent_HR', val: sensors.Agent_HR?.removed ? 'Removed' : (b.hr != null ? `${b.hr} bpm` : '--') },
           { label: 'SpO₂', agent: 'Agent_SpO2', val: sensors.Agent_SpO2?.removed ? 'Removed' : (b.spo2 != null ? `${b.spo2}%` : '--') },
           { label: 'EtCO₂', agent: 'Agent_EtCO2', val: sensors.Agent_EtCO2?.removed ? 'Removed' : ((sensors.Agent_EtCO2?.value ?? b.co2) != null ? `${sensors.Agent_EtCO2?.value ?? b.co2} mmHg` : '--') },
@@ -673,7 +673,7 @@
 
         $('rhythmStatus').textContent = sensors.Agent_ECG?.removed
           ? 'ECG Sensor Removed'
-          : b.arrhythmia
+          : !b.ecg_wave?.length ? 'Waiting for ECG' : b.arrhythmia
             ? 'Ventricular Arrhythmia Alert'
             : 'Normal Sinus Rhythm';
         $('rhythmStatus').style.color = (sensors.Agent_ECG?.removed || b.arrhythmia) ? 'var(--red)' : 'var(--green)';
@@ -720,7 +720,7 @@
       }
 
       try {
-        const r = await fetch('/api/manipulate', {
+        const r = await bedsideRequest('/api/manipulate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -778,7 +778,7 @@
 
     async function resetAll() {
       try {
-        const r = await fetch('/api/manipulate', {
+        const r = await bedsideRequest('/api/manipulate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ reset: true })

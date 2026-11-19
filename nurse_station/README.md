@@ -1,63 +1,41 @@
-# Central Nurse Station
+# Nurse Station
 
-The Nurse Station is a Next.js dashboard backed by FastAPI. The Python engine subscribes to the MQTT broker, tracks sensor trust, handles gateway ONNX inference and station failover, and provides simulated telemetry when bedside feeds are absent.
+The Next.js Central Dashboard receives snapshots and live events from a local FastAPI service. The Python engine subscribes to registrations, sensor data and alerts through HiveMQ, tracks sensor trust, and coordinates station failover.
 
-| Path | Purpose |
-| --- | --- |
-| `web/` | Next.js ward and bed dashboards, live ECG, trust history, and station controls |
-| `api.py` | Snapshots, server-sent telemetry events, and station actions |
-| `engine.py` | Python trust calculation, MQTT ingestion and discovery, fallback simulation, and failover |
-| `launch.py` | Shared process launcher for Linux, macOS, and Windows |
+## Run the station
 
-## Run locally
+From the repository root, run `./start_nurse_station.sh` or `.\start_nurse_station.bat`. Open [localhost:8501](http://localhost:8501) on the station computer. The API binds to loopback port 9501. With default settings the launcher starts the Compose-managed HiveMQ broker on loopback port 1884. For separate hardware, configure the station’s credentials using the [shared HiveMQ setup](../README.md#connect-separate-jetsons-and-the-nurse-station).
 
-Install Python 3, Node.js 20.9 or newer with npm, and Mosquitto. Launch from the repository root:
+## Monitor patients
 
-```bash
-./start_nurse_station.sh
-```
-
-The dashboard is available at http://localhost:8501. The launcher sets up dependencies, builds the app, and runs the Python API on loopback port 9501. It reuses a local broker when one is already running. Use `--broker <host>` for an external broker. On Windows, run `start_nurse_station.bat` from the repository root. If you deployed this folder by itself, run `python3 launch.py` here (`python launch.py` on Windows).
-
-The repository-level local demo starts a bedside monitor and three simulated MQTT feeds. With this folder alone, the engine supplies its own simulated feeds and uses this folder’s `chaos.json` for the emergency simulator.
-
-Both components ship the same ECG model. To regenerate it, run `python3 jetson_bedside/make_model.py` from the repository root and copy the resulting `ecg_anomaly.onnx` into `nurse_station/`.
-
-## Use the dashboard
-
-- **All wards** and the department filters show admitted beds. Open a bed to inspect ECG, compute and routing, recent alerts, and the six sensor trust scores.
-- In the sidebar **Room directory**, expand a department and select a bed number to open its dashboard. Green means stable, amber flags a monitoring issue, red indicates a patient alarm, and gray means unoccupied. Hover over a number for details.
-- **Add new bed** probes the broker for up to 2.5 minutes. Assign a department and an optional room to a discovered device, or add a simulated bed.
-- **Release bed** removes a device from active monitoring. Physical devices still sending telemetry will appear in discovery again.
-- **Emergency simulator** in the sidebar triggers or clears an alarm for demonstration. **Open emergency bed** jumps directly from a ward-wide alert to the affected bed.
-- Fault controls for latency, packet loss, routing, and GPU load are on the [bedside monitor](../jetson_bedside/README.md).
+- A fresh station has zero monitored patients. A Jetson sends its assignment after bedside registration and repeats it periodically, so a station that starts later can discover it.
+- Expand a department under **Room directory**. Grey boxes are vacant. Green indicates stable readings, amber indicates a monitoring or connection issue, and red flags an emergency. Select an occupied number for the patient report, readings, ECG and bed activity.
+- If an admitted Jetson stops reporting for eight seconds, the station marks it offline. Sensor removal and disconnection do not generate replacement measurements.
+- **Release bed** removes the patient from this running station. **Readmit bed** appears when a registered bed has been released. Configure new patients and simulate sensor changes at the bedside.
 
 ## Test high availability
 
-```bash
-./start_nurse_station.sh --dual
-```
-
-Open http://localhost:8501 and http://localhost:8502. Wait for the stations to see each other under **High availability**, then use **Test failover / switch role** on the primary to promote the standby. Each station runs its own Python engine and exchanges heartbeats over the shared MQTT broker. To start the secondary separately, pass `--station-id Nurse_Station_2 --port 8502` to the Nurse Station launcher. The Windows launcher accepts the same options.
+Run `./start_nurse_station.sh --dual` to start the primary on port 8501 and standby on 8502. Once the peer appears, expand **High availability** in the sidebar and use **Test failover / switch role**. The stations exchange heartbeats over HiveMQ.
 
 ## Run the web and API separately
 
-Activate the project’s Python virtual environment and install dependencies with `python -m pip install -r requirements.txt` from this folder. In one terminal, start the API:
+With HiveMQ running and the project Python environment activated, start the API from this directory.
 
 ```bash
+python -m pip install -r requirements.txt
 python -m uvicorn api:app --host 127.0.0.1 --port 9501
 ```
 
-In another, run the frontend:
+Run the frontend in a second terminal.
 
 ```bash
 cd web
 npm ci
-npm run dev -- --port 8501
+npm run dev -- --hostname 127.0.0.1 --port 8501
 ```
 
-Set `NURSE_API_URL` in the frontend process to use a different API address. The browser connects to Next.js on the same origin for both live events and dashboard actions.
+Set `NURSE_API_URL` in the frontend process to use a different API address. The browser uses the Next.js origin for live events and station actions.
 
 ## Benchmarks
 
-Install the Python requirements and run `python run_benchmarks.py` to generate the CSV reports and plots under `benchmarks/`.
+With this directory’s Python requirements installed, run `python run_benchmarks.py` here to write the CSV reports and 200-DPI plots under `benchmarks/`. To regenerate the included ECG model, run `jetson_bedside/make_model.py` and copy the resulting model to this directory.
