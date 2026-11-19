@@ -20,10 +20,12 @@ if os.name != "nt":
     import grp
     import pwd
 
-ROOT = Path(__file__).resolve().parent.parent
+STATION = Path(__file__).resolve().parent
+ROOT = STATION.parent
 IS_WINDOWS = os.name == "nt"
 
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(STATION))
 from mqtt_connection import valid_device_id
 
 
@@ -407,7 +409,7 @@ def print_connection_guide(host, port, ca_cert, beds, creds, source_label, servi
     print(f"  Mosquitto TLS Broker READY on {host}:{port} ({source_label})")
     print(f"{bar}\n")
 
-    print("1) ON THIS LAPTOP — Run the Nurse Station in a terminal:")
+    print("1) ON THIS LAPTOP — Run the Nurse Station (from nurse_station/ or repo root):")
     if IS_WINDOWS:
         print(
             f"   $env:MQTT_HOST = '{host}'\n"
@@ -429,8 +431,8 @@ def print_connection_guide(host, port, ca_cert, beds, creds, source_label, servi
 
     print("2) ON YOUR FRIEND'S LAPTOP / JETSON (different Wi-Fi via Tailscale or same Wi-Fi):")
     print(f"   First, send ONLY this public certificate file:\n     {ca_path}")
-    print("   (Have them save it inside the project folder as ca.pem)\n")
-    print(f"   Then they run ({first_bed}):")
+    print("   (Have them save it inside their jetson_bedside/ folder as ca.pem)\n")
+    print(f"   Then from inside jetson_bedside/ they run ({first_bed}):")
     print("   [Linux / macOS / Jetson]")
     print(
         f"     export MQTT_HOST='{host}'\n"

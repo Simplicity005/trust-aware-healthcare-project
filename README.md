@@ -1,10 +1,15 @@
 # Trust-Aware Bedside Monitoring
 
-A hospital monitoring system with two parts:
-- **Bedside Monitors** (one per patient / Jetson): live waveforms, vitals, local login, and a separate simulation page.
-- **Central Nurse Station**: watches all registered beds in one place, tracks sensor trust scores, and shows alerts.
+A hospital monitoring system with two **standalone** folders:
+- **[`jetson_bedside/`](jetson_bedside/README.md)** (one per patient / Jetson): live waveforms, vitals, local login, and its own simulation page. Needs **only Python**.
+- **[`nurse_station/`](nurse_station/README.md)** (central station laptop): watches all registered beds in one place, tracks sensor trust scores, and shows alerts.
 
 They talk to each other through **Eclipse Mosquitto** (100% free, self-hosted MQTT — no paid cloud accounts or usage limits).
+
+> **Installing on separate devices?** You do **not** have to copy the whole repository everywhere!
+> - Copy **only `jetson_bedside/`** onto each Jetson (or a friend's laptop) → run `./setup.sh` (or `.\setup.bat`) inside it.
+> - Copy **only `nurse_station/`** onto the Nurse Laptop → run `./setup.sh` (or `.\setup.bat`) inside it.
+> - Or keep the full repo on one computer to run the 1-command local demo below.
 
 ---
 
@@ -74,16 +79,21 @@ Use this to test across **two laptops on completely different Wi-Fis** (e.g., yo
 
 It uses **Eclipse Mosquitto** (running free on your laptop) + **Tailscale** (free personal VPN that makes laptops on different Wi-Fis act like they're on the same private network — no router setup, no paid cloud broker, no data limits).
 
-### Step 1 — Connect both machines with Tailscale *(skip if on the same Wi-Fi)*
+### Step 1 — Install each folder on its own machine
+
+- **On YOUR laptop (Nurse Station):** Copy `nurse_station/` (or the whole repo), `cd nurse_station`, and run `./setup.sh` (Linux/macOS) or `.\setup.bat` (Windows).
+- **On your FRIEND'S laptop or each JETSON (Bedside):** Copy **only `jetson_bedside/`**, `cd jetson_bedside`, and run `./setup.sh` (Linux/macOS/Jetson) or `.\setup.bat` (Windows). *(Needs only Python 3.10+ — no Node.js, no Mosquitto, no Docker!)*
+
+### Step 2 — Connect both machines with Tailscale *(skip if on the same Wi-Fi)*
 
 1. Install **Tailscale** (free) on **your laptop** and **your friend's laptop (or each Jetson)** from [tailscale.com/download](https://tailscale.com/download).
 2. Sign in and turn Tailscale **On** on both devices (either sign into the same Tailscale account, or share your laptop with your friend from the Tailscale web dashboard).
 
-*(If both devices are already on the exact same Wi-Fi or mobile hotspot, you can skip Tailscale — Step 2 will automatically use your Wi-Fi IP instead.)*
+*(If both devices are already on the exact same Wi-Fi or mobile hotspot, you can skip Tailscale — Step 3 will automatically use your Wi-Fi IP instead.)*
 
-### Step 2 — Start the private Mosquitto broker (1 command on YOUR laptop)
+### Step 3 — Start the private Mosquitto broker (1 command on YOUR laptop)
 
-Make sure **Eclipse Mosquitto 2.x** is installed on your laptop (from Option 1 Step 1), then run **one command** from this project folder:
+From inside `nurse_station/` (or the repo root), run **one command**:
 
 - **Ubuntu / Debian:**
   ```bash
@@ -98,44 +108,42 @@ Make sure **Eclipse Mosquitto 2.x** is installed on your laptop (from Option 1 S
   .\start_network_broker.bat
   ```
 
-This **automatically** detects your Tailscale IP, generates the TLS encryption certificates and per-bed passwords, starts Mosquitto on port `8883`, and **prints the exact copy-paste commands** for Steps 3 and 4!
+This **automatically** detects your Tailscale IP, generates the TLS encryption certificates and per-bed passwords, starts Mosquitto on port `8883`, and **prints the exact copy-paste commands** for Steps 4 and 5!
 
 > **If your friend gets a connection timeout (firewall):**
 > - **Ubuntu:** run `sudo ufw allow 8883/tcp` (only needed if `ufw` is enabled).
 > - **Windows / macOS:** click **Allow** when the firewall popup asks about `mosquitto`.
 
-### Step 3 — Start the Nurse Station (on YOUR laptop)
+### Step 4 — Start the Nurse Station (on YOUR laptop)
 
-Copy and paste **block `1)`** printed by Step 2 into a terminal (it sets `MQTT_HOST`, `MQTT_USERNAME`, `MQTT_PASSWORD`, `MQTT_CA_FILE`, and runs `./start_nurse_station.sh` or `.\start_nurse_station.bat`).
+From inside `nurse_station/` (or the repo root), copy and paste **block `1)`** printed by Step 3, then open [http://127.0.0.1:8501](http://127.0.0.1:8501) in your browser.
 
-Then open [http://127.0.0.1:8501](http://127.0.0.1:8501) in your browser.
+### Step 5 — Start the Bedside Monitor (on your friend's laptop or a Jetson)
 
-### Step 4 — Start the Bedside Monitor (on your friend's laptop or a Jetson)
-
-Your friend's laptop **only needs Python 3.10+** (no Node.js, no Mosquitto, no Docker).
-
-1. Send your friend the public **`ca.pem`** file printed in Step 2 (located at `~/.local/state/nurse-station/broker/ca.pem` — completely safe to send over WhatsApp, Discord, or email; never send `server.key`).
-2. Have her save `ca.pem` inside this project folder.
-3. Have her copy and paste **block `2)`** printed in Step 2 into her terminal.
+1. Send your friend the public **`ca.pem`** file printed in Step 3 (`~/.local/state/nurse-station/broker/ca.pem` — completely safe to send over WhatsApp, Discord, or email; never send `server.key`).
+2. Have her save `ca.pem` inside her `jetson_bedside/` folder.
+3. From inside `jetson_bedside/`, have her copy and paste **block `2)`** printed in Step 3.
 4. She opens [http://127.0.0.1:8080](http://127.0.0.1:8080), enters a patient name, department, room, and an 8+ character password, and clicks **Register**.
-5. Within a second, that patient appears live on **your** Nurse Station — even across completely different Wi-Fi networks! She can open **Simulation** on her screen to change vitals or unplug sensors and watch both screens react live.
+5. Within a second, that patient appears live on **your** Nurse Station — even across completely different Wi-Fi networks!
 
 > **Useful tips:**
 > - **Need more than 3 beds?** Pass `--beds Bed_1 Bed_2 Bed_3 Bed_4` to `start_network_broker`.
-> - **Forgot the printed commands?** Re-run the Step 2 command — it reuses your saved passwords and reprints everything.
+> - **Forgot the printed commands?** Re-run the Step 3 command — it reuses your saved passwords and reprints everything.
 > - **Want to remove the Ubuntu system service config later?** Run `sudo ./start_network_broker.sh --uninstall-etc`.
 
 ---
 
 ## Quick Reference & Troubleshooting
 
-| What you want to run | Linux / macOS / WSL | Windows | Browser URL |
-| --- | --- | --- | --- |
-| Everything on 1 PC (Demo) | `./start_local_demo.sh` | `.\start_local_demo.bat` | Station: `:8501`, Beds: `:8080`, `:8081`, `:8082` |
-| Private Network Broker (Tailscale / Wi-Fi) | `sudo ./start_network_broker.sh --install-etc` *(Ubuntu)* or `./start_network_broker.sh` | `.\start_network_broker.bat` | TLS MQTT on `:8883` |
-| Nurse Station only | `./start_nurse_station.sh` | `.\start_nurse_station.bat` | `http://127.0.0.1:8501` |
-| Single Bedside only | `./start_bedside.sh --patient-id Bed_1` | `.\start_bedside.bat --patient-id Bed_1` | `http://127.0.0.1:8080` |
+| What you want to run | Where to run it | Linux / macOS / WSL | Windows | Browser URL |
+| --- | --- | --- | --- | --- |
+| Full Local Demo (1 PC) | Repo root | `./start_local_demo.sh` | `.\start_local_demo.bat` | Station: `:8501`, Beds: `:8080–8082` |
+| Install Nurse Station | `nurse_station/` | `./setup.sh` | `.\setup.bat` | — |
+| Private Network Broker | `nurse_station/` or root | `sudo ./start_network_broker.sh --install-etc` *(Ubuntu)* or `./start_network_broker.sh` | `.\start_network_broker.bat` | TLS MQTT on `:8883` |
+| Nurse Station only | `nurse_station/` or root | `./start_nurse_station.sh` | `.\start_nurse_station.bat` | `http://127.0.0.1:8501` |
+| Install Jetson Bedside | `jetson_bedside/` | `./setup.sh` | `.\setup.bat` | — |
+| Single Bedside only | `jetson_bedside/` or root | `./start_bedside.sh --patient-id Bed_1` | `.\start_bedside.bat --patient-id Bed_1` | `http://127.0.0.1:8080` |
 
 - **"Port 1884 is in use":** Pick another port with `./start_local_demo.sh --mqtt-port 1885`.
 - **Want to use an existing local broker instead of starting a new one?** Pass `--broker 127.0.0.1 --mqtt-port <PORT>`.
-- **More technical details:** See [`jetson_bedside/README.md`](jetson_bedside/README.md) (edge AI, simulation, state storage) and [`nurse_station/README.md`](nurse_station/README.md) (high availability failover, dev mode, benchmarks).
+- **Detailed folder guides:** See [`jetson_bedside/README.md`](jetson_bedside/README.md) and [`nurse_station/README.md`](nurse_station/README.md).

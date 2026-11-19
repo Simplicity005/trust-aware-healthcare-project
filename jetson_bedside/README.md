@@ -1,15 +1,66 @@
 # Jetson Bedside Monitor
 
-This folder runs on **each patient's bedside device** (a Jetson or a local test computer). Each bed gets its own private dashboard, its own login password, and its own simulator.
+This folder runs on **each patient's bedside device** (an NVIDIA Jetson or a friend's laptop acting as a Jetson). Each bed gets its own private dashboard, its own login password, and its own simulator.
 
-> **Using separate machines (different Wi-Fis via Tailscale, or real Jetsons)?**
-> Before starting, run the 1-command Mosquitto broker on the Nurse Station computer and use the login + `ca.pem` from [Option 2: Run on Separate Machines](../README.md#option-2-run-on-separate-machines). If you are running everything on one computer, you can skip this — it connects to the local Nurse Station on port `1884` automatically.
+**This folder is 100% standalone.** You only need to copy the `jetson_bedside/` folder onto a Jetson or bedside laptop — you do **not** need `nurse_station/`, Node.js, Mosquitto, or Docker.
 
 ---
 
-## Step 1 — Start the Bedside Monitor
+## Step 1 — Install Requirements (First Time Only)
 
-Always run this command from the **main (root) project folder**, not inside `jetson_bedside/`:
+Make sure **Python 3.10+** (with `venv`) is installed:
+- Ubuntu / Debian / Jetson: `sudo apt install python3 python3-venv`
+- macOS / Windows: install from [python.org](https://www.python.org/downloads/)
+
+Then open a terminal **inside `jetson_bedside/`** and run the setup script:
+
+- **Linux / macOS / Jetson:**
+  ```bash
+  ./setup.sh
+  ```
+- **Windows (PowerShell / Command Prompt):**
+  ```powershell
+  .\setup.bat
+  ```
+
+This creates a local virtual environment (reusing Jetson system CUDA/TensorRT packages when available) and downloads all required Python packages (`paho-mqtt`, `numpy`, and `onnxruntime`).
+
+---
+
+## Step 2 — Start the Bedside Monitor
+
+Run from **inside `jetson_bedside/`**:
+
+### A) Connecting to a separate Nurse Station (different Wi-Fi via Tailscale, or same Wi-Fi)
+
+1. If you are on different Wi-Fis, install free **Tailscale** ([tailscale.com/download](https://tailscale.com/download)) and connect to the Nurse Station's Tailscale network.
+2. Save the public **`ca.pem`** file sent by the Nurse Station inside this `jetson_bedside/` folder.
+3. Paste the bedside commands printed by the Nurse Station's `start_network_broker` script:
+
+- **Linux / macOS / Jetson:**
+  ```bash
+  export MQTT_HOST='100.x.y.z'
+  export MQTT_PORT=8883
+  export MQTT_USERNAME='jetson-bed-1'
+  export MQTT_PASSWORD='your-bed-password'
+  export MQTT_CA_FILE='./ca.pem'
+
+  ./start_bedside.sh --patient-id Bed_1
+  ```
+- **Windows (PowerShell):**
+  ```powershell
+  $env:MQTT_HOST = '100.x.y.z'
+  $env:MQTT_PORT = '8883'
+  $env:MQTT_USERNAME = 'jetson-bed-1'
+  $env:MQTT_PASSWORD = 'your-bed-password'
+  $env:MQTT_CA_FILE = '.\ca.pem'
+
+  .\start_bedside.bat --patient-id Bed_1
+  ```
+
+### B) Running locally on the same computer as the Nurse Station
+
+No environment variables needed — it connects to the local Nurse Station on port `1884` automatically:
 
 - **Linux / macOS / Jetson:**
   ```bash
@@ -20,11 +71,11 @@ Always run this command from the **main (root) project folder**, not inside `jet
   .\start_bedside.bat --patient-id Bed_1
   ```
 
-*(Change `Bed_1` to `Bed_2`, `Bed_3`, etc. for other beds. The device ID is fixed once launched.)*
+*(Change `Bed_1` to `Bed_2`, `Bed_3`, etc. for other beds. Use `--web-port 8081` if running more than one bed on the same computer. The device ID is fixed once launched.)*
 
 ---
 
-## Step 2 — Register the Patient
+## Step 3 — Register the Patient
 
 1. Open [http://127.0.0.1:8080](http://127.0.0.1:8080) in a browser **on that bedside device**.
 2. Fill in:
@@ -38,10 +89,10 @@ As soon as you register, the 8 virtual sensors start running and the patient aut
 
 ---
 
-## Step 3 — Use the Bedside Simulator (Optional)
+## Step 4 — Use the Bedside Simulator (Optional)
 
 - Click **Simulation** on the monitor, or go directly to [http://127.0.0.1:8080/simulation](http://127.0.0.1:8080/simulation).
-- Log in with the same bedside password you created in Step 2.
+- Log in with the same bedside password you created in Step 3.
 - From here you can change vital targets, unplug/disconnect individual sensors, or simulate network delay, packet loss, and heavy CPU/GPU load.
 - Everything here affects **only this bed** and resets back to normal when you restart the bedside app.
 
@@ -49,7 +100,7 @@ As soon as you register, the 8 virtual sensors start running and the patient aut
 
 ## Everyday Operations
 
-- **Locking the screen:** Locks/logs out the browser UI so nobody walking by can view or touch it, while the sensors keep sending live data to the Nurse Station in the background.
+- **Locking the screen:** Logs out the browser UI so nobody walking by can view or touch it, while the sensors keep sending live data to the Nurse Station in the background.
 - **Restarting a bed:** Registration info and the salted password hash are saved in `~/.local/state/nurse-station/<device-id>.json`. If you restart using the same `--patient-id`, OS user, and state folder, the sensors automatically resume and you just log back into the dashboard.
 - **Changing where state is saved / running a clean test:** Set `BEDSIDE_STATE_DIR` to another folder before starting:
   ```bash
@@ -70,4 +121,4 @@ As soon as you register, the 8 virtual sensors start running and the patient aut
   - Cardiac traces (ECG, pleth, arterial pressure): 6-second sweep
   - Breathing traces (respiration, capnography): 12-second sweep
   - Blood pressure cuff (NIBP): updates every 15 seconds
-- **Edge AI:** Runs the included ONNX ECG anomaly model via ONNX Runtime, automatically choosing the fastest available accelerator: **TensorRT → CUDA → CPU**. *(On a Jetson, a new Python virtual environment can reuse system-installed packages; keep the full root repo checkout so the launcher and shared Mosquitto config stay available.)*
+- **Edge AI:** Runs the included `ecg_anomaly.onnx` model via ONNX Runtime, automatically choosing the fastest available accelerator: **TensorRT → CUDA → CPU**.

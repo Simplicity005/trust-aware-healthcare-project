@@ -26,6 +26,7 @@ import numpy as np
 from sensor_agents import SensorAgentThread
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mqtt_connection import DEPARTMENTS, broker_host, broker_port, mqtt_client, valid_device_id
 from patient_simulation import PatientSimulation, SAMPLE_RATE, SENSOR_AGENT_IDS, WAVEFORM_KEYS
 from trust_evaluator import AgentTrustTracker

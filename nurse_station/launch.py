@@ -21,6 +21,7 @@ NEXT = WEB / "node_modules" / "next" / "dist" / "bin" / "next"
 IS_WINDOWS = os.name == "nt"
 
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(STATION))
 from mqtt_connection import broker_port, local_host, mqtt_setting
 
 
@@ -28,7 +29,7 @@ def use_virtual_environment(bedside_only):
     if sys.prefix != sys.base_prefix:
         return None
     executable = "Scripts/python.exe" if IS_WINDOWS else "bin/python"
-    folders = (BEDSIDE / "venv", ROOT / "venv") if bedside_only else (ROOT / "venv", STATION / "venv")
+    folders = (BEDSIDE / "venv", ROOT / "venv") if bedside_only else (STATION / "venv", ROOT / "venv")
     for folder in folders:
         candidate = folder / executable
         if candidate.is_file():
@@ -159,9 +160,18 @@ def start_local_mosquitto(children, port):
     docker = shutil.which("docker")
     if not docker:
         raise RuntimeError("Install Eclipse Mosquitto or Docker with Compose to run the local broker.")
-    subprocess.run([docker, "compose", "-f", str(ROOT / "compose.yaml"), "up", "-d", "mosquitto"],
-                   env={**os.environ, "MQTT_PORT": str(port)}, check=True)
-    print("Mosquitto is running in Docker. Use docker compose down to stop the broker.", flush=True)
+    compose_file = ROOT / "compose.yaml"
+    if compose_file.is_file():
+        subprocess.run([docker, "compose", "-f", str(compose_file), "up", "-d", "mosquitto"],
+                       env={**os.environ, "MQTT_PORT": str(port)}, check=True)
+        print("Mosquitto is running in Docker. Use docker compose down to stop the broker.", flush=True)
+    else:
+        subprocess.run([
+            docker, "run", "-d", "--rm", "--name", f"nurse-station-mosquitto-{port}",
+            "-p", f"127.0.0.1:{port}:1883", "eclipse-mosquitto:2",
+            "mosquitto", "-c", "/mosquitto-no-auth.conf",
+        ], check=True)
+        print(f"Mosquitto is running in Docker. Stop it later with: docker stop nurse-station-mosquitto-{port}", flush=True)
 
 
 def start_station(children, node, args, station_id, port, api_port):

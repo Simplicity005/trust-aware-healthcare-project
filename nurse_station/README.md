@@ -2,18 +2,63 @@
 
 This folder runs the **Central Nurse Station** — the main screen where nurses monitor every registered bed at once, see sensor trust scores and alerts, and manage station failover.
 
+**This folder is 100% standalone.** You only need to copy the `nurse_station/` folder onto the Nurse Station computer — you do **not** need `jetson_bedside/` or the rest of the repository.
+
 Under the hood, it runs two local services on the station computer:
 - **Web Dashboard (Next.js):** `http://127.0.0.1:8501`
 - **Backend API & Engine (FastAPI + Python):** `http://127.0.0.1:9501` (talks to beds through Mosquitto)
 
-> **Using separate machines (different Wi-Fis via Tailscale, or real Jetsons)?**
-> Start the private Mosquitto broker first using [Option 2: Run on Separate Machines](../README.md#option-2-run-on-separate-machines) and paste the Nurse Station commands it prints. If you are running locally on one computer, the launcher automatically starts Mosquitto on port `1884` (using native Mosquitto or Docker).
+---
+
+## Step 1 — Install Requirements (First Time Only)
+
+Make sure these 3 tools are installed on the Nurse Station computer:
+1. **Python 3.10+** (with `venv`) — Ubuntu/Debian: `sudo apt install python3 python3-venv` · macOS/Windows: [python.org](https://www.python.org/downloads/)
+2. **Node.js 20.9+** (includes `npm`) — [nodejs.org](https://nodejs.org/)
+3. **Eclipse Mosquitto 2.x** *(free MQTT broker)* — Ubuntu/Debian: `sudo apt install mosquitto` · macOS: `brew install mosquitto` · Windows: [mosquitto.org/download](https://mosquitto.org/download/) *(or Docker for local-only mode)*
+
+Then open a terminal **inside `nurse_station/`** and run the setup script:
+
+- **Linux / macOS / WSL:**
+  ```bash
+  ./setup.sh
+  ```
+- **Windows (PowerShell / Command Prompt):**
+  ```powershell
+  .\setup.bat
+  ```
+
+This creates `nurse_station/venv`, installs all Python dependencies, installs the Next.js packages, and builds the web dashboard automatically.
 
 ---
 
-## Step 1 — Start the Nurse Station
+## Step 2 — Start the Nurse Station
 
-Run this from the **main (root) project folder**, not inside `nurse_station/`:
+Run from **inside `nurse_station/`**:
+
+### A) Connect separate Jetsons or a friend's laptop (different Wi-Fi via Tailscale, or same Wi-Fi)
+
+1. If the bedside device is on a different Wi-Fi, install free **Tailscale** ([tailscale.com/download](https://tailscale.com/download)) on both machines and turn it on. *(Skip Tailscale if both machines are on the exact same Wi-Fi.)*
+2. Start the private TLS Mosquitto broker with **one command**:
+   - **Ubuntu / Debian:**
+     ```bash
+     sudo ./start_network_broker.sh --install-etc
+     ```
+   - **macOS / other Linux:**
+     ```bash
+     ./start_network_broker.sh
+     ```
+   - **Windows (PowerShell):**
+     ```powershell
+     .\start_network_broker.bat
+     ```
+   *(If a remote bed times out connecting, allow port `8883` in your firewall: Ubuntu `sudo ufw allow 8883/tcp`; Windows/macOS click **Allow** on the firewall popup.)*
+3. Copy and paste **block `1)`** printed by that command into a terminal to start the Nurse Station.
+4. Send the public **`ca.pem`** file and **block `2)`** printed by that command to the bedside laptop / Jetson.
+
+### B) Local only (same computer)
+
+Starts a local loopback Mosquitto broker on port `1884` automatically and launches the Nurse Station:
 
 - **Linux / macOS / WSL:**
   ```bash
@@ -26,7 +71,7 @@ Run this from the **main (root) project folder**, not inside `nurse_station/`:
 
 ---
 
-## Step 2 — Open & Read the Dashboard
+## Step 3 — Open & Read the Dashboard
 
 Open [http://127.0.0.1:8501](http://127.0.0.1:8501) in your browser on the station computer.
 
@@ -47,7 +92,7 @@ Open [http://127.0.0.1:8501](http://127.0.0.1:8501) in your browser on the stati
 
 ## Optional: Test High Availability (Primary + Standby Failover)
 
-Want to test automatic backup failover between two Nurse Stations? Run from the **root project folder**:
+Want to test automatic backup failover between two Nurse Stations? Run from inside `nurse_station/`:
 
 - **Linux / macOS / WSL:**
   ```bash
@@ -70,14 +115,12 @@ Once the standby peer shows up, expand **High availability** in the sidebar and 
 
 Use this only if you are editing the code and want live auto-reload. Make sure Mosquitto is already running first.
 
-1. **Terminal 1 — Start the FastAPI backend** (from inside `nurse_station/` with your Python venv active):
+1. **Terminal 1 — Start the FastAPI backend** (from inside `nurse_station/` with `venv` active):
    ```bash
-   python -m pip install -r requirements.txt
    python -m uvicorn api:app --host 127.0.0.1 --port 9501
    ```
 2. **Terminal 2 — Start the Next.js web UI** (from inside `nurse_station/web/`):
    ```bash
-   npm ci
    npm run dev -- --hostname 127.0.0.1 --port 8501
    ```
 
@@ -87,9 +130,9 @@ Use this only if you are editing the code and want live auto-reload. Make sure M
 
 ## Benchmarks & Rebuilding the ECG AI Model
 
-- **Run performance benchmarks:** From inside `nurse_station/` (with `requirements.txt` installed), run:
+- **Run performance benchmarks:** From inside `nurse_station/` (with `venv` active), run:
   ```bash
   python run_benchmarks.py
   ```
   This saves CSV reports and 200-DPI charts in `nurse_station/benchmarks/`.
-- **Regenerate the ECG ONNX model:** Run `python jetson_bedside/make_model.py`, then copy the generated `ecg_anomaly.onnx` file into `nurse_station/`.
+- **Regenerate the ECG ONNX model:** Run `python make_model.py` in `jetson_bedside/`, then copy the generated `ecg_anomaly.onnx` file into `nurse_station/`.

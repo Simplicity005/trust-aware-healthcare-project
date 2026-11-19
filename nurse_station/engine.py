@@ -26,6 +26,7 @@ except ImportError:
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(BASE_DIR))
+sys.path.insert(0, BASE_DIR)
 from mqtt_connection import (
     DEPARTMENTS as HOSPITAL_DEPARTMENTS, broker_host as default_host,
     broker_port as default_port, mqtt_client, valid_device_id,
