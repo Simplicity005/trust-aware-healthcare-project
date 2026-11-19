@@ -1,83 +1,171 @@
-# Trust-aware bedside monitoring
+# Trust-Aware Bedside Monitoring
 
-Each Jetson runs a local patient monitor and simulator. The Next.js Nurse Station collects registered beds over Eclipse Mosquitto and displays their readings, ECG traces, sensor trust and alerts.
+A hospital monitoring system with two parts:
+- **Bedside Monitors** (one per patient / Jetson): live waveforms, vitals, local login, and a separate simulation page.
+- **Central Nurse Station**: watches all registered beds in one place, tracks sensor trust scores, and shows alerts.
 
-## Total Local Demo
+They talk to each other through **Eclipse Mosquitto** (MQTT).
 
-Test the entire system on one computer using simulated Jetsons. All connections use loopback. No physical sensors, cloud account or Wi-Fi setup is needed.
+---
 
-1. Install Python 3.10+ with venv support and Node.js 20.9+ with npm. The launcher installs project dependencies and builds the dashboard on its first run.
-2. Install Eclipse Mosquitto 2.x. On Ubuntu or Debian, run `sudo apt install mosquitto`. On macOS, run `brew install mosquitto`. Windows users can use the [Mosquitto installer](https://mosquitto.org/download/). If Docker with Compose is already installed and running, the launcher can use that instead.
-3. From the repository root, run **Total Local Demo**.
+## Option 1: Run Everything on One Computer (Local Demo)
 
-| Mode | Linux, macOS or WSL | Windows | Open in a local browser |
-| --- | --- | --- | --- |
-| Total Local Demo | `./start_local_demo.sh` | `.\start_local_demo.bat` | Nurse Station on port 8501 and independent beds on 8080, 8081 and 8082 |
-| Bedside | `./start_bedside.sh --patient-id Bed_1` | `.\start_bedside.bat --patient-id Bed_1` | Bedside on port 8080 |
-| Nurse Station | `./start_nurse_station.sh` | `.\start_nurse_station.bat` | Nurse Station on port 8501 |
+Use this to test the whole project on a single laptop. No Jetson hardware, real sensors, or Wi-Fi setup needed.
 
-1. Open the [Central Dashboard](http://127.0.0.1:8501). On a fresh setup the monitored-bed count is zero. The grey numbered boxes represent available beds in the room directory.
-2. Open [Bed 1](http://127.0.0.1:8080). Enter a demo patient name, department, room and a bedside password. Registration starts the eight simulated sensors. The patient appears automatically on the station. Open their numbered box to see the bed report.
-3. Open **Simulation** on that bedside to change its readings or disconnect a sensor. To set up another patient, register on [Bed 2](http://127.0.0.1:8081) or [Bed 3](http://127.0.0.1:8082). Each monitor and simulation page uses its own device login.
+### Step 1 — Install the 3 prerequisites
 
-The demo runs a private local broker on port 1884, the Nurse Station, and three separate simulated Jetsons. The default demo ignores broker addresses and credentials from your hardware setup. Use `--mqtt-port` to select another local port if 1884 is occupied. To deliberately use an existing local broker, pass `--broker 127.0.0.1 --mqtt-port PORT`.
+1. **Python 3.10+** (with `venv`)
+   - Ubuntu / Debian: `sudo apt install python3 python3-venv`
+   - macOS / Windows: install from [python.org](https://www.python.org/downloads/)
+2. **Node.js 20.9+** (includes `npm`)
+   - Install from [nodejs.org](https://nodejs.org/)
+3. **Eclipse Mosquitto 2.x** *(the message broker)*
+   - Ubuntu / Debian: `sudo apt install mosquitto`
+   - macOS: `brew install mosquitto`
+   - Windows: download from [mosquitto.org/download](https://mosquitto.org/download/)
+   - *(Already have Docker running? You can skip installing Mosquitto — the launcher will use Docker automatically.)*
 
-Registrations persist between runs. Total Local Demo stores them in `~/.local/state/nurse-station/demo/` by default. Set `BEDSIDE_STATE_DIR` to a new empty directory for a fresh test. In Bash, `BEDSIDE_STATE_DIR="$(mktemp -d)" ./start_local_demo.sh` starts with zero registrations without deleting existing ones.
+### Step 2 — Start the demo
 
-Press Ctrl+C in the launcher terminal to stop the apps and the native broker. When using the Docker fallback, run `docker compose down` from the repository root to stop its broker after the apps exit.
+Open a terminal in this project folder and run **one command**:
 
-## Connect separate Jetsons and the Nurse Station
+- **Linux / macOS / WSL:**
+  ```bash
+  ./start_local_demo.sh
+  ```
+- **Windows (PowerShell / Command Prompt):**
+  ```powershell
+  .\start_local_demo.bat
+  ```
 
-On physical hardware, each Jetson and the station connect to the same Mosquitto hostname. Wi-Fi, Ethernet and different routed network segments all work when each machine can reach the broker’s TLS port. Keep the broker on the nurse laptop for a lab or on an always-on internal server. The one-computer demo listener stays on loopback.
+> **Note:** The very first run takes a minute or two because it installs Python & Node packages and builds the web app automatically. Wait until you see the `http://localhost:...` links printed in the terminal.
 
-1. Install Mosquitto on the broker host. Configure a network listener with a server certificate for its DNS name and allow the devices to reach TCP port 8883. A typical Mosquitto 2.x configuration uses the following settings. Substitute the paths to the actual server certificate chain, private key, password file and topic permissions file. The broker service needs read access to these files. [Mosquitto configuration reference](https://mosquitto.org/man/mosquitto-conf-5.html)
+### Step 3 — Open the dashboards in your browser
 
-```conf
-listener 8883
-certfile /etc/mosquitto/certs/broker.crt
-keyfile /etc/mosquitto/certs/broker.key
-allow_anonymous false
-password_file /etc/mosquitto/passwd
-acl_file /etc/mosquitto/acl
-```
+1. **Open the Nurse Station:** [http://127.0.0.1:8501](http://127.0.0.1:8501)
+   - At first, 0 patients are monitored. The grey numbered boxes in the sidebar are empty beds.
+2. **Open Bed 1:** [http://127.0.0.1:8080](http://127.0.0.1:8080)
+   - Enter any patient name, pick a department (e.g., `ICU`), room, and set a password (at least 8 characters).
+   - Click **Register**. Bed 1's sensors start immediately and the patient pops up on the Nurse Station!
+3. **Try the Simulator:**
+   - On Bed 1's monitor, click **Simulation** to open its simulation tab.
+   - Change heart rate / SpO₂, trigger an arrhythmia, or remove/unplug a sensor and watch both dashboards react.
+4. **Add more beds (optional):**
+   - Open [Bed 2 (port 8081)](http://127.0.0.1:8081) or [Bed 3 (port 8082)](http://127.0.0.1:8082) and register them the same way.
+   - Each bed is completely isolated and has its own login and simulation page.
 
-2. Create a separate MQTT username and password for each device using `mosquitto_passwd`. In the topic permissions file, grant the station access across beds and each Jetson access only to its own device ID. For example, for two beds:
+### Step 4 — How to stop (or reset)
 
-```text
-user nurse-station
-topic readwrite hospital/#
+- **Stop everything:** Press `Ctrl + C` in the terminal where you started the demo.
+  - *(If you used Docker instead of native Mosquitto, also run `docker compose down`.)*
+- **Start fresh with 0 registered beds:**
+  - Demo beds are saved in `~/.local/state/nurse-station/demo/` so they survive restarts.
+  - For a clean one-time test without deleting your saved beds (Linux/macOS):
+    ```bash
+    BEDSIDE_STATE_DIR="$(mktemp -d)" ./start_local_demo.sh
+    ```
+  - Or delete `~/.local/state/nurse-station/demo/` to wipe them permanently.
 
-user jetson-bed-1
-topic readwrite hospital/Bed_1/#
+---
 
-user jetson-bed-2
-topic readwrite hospital/Bed_2/#
-```
+## Option 2: Run on Separate Machines
 
-3. Start the configured broker. In each machine’s launcher terminal, set the same broker hostname and use that machine’s own credentials. For a private certificate authority, set `MQTT_CA_FILE` to its trusted PEM certificate on each machine. The bedside dashboard password is set separately during patient registration.
+Use this when the Nurse Station is on one computer and each Bedside Monitor runs on its own Jetson over Wi-Fi or Ethernet.
+
+### Step 1 — Set up Mosquitto on one machine (the Nurse Laptop or a server)
+
+1. Install **Eclipse Mosquitto 2.x** on that machine and allow TCP port `8883` through its firewall.
+2. Put your TLS certificate & key in `/etc/mosquitto/certs/` (make sure the `mosquitto` user can read them).
+3. Create one login for the Nurse Station and one login per Jetson:
+   ```bash
+   sudo mosquitto_passwd -c /etc/mosquitto/passwd nurse-station
+   sudo mosquitto_passwd /etc/mosquitto/passwd jetson-bed-1
+   sudo mosquitto_passwd /etc/mosquitto/passwd jetson-bed-2
+   ```
+4. Create `/etc/mosquitto/acl` so each Jetson can only publish to its own bed:
+   ```text
+   user nurse-station
+   topic readwrite hospital/#
+
+   user jetson-bed-1
+   topic readwrite hospital/Bed_1/#
+
+   user jetson-bed-2
+   topic readwrite hospital/Bed_2/#
+   ```
+5. Add these settings to `/etc/mosquitto/mosquitto.conf` (or a file in `/etc/mosquitto/conf.d/`) and restart Mosquitto:
+   ```conf
+   listener 8883
+   certfile /etc/mosquitto/certs/broker.crt
+   keyfile /etc/mosquitto/certs/broker.key
+   allow_anonymous false
+   password_file /etc/mosquitto/passwd
+   acl_file /etc/mosquitto/acl
+   ```
+
+### Step 2 — Start the Nurse Station (on the Nurse Laptop)
+
+Set the broker details in your terminal, then start the station:
+
+- **Linux / macOS:**
+  ```bash
+  export MQTT_HOST='your-broker-hostname'
+  export MQTT_PORT=8883
+  export MQTT_USERNAME='nurse-station'
+  read -rs -p 'MQTT password: ' MQTT_PASSWORD && echo
+  export MQTT_PASSWORD
+  # If using a self-signed/private CA certificate, also run:
+  # export MQTT_CA_FILE='/path/to/ca.pem'
+
+  ./start_nurse_station.sh
+  ```
+- **Windows (PowerShell):**
+  ```powershell
+  $env:MQTT_HOST = 'your-broker-hostname'
+  $env:MQTT_PORT = '8883'
+  $cred = Get-Credential -UserName 'nurse-station' -Message 'Nurse Station MQTT password'
+  $env:MQTT_USERNAME = $cred.UserName
+  $env:MQTT_PASSWORD = $cred.GetNetworkCredential().Password
+  # Optional private CA: $env:MQTT_CA_FILE = 'C:\path\to\ca.pem'
+
+  .\start_nurse_station.bat
+  ```
+
+Open [http://127.0.0.1:8501](http://127.0.0.1:8501) on the Nurse Laptop.
+
+### Step 3 — Start each Bedside Unit (on each Jetson)
+
+On **Jetson 1**, set the same `MQTT_HOST` and `MQTT_PORT`, use `jetson-bed-1` credentials, and launch:
 
 ```bash
 export MQTT_HOST='your-broker-hostname'
 export MQTT_PORT=8883
-read -r -p 'MQTT username: ' MQTT_USERNAME
-read -rs -p 'MQTT password: ' MQTT_PASSWORD
-echo
-export MQTT_USERNAME MQTT_PASSWORD
+export MQTT_USERNAME='jetson-bed-1'
+read -rs -p 'MQTT password: ' MQTT_PASSWORD && echo
+export MQTT_PASSWORD
+# Optional private CA: export MQTT_CA_FILE='/path/to/ca.pem'
+
+./start_bedside.sh --patient-id Bed_1
 ```
 
-In Windows PowerShell, use the following before starting the batch file.
+On **Jetson 2**, do the same with `jetson-bed-2` and `--patient-id Bed_2` (and on Windows, use `.\start_bedside.bat --patient-id Bed_1`).
 
-```powershell
-$env:MQTT_HOST = 'your-broker-hostname'
-$env:MQTT_PORT = '8883'
-$credential = Get-Credential -Message 'MQTT credential for this machine'
-$env:MQTT_USERNAME = $credential.UserName
-$env:MQTT_PASSWORD = $credential.GetNetworkCredential().Password
-```
+### Step 4 — Register each patient at the bedside
 
-4. On the nurse laptop run `./start_nurse_station.sh`. On each Jetson run `./start_bedside.sh --patient-id Bed_1`, substituting its device ID. On Windows use the corresponding batch file. An explicit broker host connects to the existing service.
-5. Open each device’s own dashboard and register the patient at the bedside. The registration survives a restart under the same OS account. Registered Jetsons announce themselves again when the station starts later.
+1. On each Jetson, open [http://127.0.0.1:8080](http://127.0.0.1:8080) in its local browser.
+2. Fill in the patient's details, ward/room, and set a bedside password.
+3. The bed will immediately appear on the Nurse Station. Registrations are saved automatically, so if a Jetson restarts it will reconnect on its own.
 
-## Development and benchmarks
+---
 
-The [bedside guide](jetson_bedside/README.md) covers local storage, simulation and edge inference. The [station guide](nurse_station/README.md) covers the directory, development servers, high availability and benchmarks.
+## Quick Reference & Troubleshooting
+
+| What you want to run | Linux / macOS / WSL | Windows | Browser URL |
+| --- | --- | --- | --- |
+| Everything on 1 PC (Demo) | `./start_local_demo.sh` | `.\start_local_demo.bat` | Station: `:8501`, Beds: `:8080`, `:8081`, `:8082` |
+| Nurse Station only | `./start_nurse_station.sh` | `.\start_nurse_station.bat` | `http://127.0.0.1:8501` |
+| Single Bedside only | `./start_bedside.sh --patient-id Bed_1` | `.\start_bedside.bat --patient-id Bed_1` | `http://127.0.0.1:8080` |
+
+- **"Port 1884 is in use":** Pick another port with `./start_local_demo.sh --mqtt-port 1885`.
+- **Want to use an existing local broker instead of starting a new one?** Pass `--broker 127.0.0.1 --mqtt-port <PORT>`.
+- **More technical details:** See [`jetson_bedside/README.md`](jetson_bedside/README.md) (edge AI, simulation, state storage) and [`nurse_station/README.md`](nurse_station/README.md) (high availability failover, dev mode, benchmarks).

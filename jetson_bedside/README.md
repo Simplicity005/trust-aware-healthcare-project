@@ -1,23 +1,73 @@
-# Jetson bedside
+# Jetson Bedside Monitor
 
-Start one Jetson per bed from the repository root. Use its assigned device ID and its Mosquitto credential from the [shared setup guide](../README.md#connect-separate-jetsons-and-the-nurse-station).
+This folder runs on **each patient's bedside device** (a Jetson or a local test computer). Each bed gets its own private dashboard, its own login password, and its own simulator.
 
-```bash
-./start_bedside.sh --patient-id Bed_1
-```
+> **Using separate machines over Wi-Fi/Ethernet?**
+> Before starting, set your Mosquitto broker address and bed login from [Option 2: Run on Separate Machines](../README.md#option-2-run-on-separate-machines). If you are running everything on one computer, you can skip this — it connects to the local Nurse Station on port `1884` automatically.
 
-Open the monitor in a browser on that Jetson at [localhost:8080](http://localhost:8080). Register the department, room, patient name and a local password of at least eight characters. The device ID is fixed at launch. Registration starts the sensors and announces the assignment to the station.
+---
 
-The local [simulation page](http://localhost:8080/simulation) uses the same bedside login. It controls only this device’s vital targets, sensor connections, network delay, packet loss and compute load. Locking the screen ends that login while the sensors continue running. Each Jetson serves its web pages on loopback and subscribes only to control messages in its own MQTT topic.
+## Step 1 — Start the Bedside Monitor
 
-## Registration and restart
+Always run this command from the **main (root) project folder**, not inside `jetson_bedside/`:
 
-The bedside saves its registration and salted password hash in `~/.local/state/nurse-station/<device-id>.json`. Set `BEDSIDE_STATE_DIR` to select a different storage directory. Keep the same device ID, directory and OS account across restarts. The standalone bedside connects to the configured broker, or to the local station’s broker on port 1884 by default. The next launch resumes the registered patient's sensors and prompts for a fresh dashboard login. Simulation settings reset on restart.
+- **Linux / macOS / Jetson:**
+  ```bash
+  ./start_bedside.sh --patient-id Bed_1
+  ```
+- **Windows (PowerShell / Command Prompt):**
+  ```powershell
+  .\start_bedside.bat --patient-id Bed_1
+  ```
 
-For a fresh local demonstration, point `BEDSIDE_STATE_DIR` at a new empty directory before starting the demo. To reuse a physical Jetson for a different patient, release the old bed in the station, stop the bedside, and archive that device's registration file in a protected location. Relaunch the same ID and complete registration for the new assignment.
+*(Change `Bed_1` to `Bed_2`, `Bed_3`, etc. for other beds. The device ID is fixed once launched.)*
 
-## Sensor simulation and inference
+---
 
-Eight independent sensor threads share a 250 Hz patient simulation clock. ECG, pleth, respiration, capnography and arterial pressure traces use timestamped samples. The monitor uses a six-second sweep for cardiac traces and a twelve-second sweep for breathing traces. The simulated blood pressure cuff holds its measurement for 15 seconds between cycles.
+## Step 2 — Register the Patient
 
-The bedside runs the included ECG model through ONNX Runtime when available, preferring TensorRT, then CUDA, then CPU. A new bedside Python environment can reuse installed system packages on a Jetson. Keep the root checkout so the launcher and shared Mosquitto configuration are available.
+1. Open [http://127.0.0.1:8080](http://127.0.0.1:8080) in a browser **on that bedside device**.
+2. Fill in:
+   - **Department** (e.g., ICU, Cardiology)
+   - **Room**
+   - **Patient Name**
+   - **Local Password** *(must be at least 8 characters)*
+3. Click **Register**.
+
+As soon as you register, the 8 virtual sensors start running and the patient automatically appears on the Nurse Station.
+
+---
+
+## Step 3 — Use the Bedside Simulator (Optional)
+
+- Click **Simulation** on the monitor, or go directly to [http://127.0.0.1:8080/simulation](http://127.0.0.1:8080/simulation).
+- Log in with the same bedside password you created in Step 2.
+- From here you can change vital targets, unplug/disconnect individual sensors, or simulate network delay, packet loss, and heavy CPU/GPU load.
+- Everything here affects **only this bed** and resets back to normal when you restart the bedside app.
+
+---
+
+## Everyday Operations
+
+- **Locking the screen:** Locks/logs out the browser UI so nobody walking by can view or touch it, while the sensors keep sending live data to the Nurse Station in the background.
+- **Restarting a bed:** Registration info and the salted password hash are saved in `~/.local/state/nurse-station/<device-id>.json`. If you restart using the same `--patient-id`, OS user, and state folder, the sensors automatically resume and you just log back into the dashboard.
+- **Changing where state is saved / running a clean test:** Set `BEDSIDE_STATE_DIR` to another folder before starting:
+  ```bash
+  BEDSIDE_STATE_DIR="$(mktemp -d)" ./start_bedside.sh --patient-id Bed_1
+  ```
+- **Moving a physical Jetson to a brand-new patient:**
+  1. On the Nurse Station, click **Release bed** for the old patient.
+  2. Stop the bedside monitor (`Ctrl + C`).
+  3. Move/archive `~/.local/state/nurse-station/<device-id>.json` to a safe backup folder (or delete it for a test).
+  4. Relaunch `./start_bedside.sh --patient-id <same-id>` and register the new patient.
+
+---
+
+## How It Works Under the Hood
+
+- **Privacy & isolation:** The bedside web UI only listens on `127.0.0.1` (this device only — other machines on the same Wi-Fi cannot open it) and only subscribes to MQTT control topics for its own bed ID.
+- **Sensors (250 Hz clock):** Eight independent sensor threads generate timestamped waveforms and vitals:
+  - Cardiac traces (ECG, pleth, arterial pressure): 6-second sweep
+  - Breathing traces (respiration, capnography): 12-second sweep
+  - Blood pressure cuff (NIBP): updates every 15 seconds
+- **Edge AI:** Runs the included ONNX ECG anomaly model via ONNX Runtime, automatically choosing the fastest available accelerator: **TensorRT → CUDA → CPU**. *(On a Jetson, a new Python virtual environment can reuse system-installed packages; keep the full root repo checkout so the launcher and shared Mosquitto config stay available.)*
