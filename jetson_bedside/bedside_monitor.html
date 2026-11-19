@@ -512,7 +512,15 @@
       text-shadow: 0 1px 3px #000;
     }
 
-    .trace-label small { margin-left: 8px; color: #828d86; font-size: 8px; font-weight: 400; }
+    .trace-label small { margin-left: 8px; color: #96a299; font-size: 10px; font-weight: 400; }
+    .trace-status {
+      position: absolute;
+      top: 4px;
+      right: 8px;
+      color: #f3c36c;
+      font: 600 11px ui-monospace, Menlo, monospace;
+      pointer-events: none;
+    }
 
     canvas {
       width: 100%;
@@ -609,11 +617,11 @@
           </div>
           <span class="tag t-ok" id="ecgTag">Normal rhythm</span>
         </div>
-        <div class="trace-row" style="--trace-color:#45e985"><span class="trace-label">ECG LEAD II <small>LIVE SIGNAL · 1 mV</small></span><canvas id="ecg" width="800" height="230"></canvas></div>
-        <div class="trace-row" style="--trace-color:#f0dc36"><span class="trace-label">SpO2 PLETH <small>LIVE MQTT · PLETH</small></span><canvas id="pleth" aria-label="SpO2 pleth waveform"></canvas></div>
-        <div class="trace-row" style="--trace-color:#35d5eb"><span class="trace-label">RESPIRATION <small>LIVE MQTT · RESPIRATION</small></span><canvas id="respWave" aria-label="Respiration waveform"></canvas></div>
-        <div class="trace-row" style="--trace-color:#f29a42"><span class="trace-label">EtCO2 CAPNOGRAPHY <small>LIVE MQTT · CAPNOGRAM</small></span><canvas id="co2Wave" aria-label="EtCO2 waveform"></canvas></div>
-        <div class="trace-row" style="--trace-color:#f17acb"><span class="trace-label">IBP ARTERIAL <small>LIVE MQTT · PRESSURE</small></span><canvas id="ibpWave" aria-label="IBP waveform"></canvas></div>
+        <div class="trace-row" style="--trace-color:#45e985"><span class="trace-label">ECG LEAD II <small>6 s sweep</small></span><canvas id="ecg" aria-label="Lead II ECG waveform"></canvas></div>
+        <div class="trace-row" style="--trace-color:#f0dc36"><span class="trace-label">SpO2 PLETH <small>6 s sweep</small></span><canvas id="pleth" aria-label="SpO2 pleth waveform"></canvas></div>
+        <div class="trace-row" style="--trace-color:#35d5eb"><span class="trace-label">RESPIRATION <small>12 s sweep</small></span><canvas id="respWave" aria-label="Respiration waveform"></canvas></div>
+        <div class="trace-row" style="--trace-color:#f29a42"><span class="trace-label">EtCO2 CAPNOGRAPHY <small>12 s sweep</small></span><canvas id="co2Wave" aria-label="EtCO2 waveform"></canvas></div>
+        <div class="trace-row" style="--trace-color:#f17acb"><span class="trace-label">IBP ARTERIAL <small>6 s sweep</small></span><canvas id="ibpWave" aria-label="IBP waveform"></canvas></div>
       </section>
 
       <section class="tile c4">
@@ -709,8 +717,8 @@
       </section>
 
       <section class="tile c4">
-        <div class="head"><div class="lbl">Temperature</div><span class="tag t-warn">Unavailable</span></div>
-        <div class="vital-body"><div class="big" style="color:#f29a42">--<small>°C</small></div><div class="ref">Temperature sensor not streamed</div></div>
+        <div class="head"><div class="lbl">Temperature</div><span class="tag t-warn" id="tempTag">Unavailable</span></div>
+        <div class="vital-body"><div class="big" id="temp" style="color:#f29a42">--<small>°C</small></div><div class="ref">Simulated temperature probe</div></div>
       </section>
     </main>
 
@@ -785,122 +793,171 @@
   </div>
 
   <script>
-    let bed = null, wave = [], alarm = false, currentBed = {};
-    const cv = document.getElementById('ecg'), cx = cv.getContext('2d');
+    let bed = null, alarm = false, fetching = false;
+    let serverOffset, sweepOrigin;
     const $ = id => document.getElementById(id);
-    const nice = b => (b || 'Bed 1').replace('_', ' ');
-    const traceBuffers = {};
+    const nice = id => id.replace(/_/g, ' ');
+    const playbackDelay = 0.8;
+    const traceBuffers = new Map();
     const connectionHistory = {};
     const traceDefs = [
-      { id: 'ecg', color: '#45e985', kind: 'ecg', agent: 'Agent_ECG' },
-      { id: 'pleth', color: '#f0dc36', kind: 'pleth', agent: 'Agent_SpO2' },
-      { id: 'respWave', color: '#35d5eb', kind: 'resp', agent: 'Agent_Respiration' },
-      { id: 'co2Wave', color: '#f29a42', kind: 'co2', agent: 'Agent_EtCO2' },
-      { id: 'ibpWave', color: '#f17acb', kind: 'ibp', agent: 'Agent_IBP' }
-    ];
-    function switchBed(b) { bed = b; $('bedTitle').textContent = nice(b); poll() }
+      { id: 'ecg', color: '#45e985', agent: 'Agent_ECG', seconds: 6, min: -1.35, max: 1.55 },
+      { id: 'pleth', color: '#f0dc36', agent: 'Agent_SpO2', seconds: 6, min: -0.2, max: 0.7 },
+      { id: 'respWave', color: '#35d5eb', agent: 'Agent_Respiration', seconds: 12, min: -0.65, max: 0.8 },
+      { id: 'co2Wave', color: '#f29a42', agent: 'Agent_EtCO2', seconds: 12, min: 0, max: 70 },
+      { id: 'ibpWave', color: '#f17acb', agent: 'Agent_IBP', seconds: 6, min: 30, max: 205 }
+    ].map(trace => {
+      const canvas = $(trace.id);
+      const status = document.createElement('span');
+      status.className = 'trace-status';
+      status.textContent = 'Waiting for signal';
+      canvas.parentElement.append(status);
+      return { ...trace, canvas, ctx: canvas.getContext('2d'), status };
+    });
 
-    function resize() {
-      const ratio = window.devicePixelRatio || 1;
-      traceDefs.forEach(trace => {
-        const canvas = $(trace.id), rect = canvas.getBoundingClientRect();
-        const width = Math.max(1, Math.round(rect.width * ratio));
-        const height = Math.max(1, Math.round(rect.height * ratio));
-        if (canvas.width !== width || canvas.height !== height) {
-          canvas.width = width;
-          canvas.height = height;
-        }
-      });
-      draw();
+    function switchBed(id) {
+      bed = id;
+      alarm = false;
+      $('bedTitle').textContent = nice(id);
+      poll();
     }
-    addEventListener('resize', resize);
 
-    function drawGrid(ctx, width, height, ratio) {
-      ctx.fillStyle = '#030604'; ctx.fillRect(0, 0, width, height);
-      for (let x = 0; x < width; x += 20 * ratio) {
-        ctx.strokeStyle = Math.round(x / (20 * ratio)) % 5 === 0 ? '#18211b' : '#0c120e';
+    const resizeObserver = new ResizeObserver(entries => {
+      for (const { target, contentRect } of entries) {
+        const ratio = window.devicePixelRatio || 1;
+        target.width = Math.max(1, Math.round(contentRect.width * ratio));
+        target.height = Math.max(1, Math.round(contentRect.height * ratio));
+      }
+    });
+    traceDefs.forEach(({ canvas }) => resizeObserver.observe(canvas));
+
+    function syncClock(serverTime, requestedAt, receivedAt) {
+      if (!Number.isFinite(serverTime)) return;
+      const offset = serverTime - (requestedAt + receivedAt) / 2000;
+      if (serverOffset === undefined || Math.abs(offset - serverOffset) > 2) {
+        serverOffset = offset;
+        sweepOrigin = Math.floor(serverTime - playbackDelay);
+      } else {
+        serverOffset += Math.max(-0.015, Math.min(0.015, (offset - serverOffset) * 0.15));
+      }
+    }
+
+    function appendWaveforms(bedId, state) {
+      if (!traceBuffers.has(bedId)) traceBuffers.set(bedId, new Map());
+      const traces = traceBuffers.get(bedId);
+      for (const { agent, seconds } of traceDefs) {
+        const sensor = state.sensors?.[agent];
+        const wave = sensor?.waveform;
+        const rate = sensor?.sample_rate_hz ?? 250;
+        const timestamp = sensor?.waveform_end_ts ?? sensor?.sent_ts;
+        if (!Array.isArray(wave) || !wave.length || !Number.isInteger(rate) || rate < 1 || rate > 2000 ||
+            !Number.isFinite(timestamp) || timestamp <= 0) continue;
+
+        let buffer = traces.get(agent);
+        if (!buffer || buffer.rate !== rate) {
+          const capacity = (seconds + 3) * rate;
+          buffer = { rate, end: 0, samples: new Float32Array(capacity), stamps: new Float64Array(capacity) };
+          traces.set(agent, buffer);
+        }
+        const end = Math.round(timestamp * rate);
+        // MQTT windows overlap. Only add the new tail and leave gaps when no
+        // published window covers a span of time.
+        const first = end - wave.length + 1;
+        for (let sample = Math.max(first, buffer.end + 1); sample <= end; sample++) {
+          const slot = sample % buffer.samples.length;
+          const value = wave[sample - first];
+          buffer.samples[slot] = Number.isFinite(value) ? value : NaN;
+          buffer.stamps[slot] = sample;
+        }
+        buffer.end = Math.max(buffer.end, end);
+      }
+    }
+
+    function interpolateSample(buffer, time) {
+      const index = time * buffer.rate;
+      const sample = Math.floor(index);
+      const slot = sample % buffer.samples.length;
+      const next = (slot + 1) % buffer.samples.length;
+      if (buffer.stamps[slot] !== sample) return NaN;
+      if (buffer.stamps[next] !== sample + 1) return index - sample < 0.5 ? buffer.samples[slot] : NaN;
+      const value = buffer.samples[slot];
+      return value + (buffer.samples[next] - value) * (index - sample);
+    }
+
+    function drawGrid(ctx, width, height, seconds) {
+      ctx.fillStyle = '#030604';
+      ctx.fillRect(0, 0, width, height);
+      ctx.lineWidth = 1;
+      for (let step = 0; step <= seconds * 5; step++) {
+        const x = step * width / (seconds * 5);
+        ctx.strokeStyle = step % 5 === 0 ? '#19251e' : '#0d1510';
         ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, height); ctx.stroke();
       }
-      for (let y = 0; y < height; y += 20 * ratio) {
-        ctx.strokeStyle = Math.round(y / (20 * ratio)) % 5 === 0 ? '#18211b' : '#0c120e';
+      ctx.strokeStyle = '#152019';
+      for (let row = 1; row < 5; row++) {
+        const y = row * height / 5;
         ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke();
       }
     }
 
-    function sampleFor(kind, phase, index, count) {
-      const cycle = ((phase % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
-      const samples = traceBuffers[`${bed}:${traceDefs.find(trace => trace.kind === kind)?.agent}`]?.samples;
-      if (!samples?.length) return 0;
-      const sample = Number(samples[Math.min(samples.length - 1, Math.floor(index / Math.max(1, count) * samples.length))]);
-      if (kind === 'co2') return sample / Math.max(1, Number(currentBed.co2 || 38)) * 0.75;
-      if (kind === 'ibp') {
-        const pressure = currentBed.ibp || {};
-        const systolic = Number(pressure.sys ?? 120);
-        const diastolic = Number(pressure.dia ?? 80);
-        return (sample - diastolic) / Math.max(1, systolic - diastolic) * 0.75 - 0.2;
-      }
-      return sample;
-    }
-
-    function appendWaveforms(bedId, state) {
-      for (const trace of traceDefs) {
-        const sensor = state.sensors?.[trace.agent];
-        if (!Array.isArray(sensor?.waveform) || sensor.waveform.length < 2) continue;
-        const key = `${bedId}:${trace.agent}`;
-        const history = traceBuffers[key] || { samples: [], seq: null, timestamp: null };
-        if (history.seq === sensor.seq) continue;
-        const timestamp = Number(sensor.sent_ts);
-        let start = 0;
-        if (Number.isFinite(timestamp) && Number.isFinite(history.timestamp) && timestamp > history.timestamp) {
-          const elapsed = timestamp - history.timestamp;
-          if (elapsed < 1) start = Math.max(0, Math.min(sensor.waveform.length, Math.round((1 - elapsed) * sensor.waveform.length)));
-          else history.samples = [];
-        }
-        history.samples.push(...sensor.waveform.slice(start).map(Number));
-        if (history.samples.length > 1250) history.samples.splice(0, history.samples.length - 1250);
-        history.seq = sensor.seq;
-        history.timestamp = Number.isFinite(timestamp) ? timestamp : history.timestamp;
-        traceBuffers[key] = history;
-      }
-    }
-
-    function draw() {
-      const now = performance.now();
+    function draw(now) {
       const ratio = window.devicePixelRatio || 1;
-      traceDefs.forEach(trace => {
-        const canvas = $(trace.id), ctx = canvas.getContext('2d');
-        const width = canvas.width, height = canvas.height, mid = height * 0.56;
-        if (!width || !height) return;
-        drawGrid(ctx, width, height, ratio);
-        ctx.strokeStyle = trace.kind === 'ecg' && alarm ? '#ff5d5d' : trace.color;
-        ctx.lineWidth = 1.5 * ratio;
-        ctx.lineJoin = 'round';
-        ctx.shadowColor = ctx.strokeStyle; ctx.shadowBlur = 2 * ratio;
-        ctx.beginPath();
-        const samples = traceBuffers[`${bed}:${trace.agent}`]?.samples || [];
-        if (!samples.length) return;
-        const count = Math.ceil(width / (2 * ratio));
-        const bpm = Number(currentBed.hr || 75);
-        const period = trace.kind === 'resp' ? 3.75 : (trace.kind === 'co2' ? 3.75 : 60 / Math.max(35, bpm));
-        for (let index = 0; index < count; index++) {
-          const x = index * width / Math.max(1, count - 1);
-          const phase = (x / width * Math.PI * 8) - now / (period * 1000) * Math.PI * 2;
-          const value = sampleFor(trace.kind, phase, index, count);
-          const y = mid - value * height * (trace.kind === 'ecg' ? 0.31 : 0.36);
-          if (index === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-        }
-        ctx.stroke(); ctx.shadowBlur = 0;
-      });
-    }
+      const time = now / 1000 + serverOffset - playbackDelay;
+      for (const trace of traceDefs) {
+        const { canvas, ctx, id, agent, seconds, min, max, status } = trace;
+        const width = canvas.width / ratio, height = canvas.height / ratio;
+        ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+        drawGrid(ctx, width, height, seconds);
+        const buffer = traceBuffers.get(bed)?.get(agent);
+        const text = !buffer ? 'Waiting for signal' : time - buffer.end / buffer.rate > 0.5 ? 'Signal interrupted' : '';
+        if (status.textContent !== text) status.textContent = text;
+        if (!buffer || !Number.isFinite(time)) continue;
 
-    function animate() { draw(); requestAnimationFrame(animate) }
+        const sweptSeconds = ((time - sweepOrigin) % seconds + seconds) % seconds;
+        const start = time - sweptSeconds;
+        const head = sweptSeconds / seconds * width;
+        const gap = 14;
+        ctx.strokeStyle = id === 'ecg' && alarm ? '#ff5d5d' : trace.color;
+        ctx.lineWidth = 1.7;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        let drawing = false;
+        for (let x = 0; x <= width; x += 0.75) {
+          const ahead = x > head ? x - head : x + width - head;
+          if (ahead < gap) {
+            drawing = false;
+            continue;
+          }
+          const timestamp = start + x / width * seconds - (x > head ? seconds : 0);
+          const value = interpolateSample(buffer, timestamp);
+          if (!Number.isFinite(value)) {
+            drawing = false;
+            continue;
+          }
+          const y = height * (0.91 - 0.76 * (value - min) / (max - min));
+          if (drawing) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+          drawing = true;
+        }
+        ctx.stroke();
+
+        const leading = interpolateSample(buffer, time);
+        if (Number.isFinite(leading)) {
+          const y = height * (0.91 - 0.76 * (leading - min) / (max - min));
+          ctx.fillStyle = ctx.strokeStyle;
+          ctx.beginPath(); ctx.arc(head, y, 1.7, 0, 2 * Math.PI); ctx.fill();
+        }
+      }
+      requestAnimationFrame(draw);
+    }
 
     function set(el, cls, txt) { el.className = cls; el.textContent = txt }
 
     function renderTrust(b) {
       const definitions = [
         ['ECG', 'Agent_ECG'], ['SpO2', 'Agent_SpO2'], ['Heart Rate', 'Agent_HR'],
-        ['Respiration', 'Agent_Respiration'], ['EtCO2', 'Agent_EtCO2'], ['IBP', 'Agent_IBP'], ['NIBP', 'Agent_NIBP']
+        ['Respiration', 'Agent_Respiration'], ['EtCO2', 'Agent_EtCO2'], ['IBP', 'Agent_IBP'],
+        ['NIBP', 'Agent_NIBP'], ['Temperature', 'Agent_Temperature']
       ];
       $('trustRows').innerHTML = definitions.map(([name, agent]) => {
         const sensor = b.sensors?.[agent] || {};
@@ -918,25 +975,40 @@
     }
 
     async function poll() {
+      if (fetching) return;
+      fetching = true;
+      const requestedAt = performance.now();
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 2500);
       try {
-        const r = await fetch('/api/state'); if (!r.ok) return;
+        const r = await fetch('/api/state', { signal: controller.signal });
+        const receivedAt = performance.now();
+        if (!r.ok) return;
         const d = await r.json(), beds = Object.keys(d.beds || {}); if (!beds.length) return;
         const sel = $('bedSelect');
-        if (beds.length > 1) { sel.style.display = ''; if (sel.options.length !== beds.length) sel.innerHTML = beds.map(k => `<option value="${k}">${nice(k)}</option>`).join('') }
+        sel.style.display = beds.length > 1 ? '' : 'none';
+        if (Array.from(sel.options).map(option => option.value).join() !== beds.join()) {
+          sel.options.length = 0;
+          for (const id of beds) sel.add(new Option(nice(id), id));
+        }
+        syncClock(d.server_time ?? Date.now() / 1000, requestedAt, receivedAt);
+        for (const id of beds) appendWaveforms(id, d.beds[id]);
         if (!bed || !d.beds[bed]) bed = beds[0];
         if (sel.value !== bed) sel.value = bed;
         $('bedTitle').textContent = nice(bed);
         const b = d.beds[bed]; if (!b) return;
-        currentBed = b;
-        appendWaveforms(bed, b);
 
         const sensors = b.sensors || {};
-        const hr = b.hr, sp = b.spo2;
-        const resp = sensors.Agent_Respiration?.value;
-        const co2 = sensors.Agent_EtCO2?.value ?? b.co2;
-        const ibp = b.ibp || {}, nibp = b.nibp || {};
-        const ibpReading = sensors.Agent_IBP?.reading || {};
-        const nibpReading = sensors.Agent_NIBP?.reading || {};
+        const available = agent => sensors[agent]?.connection_status !== 'DISCONNECTED';
+        const hr = available('Agent_HR') ? b.hr : null;
+        const sp = available('Agent_SpO2') ? b.spo2 : null;
+        const resp = available('Agent_Respiration') ? sensors.Agent_Respiration?.value : null;
+        const co2 = available('Agent_EtCO2') ? sensors.Agent_EtCO2?.value ?? b.co2 : null;
+        const temp = available('Agent_Temperature') ? b.temperature_c : null;
+        const ibp = available('Agent_IBP') ? b.ibp || {} : {};
+        const nibp = available('Agent_NIBP') ? b.nibp || {} : {};
+        const ibpReading = available('Agent_IBP') ? sensors.Agent_IBP?.reading || {} : {};
+        const nibpReading = available('Agent_NIBP') ? sensors.Agent_NIBP?.reading || {} : {};
         const ibpSys = ibpReading.systolic ?? ibp.sys;
         const ibpDia = ibpReading.diastolic ?? ibp.dia;
         const ibpMapValue = ibpReading.map ?? ibp.map;
@@ -951,48 +1023,63 @@
         $('sp').innerHTML = `${sp ?? '--'}<small>%</small>`;
         $('co2').innerHTML = `${co2 ?? '--'}<small>mmHg</small>`;
         $('resp').innerHTML = `${resp ?? '--'}<small>br/min</small>`;
+        $('temp').innerHTML = `${Number.isFinite(temp) ? temp.toFixed(1) : '--'}<small>°C</small>`;
         $('ibp').innerHTML = `${ibpStr}<small>mmHg</small>`;
         $('ibpMap').textContent = ibpMap;
         $('nibp').innerHTML = `${nibpStr}<small>mmHg</small>`;
 
         // vital tags
-        if (hr > 100) set($('hrTag'), 'tag t-warn', 'Fast'); else if (hr < 60) set($('hrTag'), 'tag t-warn', 'Slow'); else set($('hrTag'), 'tag t-ok', 'Normal');
-        if (sp < 90) set($('spTag'), 'tag t-bad', 'Critical'); else if (sp < 95) set($('spTag'), 'tag t-warn', 'Low'); else set($('spTag'), 'tag t-ok', 'Normal');
-        if (co2 > 50) set($('co2Tag'), 'tag t-bad', 'High'); else if (co2 < 30) set($('co2Tag'), 'tag t-warn', 'Low'); else set($('co2Tag'), 'tag t-ok', 'Normal');
+        if (!Number.isFinite(hr)) set($('hrTag'), 'tag t-warn', 'Unavailable'); else if (hr > 100) set($('hrTag'), 'tag t-warn', 'Fast'); else if (hr < 60) set($('hrTag'), 'tag t-warn', 'Slow'); else set($('hrTag'), 'tag t-ok', 'Normal');
+        if (!Number.isFinite(sp)) set($('spTag'), 'tag t-warn', 'Unavailable'); else if (sp < 90) set($('spTag'), 'tag t-bad', 'Critical'); else if (sp < 95) set($('spTag'), 'tag t-warn', 'Low'); else set($('spTag'), 'tag t-ok', 'Normal');
+        if (!Number.isFinite(co2)) set($('co2Tag'), 'tag t-warn', 'Unavailable'); else if (co2 > 50) set($('co2Tag'), 'tag t-bad', 'High'); else if (co2 < 30) set($('co2Tag'), 'tag t-warn', 'Low'); else set($('co2Tag'), 'tag t-ok', 'Normal');
         if (resp !== null && resp !== undefined) set($('respTag'), 'tag t-ok', `${resp} br/min`); else set($('respTag'), 'tag t-warn', 'Unavailable');
+        if (!Number.isFinite(temp)) set($('tempTag'), 'tag t-warn', 'Unavailable');
+        else if (sensors.Agent_Temperature?.valid === false) set($('tempTag'), 'tag t-warn', 'Check probe');
+        else set($('tempTag'), 'tag t-ok', 'Live');
 
-        const sysVal = Number(ibpSys || 0);
-        const mapVal = Number(ibpMapValue || 0);
-        if (mapVal < 65 || sysVal < 90) set($('ibpTag'), 'tag t-bad', 'Hypotensive');
+        const sysVal = Number.isFinite(ibpSys) ? ibpSys : NaN;
+        const mapVal = Number.isFinite(ibpMapValue) ? ibpMapValue : NaN;
+        if (!Number.isFinite(sysVal)) set($('ibpTag'), 'tag t-warn', 'Unavailable');
+        else if (mapVal < 65 || sysVal < 90) set($('ibpTag'), 'tag t-bad', 'Hypotensive');
         else if (sysVal > 160) set($('ibpTag'), 'tag t-warn', 'Hypertensive');
         else set($('ibpTag'), 'tag t-ok', 'Normotensive');
 
-        const nSys = Number(nibpSys || 0);
-        if (nSys < 90) set($('nibpTag'), 'tag t-warn', 'Low');
+        const nSys = Number.isFinite(nibpSys) ? nibpSys : NaN;
+        if (!Number.isFinite(nSys)) set($('nibpTag'), 'tag t-warn', 'Unavailable');
+        else if (nSys < 90) set($('nibpTag'), 'tag t-warn', 'Low');
         else if (nSys > 160) set($('nibpTag'), 'tag t-warn', 'High');
         else set($('nibpTag'), 'tag t-ok', 'Normal');
 
-        wave = b.ecg_wave || [];
+        const wave = b.ecg_wave || [];
         let v = 0; if (wave.length) { const m = wave.reduce((a, c) => a + c, 0) / wave.length; v = wave.reduce((a, c) => a + (c - m) ** 2, 0) / wave.length }
         const c = (b.chaos && b.chaos.vitals && b.chaos.vitals.ecg_condition) || (b.chaos && b.chaos.Agent_ECG && b.chaos.Agent_ECG.condition);
-        const arr = Boolean(b.arrhythmia) || c === 'arrhythmia' || v > .2, art = !arr && c === 'malicious';
+        const hasEcg = available('Agent_ECG') && wave.length > 0;
+        const art = hasEcg && c === 'malicious';
+        const arr = hasEcg && !art && (Boolean(b.arrhythmia) || c === 'arrhythmia' || v > .2);
         alarm = arr;
 
-        set($('ecgTag'), 'tag ' + (arr ? 't-bad' : art ? 't-warn' : 't-ok'), arr ? 'Arrhythmia' : art ? 'Irregular signal' : 'Normal rhythm');
+        set($('ecgTag'), 'tag ' + (arr ? 't-bad' : art || !hasEcg ? 't-warn' : 't-ok'),
+          arr ? 'Arrhythmia' : art ? 'Irregular signal' : hasEcg ? 'Normal rhythm' : 'Unavailable');
 
         let o, tagc, tagt, title, desc, col;
         if (arr) { o = ['status s-bad', 'Critical']; tagc = 't-bad'; tagt = 'Needs attention'; title = 'Arrhythmia detected'; desc = 'Abnormal ventricular rhythm on the ECG. Please assess the patient immediately.'; col = '248,113,113' }
-        else if (sp < 90) { o = ['status s-bad', 'Low oxygen']; tagc = 't-bad'; tagt = 'Needs attention'; title = 'Low blood oxygen'; desc = 'Oxygen saturation is dangerously low. Check airway and consider supplemental oxygen.'; col = '248,113,113' }
+        else if (Number.isFinite(sp) && sp < 90) { o = ['status s-bad', 'Low oxygen']; tagc = 't-bad'; tagt = 'Needs attention'; title = 'Low blood oxygen'; desc = 'Oxygen saturation is dangerously low. Check airway and consider supplemental oxygen.'; col = '248,113,113' }
         else if (mapVal < 65) { o = ['status s-bad', 'Shock risk']; tagc = 't-bad'; tagt = 'Critical'; title = 'Hypotension / Shock'; desc = `Mean arterial pressure is dangerously low (${mapVal} mmHg). Check fluids/pressors.`; col = '248,113,113' }
         else if (co2 > 52) { o = ['status s-warn', 'Hypercapnia']; tagc = 't-warn'; tagt = 'Warning'; title = 'High End-Tidal CO2'; desc = `EtCO2 is elevated (${co2} mmHg). Risk of respiratory depression/acidosis.`; col = '251,191,36' }
         else if (art) { o = ['status s-warn', 'Check leads']; tagc = 't-warn'; tagt = 'Check'; title = 'Unclear ECG signal'; desc = 'The ECG trace is erratic. Check that electrodes are attached properly.'; col = '251,191,36' }
-        else if (hr > 130 || hr < 45) { o = ['status s-warn', 'Warning']; tagc = 't-warn'; tagt = 'Warning'; title = hr > 130 ? 'Heart rate very high' : 'Heart rate very low'; desc = `Heart rate is ${hr} bpm, outside the safe range. Please assess the patient.`; col = '251,191,36' }
+        else if (Number.isFinite(hr) && (hr > 130 || hr < 45)) { o = ['status s-warn', 'Warning']; tagc = 't-warn'; tagt = 'Warning'; title = hr > 130 ? 'Heart rate very high' : 'Heart rate very low'; desc = `Heart rate is ${hr} bpm, outside the safe range. Please assess the patient.`; col = '251,191,36' }
+        else if (!hasEcg || ![hr, sp, co2, mapVal].every(Number.isFinite)) { o = ['status s-warn', 'Signal unavailable']; tagc = 't-warn'; tagt = 'Incomplete readings'; title = 'Waiting for sensor data'; desc = 'One or more signals are unavailable.'; col = '251,191,36' }
         else { o = ['status s-ok', 'Stable']; tagc = 't-ok'; tagt = 'Healthy'; title = 'Patient is healthy'; desc = 'Heart rhythm, oxygen level, EtCO2, and blood pressure are all within normal limits.'; col = '' }
         $('overall').className = o[0]; $('overall').textContent = o[1];
         set($('condTag'), 'tag ' + tagc, tagt); $('condTitle').textContent = title; $('condDesc').textContent = desc;
         const cc = $('condCard'); cc.style.background = col ? `rgba(${col},.08)` : ''; cc.style.borderColor = col ? `rgba(${col},.3)` : '';
         renderTrust(b);
-      } catch (e) { }
+      } catch {
+        // The sweep keeps advancing through a missed poll.
+      } finally {
+        clearTimeout(timeout);
+        fetching = false;
+      }
     }
 
     async function send() {
@@ -1046,7 +1133,9 @@
       if (n === 'hypotension' || n === 'hypertension') { $('tSys').value = P[3]; $('tDia').value = P[4]; }
       send();
     }
-    resize(); requestAnimationFrame(animate); setInterval(poll, 350); poll();
+    requestAnimationFrame(draw);
+    setInterval(poll, 250);
+    poll();
   </script>
 </body>
 

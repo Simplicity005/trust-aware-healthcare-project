@@ -18,6 +18,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import numpy as np
 import paho.mqtt.client as mqtt
+from patient_simulation import SAMPLE_RATE, SENSOR_AGENT_IDS, WAVEFORM_KEYS
 from trust_evaluator import AgentTrustTracker
 
 try:
@@ -30,24 +31,6 @@ CHAOS_FILE = os.path.join(BASE_DIR, "chaos.json")
 DEFAULT_MODEL = os.path.join(BASE_DIR, "ecg_anomaly.onnx")
 BEDSIDE_HTML_FILE = os.path.join(BASE_DIR, "bedside_monitor.html")
 CHAOS_LOCK = threading.Lock()
-SENSOR_AGENT_IDS = (
-    "Agent_ECG",
-    "Agent_SpO2",
-    "Agent_HR",
-    "Agent_Respiration",
-    "Agent_EtCO2",
-    "Agent_IBP",
-    "Agent_NIBP",
-)
-SENSOR_WAVE_KEYS = {
-    "Agent_ECG": "ecg_wave",
-    "Agent_SpO2": "pleth_wave",
-    "Agent_Respiration": "respiration_wave",
-    "Agent_EtCO2": "etco2_wave",
-    "Agent_IBP": "ibp_wave",
-}
-
-
 def load_bedside_html():
     """Reads bedside_monitor.html from disk so HTML/CSS edits take effect on refresh."""
     if os.path.exists(BEDSIDE_HTML_FILE):
@@ -66,6 +49,7 @@ def default_bed_chaos():
         "Agent_EtCO2": {"delay_ms": 10, "drop_rate": 0.0, "malicious": False},
         "Agent_IBP": {"delay_ms": 10, "drop_rate": 0.0, "malicious": False, "target_sys": 120, "target_dia": 80},
         "Agent_NIBP": {"delay_ms": 15, "drop_rate": 0.0, "malicious": False, "target_sys": 120, "target_dia": 80},
+        "Agent_Temperature": {"delay_ms": 10, "drop_rate": 0.0, "malicious": False},
         "Orin_Link": {"overload_gpu": False, "use_relay_b": False},
         "vitals": {
             "target_hr": 75,
@@ -175,6 +159,7 @@ def make_bedside_handler(engines_dict, meta_info):
                             "co2": eng.latest_co2,
                             "ibp": eng.latest_ibp,
                             "nibp": eng.latest_nibp,
+                            "temperature_c": eng.latest_sensors["Agent_Temperature"]["value"],
                             "respiration_rate": eng.latest_sensors["Agent_Respiration"]["value"],
                             "etco2_mmhg": eng.latest_sensors["Agent_EtCO2"]["value"],
                             "hr_valid": eng.hr_plausible,
@@ -197,6 +182,7 @@ def make_bedside_handler(engines_dict, meta_info):
                     {
                         "broker": meta_info.get("broker", "127.0.0.1:1883"),
                         "provider": meta_info.get("provider", "CUDAExecutionProvider"),
+                        "server_time": time.time(),
                         "beds": beds_payload,
                     }
                 )
@@ -519,7 +505,7 @@ class JetsonEdgeBrain:
                 return
             payload = {**payload, "agent_id": agent_id}
 
-            wave_key = SENSOR_WAVE_KEYS.get(agent_id)
+            wave_key = WAVEFORM_KEYS.get(agent_id)
             waveform = payload.get(wave_key, []) if wave_key else []
             if not isinstance(waveform, list):
                 waveform = []
@@ -545,6 +531,8 @@ class JetsonEdgeBrain:
                     "waveform": waveform,
                     "seq": payload.get("seq"),
                     "sent_ts": payload.get("sent_ts"),
+                    "waveform_end_ts": payload.get("waveform_end_ts", payload.get("sent_ts")),
+                    "sample_rate_hz": payload.get("sample_rate_hz", SAMPLE_RATE),
                     "valid": bool(tracker.validity_window and tracker.validity_window[-1] > 0),
                 }
 
@@ -698,6 +686,7 @@ class JetsonEdgeBrain:
                         "nibp": self.latest_nibp,
                         "respiration_rate": self.latest_sensors["Agent_Respiration"]["value"],
                         "etco2_mmhg": self.latest_sensors["Agent_EtCO2"]["value"],
+                        "temperature_c": self.latest_sensors["Agent_Temperature"]["value"],
                         "ecg_variance": round(self.latest_ecg_var, 4),
                     },
                     "sensors": self.get_sensor_snapshot(),

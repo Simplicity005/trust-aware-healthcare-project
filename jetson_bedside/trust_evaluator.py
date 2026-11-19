@@ -50,9 +50,11 @@ class AgentTrustTracker:
             arr = np.asarray(waveform, dtype=np.float32)
             if not np.all(np.isfinite(arr)):
                 return 0.0
-            if float(np.std(arr)) < 0.01 and not (
-                self.agent_id == "Agent_EtCO2" and 15 <= float(np.max(arr)) <= 60
-            ):
+            peak = float(np.max(arr))
+            # A one-second capnogram window can lie entirely within inspiration
+            # or the expiratory plateau.
+            flat_capnogram = self.agent_id == "Agent_EtCO2" and (peak < 0.01 or 15 <= peak <= 60)
+            if float(np.std(arr)) < 0.01 and not flat_capnogram:
                 return 0.0
             if self.agent_id == "Agent_SpO2":
                 if float(np.min(arr)) < -0.5 or float(np.max(arr)) > 1.0:
@@ -74,6 +76,8 @@ class AgentTrustTracker:
             return 1.0 if 8 <= int(value or 0) <= 35 else 0.0
         if self.agent_id == "Agent_EtCO2":
             return 1.0 if 15 <= int(value or 0) <= 60 else 0.0
+        if self.agent_id == "Agent_Temperature":
+            return 1.0 if 20 <= float(value or 0) <= 50 else 0.0
         if self.agent_id in {"Agent_IBP", "Agent_NIBP"}:
             reading = reading if isinstance(reading, dict) else {}
             try:

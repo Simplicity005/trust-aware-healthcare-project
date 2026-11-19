@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bedside sensor streamers for seven patient-monitoring channels."""
+"""Independent MQTT workers for the bedside sensors."""
 
 import os
 import time
@@ -11,9 +11,12 @@ import threading
 import numpy as np
 import paho.mqtt.client as mqtt
 
+from patient_simulation import PatientSimulation, SAMPLE_RATE, SENSOR_AGENT_IDS, WINDOW_SAMPLES, WAVEFORM_KEYS
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CHAOS_FILE = os.path.join(BASE_DIR, "chaos.json")
 CHAOS_LOCK = threading.Lock()
+PUBLISH_INTERVAL_SECONDS = 0.4
 
 
 def default_bed_chaos():
@@ -26,6 +29,7 @@ def default_bed_chaos():
         "Agent_EtCO2": {"delay_ms": 10, "drop_rate": 0.0, "malicious": False},
         "Agent_IBP": {"delay_ms": 10, "drop_rate": 0.0, "malicious": False, "target_sys": 120, "target_dia": 80},
         "Agent_NIBP": {"delay_ms": 15, "drop_rate": 0.0, "malicious": False, "target_sys": 120, "target_dia": 80},
+        "Agent_Temperature": {"delay_ms": 10, "drop_rate": 0.0, "malicious": False},
         "Orin_Link": {"overload_gpu": False, "use_relay_b": False},
         "vitals": {
             "target_hr": 75,
@@ -81,55 +85,12 @@ def update_chaos_file(new_data, patient_id=None):
         pass
 
 
-def smooth_vital(base, timestamp, phase_offset, amplitude, lower, upper):
-    variation = amplitude * (
-        0.65 * np.sin(timestamp * 0.055 + phase_offset)
-        + 0.35 * np.sin(timestamp * 0.019 + phase_offset * 1.7)
-    )
-    return int(np.clip(round(base + variation), lower, upper))
-
-
-def generate_ecg_wave(condition="normal", phase_offset=0.0, heart_rate=75, start_time=None):
-    """Generate a 250 Hz PQRST waveform whose beat spacing follows heart rate."""
-    t = np.arange(250, dtype=np.float64) / 250.0
-    if condition == "malicious":
-        wave = np.random.uniform(-2.5, 2.5, 250) + np.sin(2 * np.pi * 35 * t) * 1.5
-        return np.round(np.clip(wave, -4.0, 4.0), 4).tolist()
-
-    if condition == "arrhythmia":
-        # Ventricular Tachycardia / Acute Arrhythmia pattern (broad erratic QRS complexes)
-        c = phase_offset
-        pvc1 = 1.75 * np.exp(-((t - (0.22 + c)) ** 2) / (2 * 0.035 ** 2))
-        pvc2 = -1.50 * np.exp(-((t - (0.42 + c)) ** 2) / (2 * 0.040 ** 2))
-        pvc3 = 1.85 * np.exp(-((t - (0.62 + c)) ** 2) / (2 * 0.035 ** 2))
-        pvc4 = -1.35 * np.exp(-((t - (0.82 + c)) ** 2) / (2 * 0.040 ** 2))
-        noise = np.random.normal(0, 0.03, 250)
-        ecg = pvc1 + pvc2 + pvc3 + pvc4 + noise
-        return np.round(ecg, 4).tolist()
-
-    epoch = time.time() if start_time is None else start_time
-    phase_origin = (epoch * heart_rate / 60.0) % 1.0
-    beat_phase = (t * heart_rate / 60.0 + phase_origin + phase_offset) % 1.0
-
-    def wave(center, width, amplitude):
-        distance = (beat_phase - center + 0.5) % 1.0 - 0.5
-        return amplitude * np.exp(-(distance ** 2) / (2 * width ** 2))
-
-    p_wave = wave(0.18, 0.025, 0.15)
-    q_wave = wave(0.34, 0.010, -0.15)
-    r_wave = wave(0.37, 0.012, 1.25)
-    s_wave = wave(0.40, 0.012, -0.25)
-    t_wave = wave(0.64, 0.040, 0.30)
-    noise = np.random.normal(0, 0.02, 250)
-    ecg = p_wave + q_wave + r_wave + s_wave + t_wave + noise
-    return np.round(ecg, 4).tolist()
-
-
 class SensorAgentThread(threading.Thread):
-    def __init__(self, patient_id, agent_id, primary_broker, backup_broker, port, stop_event):
-        super().__init__(daemon=True)
+    def __init__(self, patient_id, agent_id, simulation, primary_broker, backup_broker, port, stop_event):
+        super().__init__(name=f"{patient_id}:{agent_id}", daemon=True)
         self.patient_id = patient_id
         self.agent_id = agent_id
+        self.simulation = simulation
         self.primary_broker = primary_broker
         self.backup_broker = backup_broker
         self.port = port
@@ -137,9 +98,6 @@ class SensorAgentThread(threading.Thread):
         self.seq = 0
         self.current_broker = primary_broker
         self.client = None
-        bed_hash = sum(ord(ch) for ch in patient_id) % 5
-        self.hr_offset = bed_hash * 2 - 4
-        self.phase_offset = (bed_hash - 2) * 0.01
 
     def _init_client(self):
         try:
@@ -172,177 +130,100 @@ class SensorAgentThread(threading.Thread):
                 pass
         return self._init_client()
 
+    def _packet(self, frame, config, malicious, sent_ts):
+        agent = self.agent_id
+        value = frame.readings.get(agent, 0)
+        wave = frame.waveforms.get(agent)
+        reading = {}
+
+        if agent == "Agent_ECG":
+            condition = config.get("vitals", {}).get("ecg_condition") or config.get("Agent_ECG", {}).get("condition")
+            if malicious or condition == "malicious":
+                times = frame.end_ts + np.arange(1 - WINDOW_SAMPLES, 1) / SAMPLE_RATE
+                noise = 2.1 * np.sin(2 * np.pi * 27 * times) + 1.65 * np.sin(2 * np.pi * 43 * times)
+                wave = np.round(noise, 4).tolist()
+        elif agent == "Agent_HR" and malicious:
+            value = random.choice([0, -40, 340])
+        elif agent == "Agent_SpO2" and malicious:
+            value = random.choice([0, 15, 145])
+        elif agent == "Agent_Respiration":
+            if malicious:
+                value = random.choice([0, 55])
+            reading = {"respiration_rate": value}
+        elif agent == "Agent_EtCO2":
+            if malicious:
+                value = random.choice([0, 75])
+                wave = [sample * value / frame.readings[agent] for sample in wave]
+            reading = {"etco2_mmhg": value}
+        elif agent == "Agent_Temperature":
+            if malicious:
+                value = random.choice([0, 65])
+            reading = {"temperature_c": value}
+        elif agent in {"Agent_IBP", "Agent_NIBP"}:
+            reading = value
+            if malicious:
+                reading = (
+                    {"systolic": 0, "diastolic": 0, "map": 0} if agent == "Agent_IBP"
+                    else {"systolic": 290, "diastolic": 180, "map": 217}
+                )
+            if agent == "Agent_IBP":
+                sys, dia, mean = reading["systolic"], reading["diastolic"], reading["map"]
+                value = {"sys": sys, "dia": dia, "map": mean, "formatted": f"{sys}/{dia} ({mean})"}
+                if malicious:
+                    wave = [0] * WINDOW_SAMPLES
+            else:
+                value = reading["map"]
+
+        packet = {
+            "patient_id": self.patient_id,
+            "agent_id": agent,
+            "seq": self.seq,
+            "sent_ts": sent_ts,
+            "value": value,
+            "reading": reading,
+            "ecg_wave": [],
+        }
+        if wave is not None:
+            packet[WAVEFORM_KEYS[agent]] = wave
+            packet["sample_rate_hz"] = SAMPLE_RATE
+            packet["waveform_end_ts"] = frame.end_ts
+        return packet
+
     def run(self):
         if not self._init_client():
             self._failover_broker()
 
         topic = f"hospital/{self.patient_id}/sensors/{self.agent_id}"
+        try:
+            while not self.stop_event.is_set():
+                loop_start = time.monotonic()
+                self.seq += 1
+                config = read_patient_chaos(self.patient_id)
+                settings = config.get(self.agent_id, {})
+                if self.agent_id == "Agent_EtCO2":
+                    settings = {**config.get("Agent_CO2", {}), **settings}
 
-        while not self.stop_event.is_set():
-            loop_start = time.time()
-            self.seq += 1
-
-            bed_chaos = read_patient_chaos(self.patient_id)
-            agent_chaos = bed_chaos.get(
-                self.agent_id, {"delay_ms": 10, "drop_rate": 0.0, "malicious": False}
-            )
-            if self.agent_id == "Agent_EtCO2":
-                agent_chaos = {
-                    **bed_chaos.get("Agent_CO2", {}),
-                    **agent_chaos,
-                }
-
-            drop_rate = float(agent_chaos.get("drop_rate", 0.0))
-            delay_ms = float(agent_chaos.get("delay_ms", 10.0))
-            malicious = bool(agent_chaos.get("malicious", False))
-
-            if random.random() < drop_rate:
-                time.sleep(0.4)
-                continue
-
-            sent_ts = time.time()
-
-            delay_sec = max(0.001, delay_ms / 1000.0)
-            jitter_sec = random.uniform(0.0, 0.3 * delay_sec)
-            time.sleep(delay_sec + jitter_sec)
-
-            # Check for direct bedside vitals overrides set on the Jetson
-            vitals_cfg = bed_chaos.get("vitals", {})
-            target_hr = vitals_cfg.get("target_hr") or bed_chaos.get("Agent_HR", {}).get("target_hr")
-            target_spo2 = vitals_cfg.get("target_spo2") or bed_chaos.get("Agent_SpO2", {}).get("target_spo2")
-            target_co2 = vitals_cfg.get("target_co2") or bed_chaos.get("Agent_CO2", {}).get("target_co2")
-            target_etco2 = vitals_cfg.get("target_etco2") or target_co2 or bed_chaos.get("Agent_EtCO2", {}).get("target_etco2")
-            target_sys = vitals_cfg.get("target_sys") or bed_chaos.get("Agent_IBP", {}).get("target_sys") or bed_chaos.get("Agent_NIBP", {}).get("target_sys")
-            target_dia = vitals_cfg.get("target_dia") or bed_chaos.get("Agent_IBP", {}).get("target_dia") or bed_chaos.get("Agent_NIBP", {}).get("target_dia")
-            ecg_condition = vitals_cfg.get("ecg_condition") or bed_chaos.get("Agent_ECG", {}).get("condition", "normal")
-
-            value = 0
-            ecg_wave = []
-            reading = {}
-            waveforms = {}
-            base_hr = int(target_hr) if target_hr is not None else 75 + self.hr_offset
-            heart_rate = smooth_vital(
-                base_hr, sent_ts, self.phase_offset, 2.0 if target_hr is not None else 5.0, 35, 210
-            )
-            base_respiration = float(vitals_cfg.get("target_respiration", 16))
-            respiration_rate = smooth_vital(
-                base_respiration, sent_ts, self.phase_offset + 0.7, 1.5, 8, 35
-            )
-
-            if self.agent_id == "Agent_ECG":
-                cond = "malicious" if malicious else ecg_condition
-                ecg_wave = generate_ecg_wave(
-                    condition=cond,
-                    phase_offset=self.phase_offset,
-                    heart_rate=heart_rate,
-                    start_time=sent_ts - 1.0,
-                )
-                value = 0
-            elif self.agent_id == "Agent_SpO2":
-                if malicious:
-                    value = random.choice([0, 15, 145])
-                else:
-                    base_spo2 = int(target_spo2) if target_spo2 is not None else 98
-                    value = smooth_vital(base_spo2, sent_ts, self.phase_offset + 0.3, 0.8, 70, 100)
-                t = np.linspace(0, 1, 250, endpoint=False)
-                phase = (t * heart_rate / 60.0 + (sent_ts - 1.0) * heart_rate / 60.0 + self.phase_offset) % 1.0
-                pulse = np.maximum(0.0, np.sin(2 * np.pi * phase - 0.45)) ** 3
-                waveforms["pleth_wave"] = np.round(0.72 * pulse - 0.12, 4).tolist()
-            elif self.agent_id == "Agent_HR":
-                if malicious:
-                    value = random.choice([0, -40, 340])
-                else:
-                    value = heart_rate
-            elif self.agent_id == "Agent_Respiration":
-                value = respiration_rate
-                if malicious:
-                    value = random.choice([0, 55])
-                reading = {"respiration_rate": value}
-                t = np.linspace(0, 1, 250, endpoint=False)
-                phase = (t * value / 60.0 + (sent_ts - 1.0) * value / 60.0 + self.phase_offset) % 1.0
-                waveforms["respiration_wave"] = np.round(
-                    0.7 * np.sin(2 * np.pi * phase), 4
-                ).tolist()
-            elif self.agent_id in {"Agent_EtCO2", "Agent_CO2"}:
-                target = float(target_etco2 if target_etco2 is not None else 38)
-                value = smooth_vital(target, sent_ts, self.phase_offset + 1.1, 1.5, 15, 60)
-                if malicious:
-                    value = random.choice([0, 75])
-                reading = {"etco2_mmhg": value}
-                phase = (
-                    np.linspace(0, 1, 250, endpoint=False) * respiration_rate / 60.0
-                    + (sent_ts - 1.0) * respiration_rate / 60.0
-                    + self.phase_offset
-                ) % 1.0
-                capnogram = np.select(
-                    [phase < 0.08, phase < 0.18, phase < 0.68, phase < 0.78],
-                    [phase / 0.08, 1.0, 1.0, 1.0 - (phase - 0.68) / 0.10],
-                    default=0.0,
-                )
-                waveforms["etco2_wave"] = np.round(capnogram * value, 2).tolist()
-            elif self.agent_id == "Agent_IBP":
-                systolic = smooth_vital(int(target_sys or 120), sent_ts, self.phase_offset, 3.0, 60, 220)
-                diastolic = smooth_vital(int(target_dia or 80), sent_ts, self.phase_offset + 0.8, 2.0, 30, 130)
-                if malicious:
-                    systolic, diastolic = 0, 0
-                mean = int(round((systolic + 2 * diastolic) / 3))
-                value = {
-                    "sys": systolic,
-                    "dia": diastolic,
-                    "map": mean,
-                    "formatted": f"{systolic}/{diastolic} ({mean})",
-                }
-                reading = {"systolic": systolic, "diastolic": diastolic, "map": mean}
-                phase = (
-                    np.linspace(0, 1, 250, endpoint=False) * heart_rate / 60.0
-                    + (sent_ts - 1.0) * heart_rate / 60.0
-                    + self.phase_offset
-                ) % 1.0
-                pulse = np.select(
-                    [phase < 0.12, phase < 0.35, phase < 0.62],
-                    [phase / 0.12, 1.0 - (phase - 0.12) / 0.23 * 0.45, 0.55],
-                    default=0.0,
-                )
-                waveforms["ibp_wave"] = np.round(diastolic + pulse * (systolic - diastolic), 2).tolist()
-            elif self.agent_id == "Agent_NIBP":
-                systolic = smooth_vital(int(target_sys or 120), sent_ts, self.phase_offset + 0.3, 2.0, 60, 220)
-                diastolic = smooth_vital(int(target_dia or 80), sent_ts, self.phase_offset + 1.1, 1.5, 30, 130)
-                if malicious:
-                    systolic, diastolic = 290, 180
-                value = int(round((systolic + 2 * diastolic) / 3))
-                reading = {"systolic": systolic, "diastolic": diastolic, "map": value}
-            payload = {
-                "patient_id": self.patient_id,
-                "agent_id": self.agent_id,
-                "seq": self.seq,
-                "sent_ts": sent_ts,
-                "value": value,
-                "ecg_wave": ecg_wave,
-                "reading": reading,
-                **waveforms,
-            }
-
-            for _ in range(2):
-                if self.client:
-                    try:
-                        res = self.client.publish(topic, json.dumps(payload), qos=0)
-                        if res.rc == mqtt.MQTT_ERR_SUCCESS:
-                            break
+                if random.random() >= float(settings.get("drop_rate", 0.0)):
+                    frame = self.simulation.sample(config)
+                    sent_ts = time.time()
+                    payload = self._packet(frame, config, bool(settings.get("malicious", False)), sent_ts)
+                    delay_sec = max(0.001, float(settings.get("delay_ms", 10.0)) / 1000.0)
+                    if self.stop_event.wait(delay_sec * random.uniform(1.0, 1.3)):
+                        break
+                    message = json.dumps(payload)
+                    for _ in range(2):
+                        try:
+                            if self.client and self.client.publish(topic, message, qos=0).rc == mqtt.MQTT_ERR_SUCCESS:
+                                break
+                        except (OSError, RuntimeError):
+                            pass
                         self._failover_broker()
-                    except Exception:
-                        self._failover_broker()
-                else:
-                    self._failover_broker()
 
-            elapsed = time.time() - loop_start
-            time.sleep(max(0.05, 0.40 - elapsed))
-
-        if self.client:
-            try:
-                self.client.loop_stop()
+                self.stop_event.wait(max(0.05, PUBLISH_INTERVAL_SECONDS - (time.monotonic() - loop_start)))
+        finally:
+            if self.client:
                 self.client.disconnect()
-            except Exception:
-                pass
+                self.client.loop_stop()
 
 
 def main():
@@ -371,15 +252,6 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    agent_names = [
-        "Agent_ECG",
-        "Agent_SpO2",
-        "Agent_HR",
-        "Agent_Respiration",
-        "Agent_EtCO2",
-        "Agent_IBP",
-        "Agent_NIBP",
-    ]
     threads = []
 
     print("=" * 64)
@@ -390,9 +262,10 @@ def main():
     print("=" * 64)
 
     for pid in patient_list:
-        for agent_id in agent_names:
+        simulation = PatientSimulation(pid)
+        for agent_id in SENSOR_AGENT_IDS:
             t = SensorAgentThread(
-                pid, agent_id, args.primary_broker, args.backup_broker, args.port, stop_event
+                pid, agent_id, simulation, args.primary_broker, args.backup_broker, args.port, stop_event
             )
             t.start()
             threads.append(t)
