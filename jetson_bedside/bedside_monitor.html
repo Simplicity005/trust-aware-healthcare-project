@@ -431,6 +431,162 @@
     #fb.show {
       opacity: 1
     }
+
+    body {
+      padding: 0;
+      background: #020403;
+      color: #e4e9e5;
+      font: 12px/1.2 "Arial Narrow", "Roboto Condensed", ui-monospace, Menlo, monospace;
+      min-height: 100vh;
+    }
+
+    .wrap {
+      max-width: none;
+      height: 100vh;
+      min-height: 0;
+      margin: 0;
+      display: grid;
+      grid-template-rows: 44px minmax(0, 1fr) minmax(150px, auto) auto;
+      background: #020403;
+    }
+
+    header {
+      height: 44px;
+      margin: 0;
+      padding: 0 12px;
+      background: #131816;
+      border-bottom: 1px solid #49534d;
+    }
+
+    h1 { font: 700 15px/1 ui-monospace, Menlo, monospace; color: #e8e4a0; }
+    h1 span { color: #9da69f; margin: 0 4px; }
+    .right { gap: 8px; }
+    select { border-radius: 2px; padding: 4px 8px; background: #1b221e; color: #e6e9e5; }
+    .status { border-radius: 2px; padding: 5px 8px; font: 700 10px ui-monospace, Menlo, monospace; }
+
+    .grid {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(0, 7fr) minmax(250px, 3fr);
+      grid-template-rows: repeat(7, minmax(0, 1fr));
+      gap: 0;
+      background: #020403;
+    }
+
+    .tile {
+      min-width: 0;
+      min-height: 0;
+      padding: 0;
+      display: block;
+      position: relative;
+      background: transparent;
+      border: 0;
+      border-radius: 0;
+    }
+
+    .grid > section:nth-child(1) {
+      grid-column: 1;
+      grid-row: 1 / 8;
+      display: grid;
+      grid-template-rows: repeat(5, minmax(0, 1fr));
+      border-right: 1px solid #69726d;
+    }
+
+    .grid > section:nth-child(1) > .head { display: none; }
+    .grid > section:nth-child(2) { display: none; }
+
+    .trace-row {
+      min-height: 0;
+      position: relative;
+      overflow: hidden;
+      border-bottom: 1px solid #303833;
+    }
+
+    .trace-label {
+      position: absolute;
+      z-index: 1;
+      top: 4px;
+      left: 7px;
+      color: var(--trace-color);
+      font: 700 10px ui-monospace, Menlo, monospace;
+      text-shadow: 0 1px 3px #000;
+    }
+
+    .trace-label small { margin-left: 8px; color: #828d86; font-size: 8px; font-weight: 400; }
+
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      background: #030604;
+      border: 0;
+      border-radius: 0;
+    }
+
+    .grid > section:nth-child(3) { grid-column: 2; grid-row: 1; }
+    .grid > section:nth-child(4) { grid-column: 2; grid-row: 2; }
+    .grid > section:nth-child(8) { grid-column: 2; grid-row: 3; }
+    .grid > section:nth-child(9) { grid-column: 2; grid-row: 4; }
+    .grid > section:nth-child(7) { grid-column: 2; grid-row: 5; }
+    .grid > section:nth-child(6) { grid-column: 2; grid-row: 6; }
+    .grid > section:nth-child(5) { grid-column: 2; grid-row: 7; }
+
+    .grid > section:nth-child(n+3) { border-bottom: 1px solid #303833; padding: 4px 9px; }
+    .grid > section:nth-child(n+3) .head { margin: 0; min-height: 16px; }
+    .lbl { color: #bdc7c0; font: 700 9px ui-monospace, Menlo, monospace; letter-spacing: .04em; }
+    .info { width: 12px; height: 12px; color: #87918a; border-radius: 50%; }
+    .tip { left: auto; right: -4px; max-width: calc(100vw - 16px); }
+    .tag { padding: 2px 5px; border-radius: 2px; font: 700 8px ui-monospace, Menlo, monospace; }
+    .vital-body { min-height: 0; padding: 0; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 4px; }
+    .big { margin: 0; font: 700 clamp(20px, 2.4vw, 34px)/1 ui-monospace, Menlo, monospace; letter-spacing: 0; white-space: nowrap; }
+    .big small { margin-left: 4px; color: #9ba59e; font: 10px ui-monospace, Menlo, monospace; }
+    .ref { margin: 0; color: #79847d; font: 8px ui-monospace, Menlo, monospace; }
+
+    .trust-panel {
+      padding: 5px 9px 7px;
+      border-top: 1px solid #626c65;
+      background: #090d0a;
+    }
+
+    .trust-title, .trust-row {
+      display: grid;
+      grid-template-columns: minmax(82px, 1.1fr) 58px minmax(76px, 1fr) 86px 86px 76px;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .trust-title { padding: 2px 0 4px; color: #9ca79f; font: 700 8px ui-monospace, Menlo, monospace; }
+    .trust-row { min-height: 18px; border-top: 1px solid #1e2721; color: #cbd3cd; font: 9px ui-monospace, Menlo, monospace; }
+    .trust-score { font-weight: 700; }
+    .trust-row.high { color: #63e494; }
+    .trust-row.medium { color: #f0d653; }
+    .trust-row.low { color: #ff6868; }
+    .trust-row.offline { color: #7d8580; }
+    .trust-note { color: #78827b; font: 8px ui-monospace, Menlo, monospace; }
+
+    #conditionSummary { display: none; }
+    details { margin: 0; border: 0; border-top: 1px solid #303833; border-radius: 0; background: #111613; }
+    summary { padding: 8px 12px; }
+    .sim { padding: 0 12px 12px; }
+    .box { border-radius: 2px; padding: 10px; }
+    button { border-radius: 2px; }
+
+    @media (max-width: 760px) {
+      .wrap { height: auto; min-height: 100vh; grid-template-rows: 42px auto auto auto; }
+      header { height: 42px; padding: 0 7px; }
+      h1 { font-size: 12px; }
+      .grid { display: grid; grid-template-columns: 1fr; grid-template-rows: 390px repeat(7, minmax(58px, auto)); }
+      .grid > section:nth-child(1) { grid-column: 1; grid-row: 1; border-right: 0; border-bottom: 1px solid #69726d; }
+      .grid > section:nth-child(3) { grid-column: 1; grid-row: 2; }
+      .grid > section:nth-child(4) { grid-column: 1; grid-row: 3; }
+      .grid > section:nth-child(8) { grid-column: 1; grid-row: 4; }
+      .grid > section:nth-child(9) { grid-column: 1; grid-row: 5; }
+      .grid > section:nth-child(7) { grid-column: 1; grid-row: 6; }
+      .grid > section:nth-child(6) { grid-column: 1; grid-row: 7; }
+      .grid > section:nth-child(5) { grid-column: 1; grid-row: 8; }
+      .trust-title, .trust-row { grid-template-columns: minmax(72px, 1fr) 48px minmax(60px, 1fr) 65px 72px; gap: 4px; }
+      .trust-title, .trust-row { grid-template-columns: minmax(60px, 1fr) 42px minmax(48px, .9fr) 62px 64px 56px; gap: 3px; }
+    }
   </style>
 </head>
 
@@ -453,7 +609,11 @@
           </div>
           <span class="tag t-ok" id="ecgTag">Normal rhythm</span>
         </div>
-        <canvas id="ecg" width="800" height="230"></canvas>
+        <div class="trace-row" style="--trace-color:#45e985"><span class="trace-label">ECG LEAD II <small>LIVE SIGNAL · 1 mV</small></span><canvas id="ecg" width="800" height="230"></canvas></div>
+        <div class="trace-row" style="--trace-color:#f0dc36"><span class="trace-label">SpO2 PLETH <small>LIVE MQTT · PLETH</small></span><canvas id="pleth" aria-label="SpO2 pleth waveform"></canvas></div>
+        <div class="trace-row" style="--trace-color:#35d5eb"><span class="trace-label">RESPIRATION <small>LIVE MQTT · RESPIRATION</small></span><canvas id="respWave" aria-label="Respiration waveform"></canvas></div>
+        <div class="trace-row" style="--trace-color:#f29a42"><span class="trace-label">EtCO2 CAPNOGRAPHY <small>LIVE MQTT · CAPNOGRAM</small></span><canvas id="co2Wave" aria-label="EtCO2 waveform"></canvas></div>
+        <div class="trace-row" style="--trace-color:#f17acb"><span class="trace-label">IBP ARTERIAL <small>LIVE MQTT · PRESSURE</small></span><canvas id="ibpWave" aria-label="IBP waveform"></canvas></div>
       </section>
 
       <section class="tile c4">
@@ -482,7 +642,7 @@
           <span class="tag t-ok" id="hrTag">Normal</span>
         </div>
         <div class="vital-body">
-          <div class="big" id="hr" style="color:var(--blue)">--<small>bpm</small></div>
+          <div class="big" id="hr" style="color:#45e985">--<small>bpm</small></div>
           <div class="ref">Normal 60&ndash;100 bpm</div>
         </div>
       </section>
@@ -496,7 +656,7 @@
           <span class="tag t-ok" id="spTag">Normal</span>
         </div>
         <div class="vital-body">
-          <div class="big" id="sp" style="color:var(--green)">--<small>%</small></div>
+          <div class="big" id="sp" style="color:#f0dc36">--<small>%</small></div>
           <div class="ref">Normal 95&ndash;100 %</div>
         </div>
       </section>
@@ -510,7 +670,7 @@
           <span class="tag t-ok" id="co2Tag">Normal</span>
         </div>
         <div class="vital-body">
-          <div class="big" id="co2" style="color:var(--amber)">--<small>mmHg</small></div>
+          <div class="big" id="co2" style="color:#f29a42">--<small>mmHg</small></div>
           <div class="ref">Normal 35&ndash;45 mmHg</div>
         </div>
       </section>
@@ -538,11 +698,27 @@
           <span class="tag t-ok" id="nibpTag">Normal</span>
         </div>
         <div class="vital-body">
-          <div class="big" id="nibp" style="color:#a78bfa">--<small>mmHg</small></div>
+          <div class="big" id="nibp" style="color:#e8e9df">--<small>mmHg</small></div>
           <div class="ref">Pneumatic Arm Cuff &middot; Target: 120/80 mmHg</div>
         </div>
       </section>
+
+      <section class="tile c4">
+        <div class="head"><div class="lbl">Respiration rate</div><span class="tag t-ok" id="respTag">Waiting</span></div>
+        <div class="vital-body"><div class="big" id="resp" style="color:#35d5eb">--<small>br/min</small></div><div class="ref">Respiratory sensor · breaths/min</div></div>
+      </section>
+
+      <section class="tile c4">
+        <div class="head"><div class="lbl">Temperature</div><span class="tag t-warn">Unavailable</span></div>
+        <div class="vital-body"><div class="big" style="color:#f29a42">--<small>°C</small></div><div class="ref">Temperature sensor not streamed</div></div>
+      </section>
     </main>
+
+    <section class="trust-panel" aria-label="Live sensor trust">
+      <div class="trust-title"><span>SENSOR</span><span>TRUST</span><span>SIGNAL</span><span>CONNECTION</span><span>RELIABILITY</span><span>HEALTH</span></div>
+      <div id="trustRows"></div>
+      <div class="trust-note">Trust, signal quality, connectivity and health are evaluated by the bedside edge brain.</div>
+    </section>
 
     <details>
       <summary>
@@ -583,6 +759,18 @@
               <option value="malicious">Irregular signal</option>
             </select>
           </div>
+          <div class="box">
+            <div class="row"><span>Sensor packet drop</span><b id="dropLbl">0%</b></div>
+            <input type="range" id="tDrop" min="0" max="0.9" step="0.05" value="0" oninput="send()">
+          </div>
+          <div class="box">
+            <div class="row"><span>Network delay</span><b id="delayLbl">10 ms</b></div>
+            <input type="range" id="tDelay" min="0" max="500" step="5" value="10" oninput="send()">
+          </div>
+          <div class="box">
+            <div class="row"><span>Edge processing</span></div>
+            <label><input type="checkbox" id="tOverload" onchange="send()"> Overload Jetson GPU</label>
+          </div>
         </div>
         <div class="btns">
           <button class="b-ok" onclick="preset('healthy')">Healthy</button>
@@ -597,31 +785,137 @@
   </div>
 
   <script>
-    let bed = null, wave = [], alarm = false;
+    let bed = null, wave = [], alarm = false, currentBed = {};
     const cv = document.getElementById('ecg'), cx = cv.getContext('2d');
     const $ = id => document.getElementById(id);
     const nice = b => (b || 'Bed 1').replace('_', ' ');
+    const traceBuffers = {};
+    const connectionHistory = {};
+    const traceDefs = [
+      { id: 'ecg', color: '#45e985', kind: 'ecg', agent: 'Agent_ECG' },
+      { id: 'pleth', color: '#f0dc36', kind: 'pleth', agent: 'Agent_SpO2' },
+      { id: 'respWave', color: '#35d5eb', kind: 'resp', agent: 'Agent_Respiration' },
+      { id: 'co2Wave', color: '#f29a42', kind: 'co2', agent: 'Agent_EtCO2' },
+      { id: 'ibpWave', color: '#f17acb', kind: 'ibp', agent: 'Agent_IBP' }
+    ];
     function switchBed(b) { bed = b; $('bedTitle').textContent = nice(b); poll() }
 
-    function resize() { const w = Math.floor(cv.getBoundingClientRect().width) || 800; if (w > 50) { cv.width = w; cv.height = 230 } draw() }
+    function resize() {
+      const ratio = window.devicePixelRatio || 1;
+      traceDefs.forEach(trace => {
+        const canvas = $(trace.id), rect = canvas.getBoundingClientRect();
+        const width = Math.max(1, Math.round(rect.width * ratio));
+        const height = Math.max(1, Math.round(rect.height * ratio));
+        if (canvas.width !== width || canvas.height !== height) {
+          canvas.width = width;
+          canvas.height = height;
+        }
+      });
+      draw();
+    }
     addEventListener('resize', resize);
 
-    function draw() {
-      if (!wave.length) return;
-      const w = cv.width, h = cv.height, mid = h * .56;
-      cx.fillStyle = '#0c1117'; cx.fillRect(0, 0, w, h);
-      cx.strokeStyle = 'rgba(255,255,255,.035)'; cx.lineWidth = 1;
-      for (let x = 0; x < w; x += 36) { cx.beginPath(); cx.moveTo(x, 0); cx.lineTo(x, h); cx.stroke() }
-      for (let y = 0; y < h; y += 36) { cx.beginPath(); cx.moveTo(0, y); cx.lineTo(w, y); cx.stroke() }
-      cx.strokeStyle = alarm ? '#f87171' : '#34d399'; cx.lineWidth = 2.2; cx.lineJoin = 'round';
-      cx.shadowColor = alarm ? 'rgba(248,113,113,.5)' : 'rgba(52,211,153,.45)'; cx.shadowBlur = 8;
-      cx.beginPath();
-      const st = w / (wave.length - 1);
-      wave.forEach((v, i) => { const y = mid - v * (h * .3); i ? cx.lineTo(i * st, y) : cx.moveTo(0, y) });
-      cx.stroke(); cx.shadowBlur = 0;
+    function drawGrid(ctx, width, height, ratio) {
+      ctx.fillStyle = '#030604'; ctx.fillRect(0, 0, width, height);
+      for (let x = 0; x < width; x += 20 * ratio) {
+        ctx.strokeStyle = Math.round(x / (20 * ratio)) % 5 === 0 ? '#18211b' : '#0c120e';
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, height); ctx.stroke();
+      }
+      for (let y = 0; y < height; y += 20 * ratio) {
+        ctx.strokeStyle = Math.round(y / (20 * ratio)) % 5 === 0 ? '#18211b' : '#0c120e';
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke();
+      }
     }
 
+    function sampleFor(kind, phase, index, count) {
+      const cycle = ((phase % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+      const samples = traceBuffers[`${bed}:${traceDefs.find(trace => trace.kind === kind)?.agent}`]?.samples;
+      if (!samples?.length) return 0;
+      const sample = Number(samples[Math.min(samples.length - 1, Math.floor(index / Math.max(1, count) * samples.length))]);
+      if (kind === 'co2') return sample / Math.max(1, Number(currentBed.co2 || 38)) * 0.75;
+      if (kind === 'ibp') {
+        const pressure = currentBed.ibp || {};
+        const systolic = Number(pressure.sys ?? 120);
+        const diastolic = Number(pressure.dia ?? 80);
+        return (sample - diastolic) / Math.max(1, systolic - diastolic) * 0.75 - 0.2;
+      }
+      return sample;
+    }
+
+    function appendWaveforms(bedId, state) {
+      for (const trace of traceDefs) {
+        const sensor = state.sensors?.[trace.agent];
+        if (!Array.isArray(sensor?.waveform) || sensor.waveform.length < 2) continue;
+        const key = `${bedId}:${trace.agent}`;
+        const history = traceBuffers[key] || { samples: [], seq: null, timestamp: null };
+        if (history.seq === sensor.seq) continue;
+        const timestamp = Number(sensor.sent_ts);
+        let start = 0;
+        if (Number.isFinite(timestamp) && Number.isFinite(history.timestamp) && timestamp > history.timestamp) {
+          const elapsed = timestamp - history.timestamp;
+          if (elapsed < 1) start = Math.max(0, Math.min(sensor.waveform.length, Math.round((1 - elapsed) * sensor.waveform.length)));
+          else history.samples = [];
+        }
+        history.samples.push(...sensor.waveform.slice(start).map(Number));
+        if (history.samples.length > 1250) history.samples.splice(0, history.samples.length - 1250);
+        history.seq = sensor.seq;
+        history.timestamp = Number.isFinite(timestamp) ? timestamp : history.timestamp;
+        traceBuffers[key] = history;
+      }
+    }
+
+    function draw() {
+      const now = performance.now();
+      const ratio = window.devicePixelRatio || 1;
+      traceDefs.forEach(trace => {
+        const canvas = $(trace.id), ctx = canvas.getContext('2d');
+        const width = canvas.width, height = canvas.height, mid = height * 0.56;
+        if (!width || !height) return;
+        drawGrid(ctx, width, height, ratio);
+        ctx.strokeStyle = trace.kind === 'ecg' && alarm ? '#ff5d5d' : trace.color;
+        ctx.lineWidth = 1.5 * ratio;
+        ctx.lineJoin = 'round';
+        ctx.shadowColor = ctx.strokeStyle; ctx.shadowBlur = 2 * ratio;
+        ctx.beginPath();
+        const samples = traceBuffers[`${bed}:${trace.agent}`]?.samples || [];
+        if (!samples.length) return;
+        const count = Math.ceil(width / (2 * ratio));
+        const bpm = Number(currentBed.hr || 75);
+        const period = trace.kind === 'resp' ? 3.75 : (trace.kind === 'co2' ? 3.75 : 60 / Math.max(35, bpm));
+        for (let index = 0; index < count; index++) {
+          const x = index * width / Math.max(1, count - 1);
+          const phase = (x / width * Math.PI * 8) - now / (period * 1000) * Math.PI * 2;
+          const value = sampleFor(trace.kind, phase, index, count);
+          const y = mid - value * height * (trace.kind === 'ecg' ? 0.31 : 0.36);
+          if (index === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.stroke(); ctx.shadowBlur = 0;
+      });
+    }
+
+    function animate() { draw(); requestAnimationFrame(animate) }
+
     function set(el, cls, txt) { el.className = cls; el.textContent = txt }
+
+    function renderTrust(b) {
+      const definitions = [
+        ['ECG', 'Agent_ECG'], ['SpO2', 'Agent_SpO2'], ['Heart Rate', 'Agent_HR'],
+        ['Respiration', 'Agent_Respiration'], ['EtCO2', 'Agent_EtCO2'], ['IBP', 'Agent_IBP'], ['NIBP', 'Agent_NIBP']
+      ];
+      $('trustRows').innerHTML = definitions.map(([name, agent]) => {
+        const sensor = b.sensors?.[agent] || {};
+        const link = sensor.connection_status === 'CONNECTED';
+        const score = Number(sensor.trust_score || 0);
+        const quality = Number(sensor.signal_quality || 0);
+        const reliability = sensor.reliability_level || 'DISCONNECTED';
+        const health = sensor.sensor_health || 'DISCONNECTED';
+        const previous = connectionHistory[`${bed}:${agent}`];
+        const recovered = link && previous === 'DISCONNECTED';
+        connectionHistory[`${bed}:${agent}`] = link ? 'CONNECTED' : 'DISCONNECTED';
+        const css = !link ? 'offline' : score < 45 ? 'low' : score < 70 ? 'medium' : 'high';
+        return `<div class="trust-row ${css}"><span>${name}</span><span class="trust-score">${score.toFixed(0)}%</span><span>${sensor.valid ? `${quality}% ${quality >= 70 ? 'GOOD' : quality >= 45 ? 'FAIR' : 'POOR'}` : `${quality}% INVALID`}</span><span>${recovered ? 'RECOVERED' : link ? 'CONNECTED' : 'DISCONNECTED'}</span><span>${reliability}</span><span>${health}</span></div>`;
+      }).join('');
+    }
 
     async function poll() {
       try {
@@ -633,16 +927,30 @@
         if (sel.value !== bed) sel.value = bed;
         $('bedTitle').textContent = nice(bed);
         const b = d.beds[bed]; if (!b) return;
+        currentBed = b;
+        appendWaveforms(bed, b);
 
-        const hr = b.hr, sp = b.spo2, co2 = b.co2;
+        const sensors = b.sensors || {};
+        const hr = b.hr, sp = b.spo2;
+        const resp = sensors.Agent_Respiration?.value;
+        const co2 = sensors.Agent_EtCO2?.value ?? b.co2;
         const ibp = b.ibp || {}, nibp = b.nibp || {};
-        const ibpStr = typeof ibp === 'object' ? (ibp.formatted || `${ibp.sys || 120}/${ibp.dia || 80} (${ibp.map || 93})`) : String(ibp);
-        const ibpMap = typeof ibp === 'object' ? (ibp.map || Math.round(((ibp.sys || 120) + 2 * (ibp.dia || 80)) / 3)) : '--';
-        const nibpStr = typeof nibp === 'object' ? (nibp.formatted || `${nibp.sys || 120}/${nibp.dia || 80}`) : String(nibp);
+        const ibpReading = sensors.Agent_IBP?.reading || {};
+        const nibpReading = sensors.Agent_NIBP?.reading || {};
+        const ibpSys = ibpReading.systolic ?? ibp.sys;
+        const ibpDia = ibpReading.diastolic ?? ibp.dia;
+        const ibpMapValue = ibpReading.map ?? ibp.map;
+        const nibpSys = nibpReading.systolic ?? nibp.sys;
+        const nibpDia = nibpReading.diastolic ?? nibp.dia;
+        const nibpMapValue = nibpReading.map ?? nibp.map;
+        const ibpStr = ibpSys !== undefined && ibpDia !== undefined ? `${ibpSys}/${ibpDia}` : '--/--';
+        const ibpMap = ibpMapValue ?? '--';
+        const nibpStr = nibpSys !== undefined && nibpDia !== undefined ? `${nibpSys}/${nibpDia} (${nibpMapValue ?? '--'})` : '--/--';
 
         $('hr').innerHTML = `${hr ?? '--'}<small>bpm</small>`;
         $('sp').innerHTML = `${sp ?? '--'}<small>%</small>`;
         $('co2').innerHTML = `${co2 ?? '--'}<small>mmHg</small>`;
+        $('resp').innerHTML = `${resp ?? '--'}<small>br/min</small>`;
         $('ibp').innerHTML = `${ibpStr}<small>mmHg</small>`;
         $('ibpMap').textContent = ibpMap;
         $('nibp').innerHTML = `${nibpStr}<small>mmHg</small>`;
@@ -651,14 +959,15 @@
         if (hr > 100) set($('hrTag'), 'tag t-warn', 'Fast'); else if (hr < 60) set($('hrTag'), 'tag t-warn', 'Slow'); else set($('hrTag'), 'tag t-ok', 'Normal');
         if (sp < 90) set($('spTag'), 'tag t-bad', 'Critical'); else if (sp < 95) set($('spTag'), 'tag t-warn', 'Low'); else set($('spTag'), 'tag t-ok', 'Normal');
         if (co2 > 50) set($('co2Tag'), 'tag t-bad', 'High'); else if (co2 < 30) set($('co2Tag'), 'tag t-warn', 'Low'); else set($('co2Tag'), 'tag t-ok', 'Normal');
+        if (resp !== null && resp !== undefined) set($('respTag'), 'tag t-ok', `${resp} br/min`); else set($('respTag'), 'tag t-warn', 'Unavailable');
 
-        const sysVal = typeof ibp === 'object' ? (ibp.sys || 120) : 120;
-        const mapVal = typeof ibp === 'object' ? (ibp.map || 93) : 93;
+        const sysVal = Number(ibpSys || 0);
+        const mapVal = Number(ibpMapValue || 0);
         if (mapVal < 65 || sysVal < 90) set($('ibpTag'), 'tag t-bad', 'Hypotensive');
         else if (sysVal > 160) set($('ibpTag'), 'tag t-warn', 'Hypertensive');
         else set($('ibpTag'), 'tag t-ok', 'Normotensive');
 
-        const nSys = typeof nibp === 'object' ? (nibp.sys || 120) : 120;
+        const nSys = Number(nibpSys || 0);
         if (nSys < 90) set($('nibpTag'), 'tag t-warn', 'Low');
         else if (nSys > 160) set($('nibpTag'), 'tag t-warn', 'High');
         else set($('nibpTag'), 'tag t-ok', 'Normal');
@@ -666,7 +975,7 @@
         wave = b.ecg_wave || [];
         let v = 0; if (wave.length) { const m = wave.reduce((a, c) => a + c, 0) / wave.length; v = wave.reduce((a, c) => a + (c - m) ** 2, 0) / wave.length }
         const c = (b.chaos && b.chaos.vitals && b.chaos.vitals.ecg_condition) || (b.chaos && b.chaos.Agent_ECG && b.chaos.Agent_ECG.condition);
-        const arr = c === 'arrhythmia' || v > .2, art = !arr && c === 'malicious';
+        const arr = Boolean(b.arrhythmia) || c === 'arrhythmia' || v > .2, art = !arr && c === 'malicious';
         alarm = arr;
 
         set($('ecgTag'), 'tag ' + (arr ? 't-bad' : art ? 't-warn' : 't-ok'), arr ? 'Arrhythmia' : art ? 'Irregular signal' : 'Normal rhythm');
@@ -682,18 +991,21 @@
         $('overall').className = o[0]; $('overall').textContent = o[1];
         set($('condTag'), 'tag ' + tagc, tagt); $('condTitle').textContent = title; $('condDesc').textContent = desc;
         const cc = $('condCard'); cc.style.background = col ? `rgba(${col},.08)` : ''; cc.style.borderColor = col ? `rgba(${col},.3)` : '';
-        draw();
+        renderTrust(b);
       } catch (e) { }
     }
 
     async function send() {
       const hr = +$('tHr').value, sp = +$('tSp').value, co2 = +$('tCo2').value;
       const sys = +$('tSys').value, dia = +$('tDia').value, ec = $('tEcg').value;
+      const drop = +$('tDrop').value, delay = +$('tDelay').value, overload = $('tOverload').checked;
       $('hrLbl').textContent = hr + ' bpm';
       $('spLbl').textContent = sp + ' %';
       $('co2Lbl').textContent = co2 + ' mmHg';
       $('sysLbl').textContent = sys + ' mmHg';
       $('diaLbl').textContent = dia + ' mmHg';
+      $('dropLbl').textContent = Math.round(drop * 100) + '%';
+      $('delayLbl').textContent = delay + ' ms';
       try {
         const r = await fetch('/api/manipulate', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -705,11 +1017,11 @@
             target_sys: sys,
             target_dia: dia,
             ecg_condition: ec,
-            delay_ms: 10,
-            drop_rate: 0,
+            delay_ms: delay,
+            drop_rate: drop,
             malicious: ec === 'malicious',
-            overload_gpu: false,
-            use_relay_b: false
+            overload_gpu: overload,
+            use_relay_b: overload
           })
         });
         if (r.ok) { $('fb').classList.add('show'); setTimeout(() => $('fb').classList.remove('show'), 1800) }
@@ -727,9 +1039,14 @@
       if (!P) return;
       $('tHr').value = P[0]; $('tSp').value = P[1]; $('tCo2').value = P[2];
       $('tSys').value = P[3]; $('tDia').value = P[4]; $('tEcg').value = P[5];
+      if (n === 'healthy') { $('tDrop').value = 0; $('tDelay').value = 10; $('tOverload').checked = false; }
+      if (n === 'arrhythmia') $('tDrop').value = 0;
+      if (n === 'hypoxia') $('tSp').value = P[1];
+      if (n === 'hypercapnia') $('tCo2').value = P[2];
+      if (n === 'hypotension' || n === 'hypertension') { $('tSys').value = P[3]; $('tDia').value = P[4]; }
       send();
     }
-    resize(); setInterval(poll, 350); poll();
+    resize(); requestAnimationFrame(animate); setInterval(poll, 350); poll();
   </script>
 </body>
 
