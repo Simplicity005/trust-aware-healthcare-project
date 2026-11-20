@@ -8,9 +8,13 @@ This folder runs on **each patient's bedside device** (an NVIDIA Jetson or a fri
 
 ## Step 1 — Install Requirements (First Time Only)
 
-Make sure **Python 3.8+** (with `venv`) is installed:
-- Ubuntu / Debian / Jetson: `sudo apt install python3 python3-venv`
-- macOS / Windows: install from [python.org](https://www.python.org/downloads/)
+Make sure **Python 3.8+** (with `pip` and `venv`) is installed:
+- **Ubuntu / Debian / Jetson:**
+  ```bash
+  sudo apt update && sudo apt install -y python3 python3-pip python3-venv
+  ```
+  *(If your Jetson uses Python 3.8 specifically, also install `python3.8-venv`: `sudo apt install -y python3.8-venv python3-pip`. If you previously created a `venv/` without `pip`, remove it with `rm -rf venv` before running `./setup.sh`.)*
+- **macOS / Windows:** install from [python.org](https://www.python.org/downloads/) *(on Windows, check **"Add Python to PATH"** during install)*
 
 Then open a terminal **inside `jetson_bedside/`** and run the setup script:
 

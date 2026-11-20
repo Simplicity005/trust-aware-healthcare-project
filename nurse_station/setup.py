@@ -14,16 +14,56 @@ NEXT = WEB / "node_modules" / "next" / "dist" / "bin" / "next"
 IS_WINDOWS = os.name == "nt"
 
 
+def has_pip(python):
+    return subprocess.run(
+        [str(python), "-m", "pip", "--version"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    ).returncode == 0
+
+
+def ensure_pip(python, venv_dir):
+    if has_pip(python):
+        return python
+    print("pip not found in virtual environment — attempting ensurepip...", flush=True)
+    subprocess.run(
+        [str(python), "-m", "ensurepip", "--upgrade"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    if has_pip(python):
+        return python
+    if venv_dir is not None and venv_dir.is_dir():
+        print("Recreating virtual environment cleanly...", flush=True)
+        shutil.rmtree(venv_dir, ignore_errors=True)
+        try:
+            venv.EnvBuilder(with_pip=True).create(venv_dir)
+            executable = venv_dir / ("Scripts/python.exe" if IS_WINDOWS else "bin/python")
+            if executable.is_file() and has_pip(executable):
+                return executable
+        except (OSError, subprocess.CalledProcessError):
+            pass
+    ver = f"{sys.version_info.major}.{sys.version_info.minor}"
+    print(
+        "\npip is not installed for this Python.\n"
+        "On Ubuntu / Debian, install it with:\n"
+        f"  sudo apt update && sudo apt install -y python3-pip python3-venv python{ver}-venv\n"
+        "Then delete any broken venv (`rm -rf venv`) and run ./setup.sh again.",
+        file=sys.stderr,
+    )
+    return None
+
+
 def ensure_venv():
     if sys.prefix != sys.base_prefix:
-        return Path(sys.executable)
+        return Path(sys.executable), None
     venv_dir = STATION / "venv"
     executable = venv_dir / ("Scripts/python.exe" if IS_WINDOWS else "bin/python")
     if executable.is_file():
-        return executable
+        return executable, venv_dir
     print(f"Creating virtual environment in {venv_dir}...", flush=True)
     venv.EnvBuilder(with_pip=True).create(venv_dir)
-    return executable
+    return executable, venv_dir
 
 
 def check_mosquitto():
@@ -55,7 +95,10 @@ def main():
         print(f"Node.js 20.9+ is required (found {version}).", file=sys.stderr)
         return 1
 
-    python = ensure_venv()
+    python, venv_dir = ensure_venv()
+    python = ensure_pip(python, venv_dir)
+    if python is None:
+        return 1
     pip_cmd = [str(python), "-m", "pip", "install", "--upgrade"]
 
     print("Installing Nurse Station Python packages...", flush=True)

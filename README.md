@@ -19,8 +19,8 @@ Use this to test the whole project on a single laptop. No Jetson hardware, real 
 
 ### Step 1 — Install the 3 prerequisites
 
-1. **Python 3.8+** (with `venv`)
-   - Ubuntu / Debian: `sudo apt install python3 python3-venv`
+1. **Python 3.8+** (with `pip` and `venv`)
+   - Ubuntu / Debian: `sudo apt update && sudo apt install -y python3 python3-pip python3-venv`
    - macOS / Windows: install from [python.org](https://www.python.org/downloads/)
 2. **Node.js 20.9+** (includes `npm`)
    - Install from [nodejs.org](https://nodejs.org/)

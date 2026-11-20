@@ -13,7 +13,7 @@ Under the hood, it runs two local services on the station computer:
 ## Step 1 — Install Requirements (First Time Only)
 
 Make sure these 3 tools are installed on the Nurse Station computer:
-1. **Python 3.8+** (with `venv`) — Ubuntu/Debian: `sudo apt install python3 python3-venv` · macOS/Windows: [python.org](https://www.python.org/downloads/)
+1. **Python 3.8+** (with `pip` and `venv`) — Ubuntu/Debian: `sudo apt update && sudo apt install -y python3 python3-pip python3-venv` · macOS/Windows: [python.org](https://www.python.org/downloads/)
 2. **Node.js 20.9+** (includes `npm`) — [nodejs.org](https://nodejs.org/)
 3. **Eclipse Mosquitto 2.x** *(free MQTT broker)* — Ubuntu/Debian: `sudo apt install mosquitto` · macOS: `brew install mosquitto` · Windows: [mosquitto.org/download](https://mosquitto.org/download/) *(or Docker for local-only mode)*
 
