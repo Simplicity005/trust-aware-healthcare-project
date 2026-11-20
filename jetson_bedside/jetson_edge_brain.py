@@ -184,7 +184,7 @@ def make_bedside_handler(brain, auth_ctrl):
         def _get_session_token(self):
             auth_header = self.headers.get("Authorization", "")
             if auth_header.startswith("Bearer "):
-                return auth_header.removeprefix("Bearer ").strip()
+                return auth_header[len("Bearer "):].strip()
             return None
 
         def _send_json(self, obj, code=200):

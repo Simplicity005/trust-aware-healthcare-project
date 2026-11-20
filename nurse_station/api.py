@@ -4,7 +4,11 @@ import asyncio
 from contextlib import asynccontextmanager
 import json
 import math
-from typing import Annotated
+from typing import Optional
+try:
+    from typing import Annotated
+except ImportError:
+    from typing_extensions import Annotated
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
@@ -17,13 +21,19 @@ RoomName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1,
 DEPARTMENT_CODES = {code for code, _ in HOSPITAL_DEPARTMENTS}
 
 
+async def run_in_thread(fn, *args):
+    if hasattr(asyncio, "to_thread"):
+        return await asyncio.to_thread(fn, *args)
+    return await asyncio.get_running_loop().run_in_executor(None, fn, *args)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.engine = MultiPatientTrustEngine()
     try:
         yield
     finally:
-        await asyncio.to_thread(app.state.engine.close)
+        await run_in_thread(app.state.engine.close)
 
 
 app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
@@ -35,7 +45,7 @@ class BedAction(BaseModel):
 
 class Assignment(BaseModel):
     department: str
-    room: RoomName | None = None
+    room: Optional[RoomName] = None
 
 
 class Admission(Assignment, BedAction):
@@ -112,7 +122,7 @@ def snapshot(request: Request):
 async def events(request: Request):
     async def updates():
         while not await request.is_disconnected():
-            data = await asyncio.to_thread(telemetry_json, request.app.state.engine)
+            data = await run_in_thread(telemetry_json, request.app.state.engine)
             yield f"data: {data}\n\n"
             await asyncio.sleep(0.35)
 

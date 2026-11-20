@@ -28,8 +28,8 @@ def ensure_venv():
 
 
 def main():
-    if sys.version_info < (3, 10):
-        print("Python 3.10 or newer is required.", file=sys.stderr)
+    if sys.version_info < (3, 8):
+        print("Python 3.8 or newer is required.", file=sys.stderr)
         return 1
 
     python = ensure_venv()

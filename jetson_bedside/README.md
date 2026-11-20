@@ -8,7 +8,7 @@ This folder runs on **each patient's bedside device** (an NVIDIA Jetson or a fri
 
 ## Step 1 — Install Requirements (First Time Only)
 
-Make sure **Python 3.10+** (with `venv`) is installed:
+Make sure **Python 3.8+** (with `venv`) is installed:
 - Ubuntu / Debian / Jetson: `sudo apt install python3 python3-venv`
 - macOS / Windows: install from [python.org](https://www.python.org/downloads/)
 

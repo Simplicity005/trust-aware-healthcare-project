@@ -19,7 +19,7 @@ Use this to test the whole project on a single laptop. No Jetson hardware, real 
 
 ### Step 1 — Install the 3 prerequisites
 
-1. **Python 3.10+** (with `venv`)
+1. **Python 3.8+** (with `venv`)
    - Ubuntu / Debian: `sudo apt install python3 python3-venv`
    - macOS / Windows: install from [python.org](https://www.python.org/downloads/)
 2. **Node.js 20.9+** (includes `npm`)
@@ -82,7 +82,7 @@ It uses **Eclipse Mosquitto** (running free on your laptop) + **Tailscale** (fre
 ### Step 1 — Install each folder on its own machine
 
 - **On YOUR laptop (Nurse Station):** Copy `nurse_station/` (or the whole repo), `cd nurse_station`, and run `./setup.sh` (Linux/macOS) or `.\setup.bat` (Windows).
-- **On your FRIEND'S laptop or each JETSON (Bedside):** Copy **only `jetson_bedside/`**, `cd jetson_bedside`, and run `./setup.sh` (Linux/macOS/Jetson) or `.\setup.bat` (Windows). *(Needs only Python 3.10+ — no Node.js, no Mosquitto, no Docker!)*
+- **On your FRIEND'S laptop or each JETSON (Bedside):** Copy **only `jetson_bedside/`**, `cd jetson_bedside`, and run `./setup.sh` (Linux/macOS/Jetson) or `.\setup.bat` (Windows). *(Needs only Python 3.8+ — no Node.js, no Mosquitto, no Docker!)*
 
 ### Step 2 — Connect both machines with Tailscale *(skip if on the same Wi-Fi)*
 
