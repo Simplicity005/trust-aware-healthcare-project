@@ -140,7 +140,7 @@ def chown_to_invoking_user(path):
         os.chown(path, uid, gid)
 
 
-def ensure_certificates(state_dir, openssl, host):
+def ensure_certificates(state_dir, openssl, host, extra_hosts=()):
     ca_key = state_dir / "ca.key"
     ca_cert = state_dir / "ca.pem"
     server_key = state_dir / "server.key"
@@ -186,9 +186,14 @@ def ensure_certificates(state_dir, openssl, host):
         except (OSError, ValueError):
             existing_hosts = []
 
-    need_server_cert = not server_key.is_file() or not server_cert.is_file() or host not in existing_hosts
+    required_hosts = {h for h in (host, *extra_hosts) if h}
+    need_server_cert = (
+        not server_key.is_file()
+        or not server_cert.is_file()
+        or not required_hosts.issubset(set(existing_hosts))
+    )
     if need_server_cert:
-        hosts = sorted(set(existing_hosts) | {host})
+        hosts = sorted(set(existing_hosts) | required_hosts)
         san_entries = ["IP:127.0.0.1", "DNS:localhost"]
         for entry in hosts:
             prefix = "IP" if is_ip_address(entry) else "DNS"
@@ -476,6 +481,12 @@ def main():
         "--host",
         help="Your Tailscale IP (100.x.y.z), Tailscale MagicDNS name, or Wi-Fi IP. Auto-detected if omitted.",
     )
+    parser.add_argument(
+        "--wifi", "--lan",
+        dest="wifi",
+        action="store_true",
+        help="Prefer your local Wi-Fi/LAN IP instead of Tailscale IP (for devices on the same Wi-Fi without Tailscale)",
+    )
     parser.add_argument("--port", type=int, default=8883, help="TLS MQTT port (default: 8883)")
     parser.add_argument(
         "--beds",
@@ -542,26 +553,36 @@ def main():
         )
         return 1
 
+    tailscale_ip = detect_tailscale_ip()
+    lan_ip = detect_lan_ip()
     if args.host:
         host = args.host.strip()
         source_label = "provided via --host"
+    elif args.wifi:
+        if not lan_ip:
+            print(
+                "Could not detect your local Wi-Fi/LAN IP automatically.\n"
+                "Pass your Wi-Fi IP manually: ./start_network_broker.sh --host <your-wifi-ip>",
+                file=sys.stderr,
+            )
+            return 1
+        host = lan_ip
+        source_label = "Local Wi-Fi/LAN IP (--wifi)"
+    elif tailscale_ip:
+        host = tailscale_ip
+        source_label = "Tailscale IP"
+    elif lan_ip:
+        host = lan_ip
+        source_label = "Local Wi-Fi/LAN IP (Tailscale not detected)"
     else:
-        tailscale_ip = detect_tailscale_ip()
-        if tailscale_ip:
-            host = tailscale_ip
-            source_label = "Tailscale IP"
-        else:
-            lan_ip = detect_lan_ip()
-            if lan_ip:
-                host = lan_ip
-                source_label = "Local Wi-Fi/LAN IP (Tailscale not detected)"
-            else:
-                print(
-                    "Could not detect your Tailscale or Wi-Fi IP automatically.\n"
-                    "Start Tailscale (or pass your IP manually): ./start_network_broker.sh --host 100.x.y.z",
-                    file=sys.stderr,
-                )
-                return 1
+        print(
+            "Could not detect your Tailscale or Wi-Fi IP automatically.\n"
+            "Start Tailscale (or pass your IP manually): ./start_network_broker.sh --host 100.x.y.z",
+            file=sys.stderr,
+        )
+        return 1
+
+    extra_hosts = [ip for ip in (tailscale_ip, lan_ip) if ip and ip != host]
 
     if not args.install_etc and port_listening(args.port):
         print(
@@ -576,7 +597,7 @@ def main():
     chown_to_invoking_user(state_dir)
 
     try:
-        ca_cert, server_cert, server_key = ensure_certificates(state_dir, openssl, host)
+        ca_cert, server_cert, server_key = ensure_certificates(state_dir, openssl, host, extra_hosts=extra_hosts)
         creds, conf_file, docker_conf_file, passwd_file, acl_file = ensure_credentials_and_config(
             state_dir, mosquitto_passwd, args.beds, args.port,
             ca_cert, server_cert, server_key, args.reset_credentials,

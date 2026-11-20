@@ -99,6 +99,7 @@ From inside `nurse_station/` (or the repo root), run **one command**:
   ```bash
   sudo ./start_network_broker.sh --install-etc
   ```
+  *(On the same Wi-Fi without Tailscale? Add `--wifi`: `sudo ./start_network_broker.sh --install-etc --wifi`.)*
 - **macOS / other Linux:**
   ```bash
   ./start_network_broker.sh

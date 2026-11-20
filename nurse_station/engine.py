@@ -76,9 +76,7 @@ class AgentTrustTracker:
         self.packets_missed = 0
 
     def check_data_plausibility(self, value=0, ecg_wave=None, cross_sensor_conflict=False):
-        if cross_sensor_conflict:
-            return 0.10
-
+        own_valid = 1.0
         if self.agent_id == "Agent_ECG":
             if not ecg_wave or len(ecg_wave) != 250:
                 return 0.0
@@ -86,23 +84,18 @@ class AgentTrustTracker:
             max_abs = float(np.max(np.abs(arr)))
             std_val = float(np.std(arr))
             diff_std = float(np.std(np.diff(arr)))
-            if max_abs > 2.2 or std_val > 0.65 or std_val < 0.03 or diff_std > 0.35:
+            if max_abs > 2.2 or std_val > 1.0 or std_val < 0.03 or diff_std > 0.35:
                 return 0.0
-            return 1.0
-
-        if self.agent_id == "Agent_SpO2":
+        elif self.agent_id == "Agent_SpO2":
             val = int(value or 0)
-            return 1.0 if (70 <= val <= 100) else 0.0
-
-        if self.agent_id == "Agent_HR":
+            own_valid = 1.0 if (70 <= val <= 100) else 0.0
+        elif self.agent_id == "Agent_HR":
             val = int(value or 0)
-            return 1.0 if (40 <= val <= 190) else 0.0
-
-        if self.agent_id == "Agent_CO2":
+            own_valid = 1.0 if (40 <= val <= 190) else 0.0
+        elif self.agent_id == "Agent_CO2":
             val = int(value or 0)
-            return 1.0 if (15 <= val <= 75) else 0.0
-
-        if self.agent_id in ("Agent_IBP", "Agent_NIBP"):
+            own_valid = 1.0 if (15 <= val <= 75) else 0.0
+        elif self.agent_id in ("Agent_IBP", "Agent_NIBP"):
             if isinstance(value, dict):
                 sys_v = int(value.get("sys", 120))
                 dia_v = int(value.get("dia", 80))
@@ -114,9 +107,11 @@ class AgentTrustTracker:
                     sys_v, dia_v = 120, 80
             else:
                 sys_v, dia_v = int(value or 120), 80
-            return 1.0 if (50 <= sys_v <= 250 and 25 <= dia_v <= 140 and sys_v > dia_v) else 0.0
+            own_valid = 1.0 if (50 <= sys_v <= 250 and 25 <= dia_v <= 140 and sys_v > dia_v) else 0.0
 
-        return 1.0
+        if own_valid == 0.0:
+            return 0.0
+        return 0.10 if cross_sensor_conflict else own_valid
 
     def update(
         self,
@@ -501,9 +496,25 @@ class MultiPatientTrustEngine:
 
         with self.lock:
             bed = self._get_or_create_bed(patient_id)
-            conflict = bool(bed.edge_summary.get("sensor_conflict", False))
+            conflict = bool(bed.edge_summary.get("sensor_conflict", False)) and agent_id in {"Agent_HR", "Agent_SpO2"}
             tracker = bed.agents[agent_id]
+            prev_status = tracker.status
             tracker.update(payload=payload, recv_ts=recv_ts, cross_sensor_conflict=conflict)
+            if tracker.status == "ISOLATED" and prev_status != "ISOLATED":
+                label = AGENT_LABELS.get(agent_id, agent_id)
+                ts_str = time.strftime("%H:%M:%S", time.localtime(recv_ts))
+                entry = (
+                    f"[{ts_str}] [{patient_id}] SENSOR ISOLATED: {label} quarantined "
+                    f"(trust {tracker.trust_score * 100:.0f}%) — spoofed/implausible data suppressed."
+                )
+                bed.alert_log.appendleft(entry)
+                self.global_alert_log.appendleft(entry)
+            elif tracker.status == "TRUSTED" and prev_status == "ISOLATED":
+                label = AGENT_LABELS.get(agent_id, agent_id)
+                ts_str = time.strftime("%H:%M:%S", time.localtime(recv_ts))
+                entry = f"[{ts_str}] [{patient_id}] SENSOR RESTORED: {label} returned to trusted monitoring."
+                bed.alert_log.appendleft(entry)
+                self.global_alert_log.appendleft(entry)
 
             if agent_id == "Agent_ECG":
                 ecg_wave = payload.get("ecg_wave", [])

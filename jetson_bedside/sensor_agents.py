@@ -42,8 +42,9 @@ class SensorAgentThread(threading.Thread):
             reading = {"respiration_rate": value}
         elif agent == "Agent_EtCO2":
             if malicious:
-                value = random.choice([0, 75])
-                wave = [sample * value / frame.readings[agent] for sample in wave]
+                value = random.choice([0, 95])
+                base = frame.readings[agent] or 38.0
+                wave = [round(sample * value / base, 4) for sample in wave]
             reading = {"etco2_mmhg": value}
         elif agent == "Agent_Temperature":
             if malicious:

@@ -737,7 +737,8 @@ class JetsonEdgeBrain:
             with self.lock:
                 self._track_link(agent_id, payload, now)
                 tracker = self.trust_trackers[agent_id]
-                tracker.update(payload=payload, recv_ts=now, cross_sensor_conflict=self.sensor_conflict)
+                apply_conflict = self.sensor_conflict and agent_id in {"Agent_HR", "Agent_SpO2"}
+                tracker.update(payload=payload, recv_ts=now, cross_sensor_conflict=apply_conflict)
                 self.latest_sensors[agent_id] = {
                     "value": payload.get("value"),
                     "reading": reading,
@@ -804,10 +805,19 @@ class JetsonEdgeBrain:
                 overload_gpu = bool(orin_chaos.get("overload_gpu", False)) or self.force_offload
                 use_relay_b = bool(orin_chaos.get("use_relay_b", False)) or overload_gpu
 
+                ecg_tracker = self.trust_trackers["Agent_ECG"]
+                ecg_untrusted = (
+                    ecg_tracker.status == "ISOLATED"
+                    or bool(ecg_tracker.validity_window and ecg_tracker.validity_window[-1] == 0.0)
+                )
                 anomaly_prob, inference_ms = self._run_inference(ecg_wave, overload_gpu=overload_gpu)
                 var_val = float(np.var(ecg_wave))
                 ptp_val = float(np.ptp(ecg_wave))
-                is_arrhythmia = (var_val > 0.18 or ptp_val > 2.2) and (anomaly_prob >= 0.50 or var_val > 0.25)
+                if ecg_untrusted:
+                    anomaly_prob = 0.0
+                    is_arrhythmia = False
+                else:
+                    is_arrhythmia = (var_val > 0.18 or ptp_val > 2.2) and (anomaly_prob >= 0.50 or var_val > 0.25)
 
                 with self.lock:
                     self.packets_processed += 1
@@ -845,26 +855,15 @@ class JetsonEdgeBrain:
         with self.lock:
             hr = self.latest_hr
             spo2 = self.latest_spo2
-            co2 = self.latest_co2
-            ibp = self.latest_ibp
+            hr_ok = self.hr_plausible
+            spo2_ok = self.spo2_plausible
             arrhythmia = self.last_arrhythmia
 
+        # Flag genuine cross-sensor contradictions between individually plausible readings;
+        # single-sensor out-of-range spoofing is isolated directly by that sensor's own tracker.
         conflict = False
-        if hr is not None and spo2 is not None:
-            if not arrhythmia and spo2 >= 95 and (hr <= 0 or hr >= 240):
-                conflict = True
-            if spo2 <= 30 and hr > 60 and not arrhythmia:
-                conflict = True
-        if spo2 is not None and (spo2 < 50 or spo2 > 105):
-            conflict = True
-        if hr is not None and (hr < 30 or hr > 280):
-            conflict = True
-        if co2 is not None and (co2 < 10 or co2 > 85):
-            conflict = True
-        if isinstance(ibp, dict):
-            s_v = int(ibp.get("sys", 120))
-            d_v = int(ibp.get("dia", 80))
-            if s_v <= d_v or s_v < 40 or s_v > 260:
+        if hr is not None and spo2 is not None and hr_ok and spo2_ok:
+            if not arrhythmia and spo2 <= 75 and 55 <= hr <= 80:
                 conflict = True
 
         with self.lock:

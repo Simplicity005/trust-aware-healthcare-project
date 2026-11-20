@@ -1065,16 +1065,19 @@
         drawGrid(ctx, width, height, seconds);
         const sensorInfo = latestSensors[agent];
         const isRemoved = sensorInfo?.removed || sensorInfo?.connection_status === 'REMOVED';
+        const isIso = sensorInfo?.reliability_level === 'ISOLATED';
         const buffer = traceBuffers.get(bed)?.get(agent);
         const text = isRemoved
           ? 'Sensor removed'
-          : !buffer
-            ? 'Waiting for signal'
-            : time - buffer.end / buffer.rate > 0.5
-              ? 'Signal interrupted'
-              : '';
+          : isIso
+            ? 'Sensor isolated (untrusted signal)'
+            : !buffer
+              ? 'Waiting for signal'
+              : time - buffer.end / buffer.rate > 0.5
+                ? 'Signal interrupted'
+                : '';
         if (status.textContent !== text) status.textContent = text;
-        if (isRemoved || !buffer || !Number.isFinite(time)) continue;
+        if (isRemoved || isIso || !buffer || !Number.isFinite(time)) continue;
 
         const sweptSeconds = ((time - sweepOrigin) % seconds + seconds) % seconds;
         const start = time - sweptSeconds;
@@ -1165,8 +1168,9 @@
         appendWaveforms(bed, b);
 
         const sensors = b.sensors || {};
-        const available = agent => sensors[agent]?.connection_status === 'CONNECTED' && !sensors[agent]?.removed;
         const isRemoved = agent => Boolean(sensors[agent]?.removed || sensors[agent]?.connection_status === 'REMOVED');
+        const isIsolated = agent => !isRemoved(agent) && sensors[agent]?.reliability_level === 'ISOLATED';
+        const available = agent => sensors[agent]?.connection_status === 'CONNECTED' && !isRemoved(agent) && !isIsolated(agent);
 
         const hr = available('Agent_HR') ? b.hr : null;
         const sp = available('Agent_SpO2') ? b.spo2 : null;
@@ -1183,42 +1187,47 @@
         const nibpSys = nibpReading.systolic ?? nibp.sys;
         const nibpDia = nibpReading.diastolic ?? nibp.dia;
         const nibpMapValue = nibpReading.map ?? nibp.map;
-        const ibpStr = ibpSys !== undefined && ibpDia !== undefined ? `${ibpSys}/${ibpDia}` : '--/--';
-        const ibpMap = ibpMapValue ?? '--';
-        const nibpStr = nibpSys !== undefined && nibpDia !== undefined ? `${nibpSys}/${nibpDia} (${nibpMapValue ?? '--'})` : '--/--';
+        const ibpStr = isIsolated('Agent_IBP') ? 'Isolated' : (ibpSys !== undefined && ibpDia !== undefined ? `${ibpSys}/${ibpDia}` : '--/--');
+        const ibpMap = isIsolated('Agent_IBP') ? '--' : (ibpMapValue ?? '--');
+        const nibpStr = isIsolated('Agent_NIBP') ? 'Isolated' : (nibpSys !== undefined && nibpDia !== undefined ? `${nibpSys}/${nibpDia} (${nibpMapValue ?? '--'})` : '--/--');
 
-        $('hr').innerHTML = `${hr ?? '--'}<small>bpm</small>`;
-        $('sp').innerHTML = `${sp ?? '--'}<small>%</small>`;
-        $('co2').innerHTML = `${co2 ?? '--'}<small>mmHg</small>`;
-        $('resp').innerHTML = `${resp ?? '--'}<small>br/min</small>`;
-        $('temp').innerHTML = `${Number.isFinite(temp) ? temp.toFixed(1) : '--'}<small>°C</small>`;
-        $('ibp').innerHTML = `${ibpStr}<small>mmHg</small>`;
+        $('hr').innerHTML = isIsolated('Agent_HR') ? 'Isolated' : `${hr ?? '--'}<small>bpm</small>`;
+        $('sp').innerHTML = isIsolated('Agent_SpO2') ? 'Isolated' : `${sp ?? '--'}<small>%</small>`;
+        $('co2').innerHTML = isIsolated('Agent_EtCO2') ? 'Isolated' : `${co2 ?? '--'}<small>mmHg</small>`;
+        $('resp').innerHTML = isIsolated('Agent_Respiration') ? 'Isolated' : `${resp ?? '--'}<small>br/min</small>`;
+        $('temp').innerHTML = isIsolated('Agent_Temperature') ? 'Isolated' : `${Number.isFinite(temp) ? temp.toFixed(1) : '--'}<small>°C</small>`;
+        $('ibp').innerHTML = isIsolated('Agent_IBP') ? 'Isolated' : `${ibpStr}<small>mmHg</small>`;
         $('ibpMap').textContent = ibpMap;
-        $('nibp').innerHTML = `${nibpStr}<small>mmHg</small>`;
+        $('nibp').innerHTML = isIsolated('Agent_NIBP') ? 'Isolated' : `${nibpStr}<small>mmHg</small>`;
 
         if (isRemoved('Agent_HR')) set($('hrTag'), 'tag t-bad', 'Removed');
+        else if (isIsolated('Agent_HR')) set($('hrTag'), 'tag t-bad', 'Isolated');
         else if (!Number.isFinite(hr)) set($('hrTag'), 'tag t-warn', 'Unavailable');
         else if (hr > 100) set($('hrTag'), 'tag t-warn', 'Fast');
         else if (hr < 60) set($('hrTag'), 'tag t-warn', 'Slow');
         else set($('hrTag'), 'tag t-ok', 'Normal');
 
         if (isRemoved('Agent_SpO2')) set($('spTag'), 'tag t-bad', 'Removed');
+        else if (isIsolated('Agent_SpO2')) set($('spTag'), 'tag t-bad', 'Isolated');
         else if (!Number.isFinite(sp)) set($('spTag'), 'tag t-warn', 'Unavailable');
         else if (sp < 90) set($('spTag'), 'tag t-bad', 'Critical');
         else if (sp < 95) set($('spTag'), 'tag t-warn', 'Low');
         else set($('spTag'), 'tag t-ok', 'Normal');
 
         if (isRemoved('Agent_EtCO2')) set($('co2Tag'), 'tag t-bad', 'Removed');
+        else if (isIsolated('Agent_EtCO2')) set($('co2Tag'), 'tag t-bad', 'Isolated');
         else if (!Number.isFinite(co2)) set($('co2Tag'), 'tag t-warn', 'Unavailable');
         else if (co2 > 50) set($('co2Tag'), 'tag t-bad', 'High');
         else if (co2 < 30) set($('co2Tag'), 'tag t-warn', 'Low');
         else set($('co2Tag'), 'tag t-ok', 'Normal');
 
         if (isRemoved('Agent_Respiration')) set($('respTag'), 'tag t-bad', 'Removed');
+        else if (isIsolated('Agent_Respiration')) set($('respTag'), 'tag t-bad', 'Isolated');
         else if (resp !== null && resp !== undefined) set($('respTag'), 'tag t-ok', `${resp} br/min`);
         else set($('respTag'), 'tag t-warn', 'Unavailable');
 
         if (isRemoved('Agent_Temperature')) set($('tempTag'), 'tag t-bad', 'Removed');
+        else if (isIsolated('Agent_Temperature')) set($('tempTag'), 'tag t-bad', 'Isolated');
         else if (!Number.isFinite(temp)) set($('tempTag'), 'tag t-warn', 'Unavailable');
         else if (sensors.Agent_Temperature?.valid === false) set($('tempTag'), 'tag t-warn', 'Check probe');
         else set($('tempTag'), 'tag t-ok', 'Live');
@@ -1226,6 +1235,7 @@
         const sysVal = Number.isFinite(ibpSys) ? ibpSys : NaN;
         const mapVal = Number.isFinite(ibpMapValue) ? ibpMapValue : NaN;
         if (isRemoved('Agent_IBP')) set($('ibpTag'), 'tag t-bad', 'Removed');
+        else if (isIsolated('Agent_IBP')) set($('ibpTag'), 'tag t-bad', 'Isolated');
         else if (!Number.isFinite(sysVal)) set($('ibpTag'), 'tag t-warn', 'Unavailable');
         else if (mapVal < 65 || sysVal < 90) set($('ibpTag'), 'tag t-bad', 'Hypotensive');
         else if (sysVal > 160) set($('ibpTag'), 'tag t-warn', 'Hypertensive');
@@ -1233,6 +1243,7 @@
 
         const nSys = Number.isFinite(nibpSys) ? nibpSys : NaN;
         if (isRemoved('Agent_NIBP')) set($('nibpTag'), 'tag t-bad', 'Removed');
+        else if (isIsolated('Agent_NIBP')) set($('nibpTag'), 'tag t-bad', 'Isolated');
         else if (!Number.isFinite(nSys)) set($('nibpTag'), 'tag t-warn', 'Unavailable');
         else if (nSys < 90) set($('nibpTag'), 'tag t-warn', 'Low');
         else if (nSys > 160) set($('nibpTag'), 'tag t-warn', 'High');
@@ -1242,18 +1253,20 @@
         let v = 0; if (wave.length) { const m = wave.reduce((a, c) => a + c, 0) / wave.length; v = wave.reduce((a, c) => a + (c - m) ** 2, 0) / wave.length }
         const c = (b.chaos && b.chaos.vitals && b.chaos.vitals.ecg_condition) || (b.chaos && b.chaos.Agent_ECG && b.chaos.Agent_ECG.condition);
         const hasEcg = available('Agent_ECG') && wave.length > 0;
-        const art = hasEcg && c === 'malicious';
+        const art = !isRemoved('Agent_ECG') && (isIsolated('Agent_ECG') || (hasEcg && c === 'malicious'));
         const arr = hasEcg && !art && (Boolean(b.arrhythmia) || c === 'arrhythmia' || v > .2);
         alarm = arr;
 
-        set($('ecgTag'), 'tag ' + (isRemoved('Agent_ECG') || arr ? 't-bad' : art || !hasEcg ? 't-warn' : 't-ok'),
-          isRemoved('Agent_ECG') ? 'Removed' : arr ? 'Arrhythmia' : art ? 'Irregular signal' : hasEcg ? 'Normal rhythm' : 'Unavailable');
+        set($('ecgTag'), 'tag ' + (isRemoved('Agent_ECG') || isIsolated('Agent_ECG') || arr ? 't-bad' : art || !hasEcg ? 't-warn' : 't-ok'),
+          isRemoved('Agent_ECG') ? 'Removed' : isIsolated('Agent_ECG') ? 'Isolated' : arr ? 'Arrhythmia' : art ? 'Irregular signal' : hasEcg ? 'Normal rhythm' : 'Unavailable');
 
+        const anyIsolated = Object.keys(sensors).some(isIsolated);
         let o, tagc, tagt, title, desc, col;
         if (arr) { o = ['status s-bad', 'Critical']; tagc = 't-bad'; tagt = 'Needs attention'; title = 'Arrhythmia detected'; desc = 'Abnormal ventricular rhythm on the ECG. Please assess the patient immediately.'; col = '248,113,113' }
         else if (Number.isFinite(sp) && sp < 90) { o = ['status s-bad', 'Low oxygen']; tagc = 't-bad'; tagt = 'Needs attention'; title = 'Low blood oxygen'; desc = 'Oxygen saturation is dangerously low. Check airway and consider supplemental oxygen.'; col = '248,113,113' }
         else if (mapVal < 65) { o = ['status s-bad', 'Shock risk']; tagc = 't-bad'; tagt = 'Critical'; title = 'Hypotension / Shock'; desc = `Mean arterial pressure is dangerously low (${mapVal} mmHg). Check fluids/pressors.`; col = '248,113,113' }
         else if (co2 > 52) { o = ['status s-warn', 'Hypercapnia']; tagc = 't-warn'; tagt = 'Warning'; title = 'High End-Tidal CO2'; desc = `EtCO2 is elevated (${co2} mmHg). Risk of respiratory depression/acidosis.`; col = '251,191,36' }
+        else if (anyIsolated) { o = ['status s-bad', 'Sensor isolated']; tagc = 't-bad'; tagt = 'Quarantined'; title = 'Spoofed / faulty sensor isolated'; desc = 'One or more bedside sensors sent implausible data and were quarantined to suppress false alarms.'; col = '248,113,113' }
         else if (art) { o = ['status s-warn', 'Check leads']; tagc = 't-warn'; tagt = 'Check'; title = 'Unclear ECG signal'; desc = 'The ECG trace is erratic. Check that electrodes are attached properly.'; col = '251,191,36' }
         else if (Number.isFinite(hr) && (hr > 130 || hr < 45)) { o = ['status s-warn', 'Warning']; tagc = 't-warn'; tagt = 'Warning'; title = hr > 130 ? 'Heart rate very high' : 'Heart rate very low'; desc = `Heart rate is ${hr} bpm, outside the safe range. Please assess the patient.`; col = '251,191,36' }
         else if (!hasEcg || ![hr, sp, co2, mapVal].every(Number.isFinite)) { o = ['status s-warn', 'Incomplete readings']; tagc = 't-warn'; tagt = 'Incomplete readings'; title = 'Sensor disconnected'; desc = 'One or more bedside sensors are removed or unavailable.'; col = '251,191,36' }

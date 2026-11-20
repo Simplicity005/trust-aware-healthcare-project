@@ -32,8 +32,6 @@ class AgentTrustTracker:
     def check_data_plausibility(
         self, value=0, ecg_wave=None, cross_sensor_conflict=False, reading=None, waveform=None
     ):
-        if cross_sensor_conflict:
-            return 0.10
         if self.agent_id == "Agent_ECG":
             if not ecg_wave or len(ecg_wave) != 250:
                 return 0.0
@@ -41,9 +39,9 @@ class AgentTrustTracker:
             max_abs = float(np.max(np.abs(arr)))
             std_val = float(np.std(arr))
             diff_std = float(np.std(np.diff(arr)))
-            if max_abs > 2.2 or std_val > 0.65 or std_val < 0.03 or diff_std > 0.35:
+            if max_abs > 2.2 or std_val > 1.0 or std_val < 0.03 or diff_std > 0.35:
                 return 0.0
-            return 1.0
+            return 0.10 if cross_sensor_conflict else 1.0
         if self.agent_id in {"Agent_SpO2", "Agent_Respiration", "Agent_EtCO2", "Agent_IBP"}:
             if not isinstance(waveform, list) or len(waveform) != 250:
                 return 0.0
@@ -53,7 +51,7 @@ class AgentTrustTracker:
             peak = float(np.max(arr))
             # A one-second capnogram window can lie entirely within inspiration
             # or the expiratory plateau.
-            flat_capnogram = self.agent_id == "Agent_EtCO2" and (peak < 0.01 or 15 <= peak <= 60)
+            flat_capnogram = self.agent_id == "Agent_EtCO2" and (peak < 0.01 or 15 <= peak <= 78)
             if float(np.std(arr)) < 0.01 and not flat_capnogram:
                 return 0.0
             if self.agent_id == "Agent_SpO2":
@@ -63,22 +61,23 @@ class AgentTrustTracker:
                 if float(np.max(np.abs(arr))) > 1.5:
                     return 0.0
             elif self.agent_id == "Agent_EtCO2":
-                if float(np.min(arr)) < 0 or float(np.max(arr)) > 65:
+                if float(np.min(arr)) < 0 or float(np.max(arr)) > 80:
                     return 0.0
             elif float(np.min(arr)) < 20 or float(np.max(arr)) > 250:
                 return 0.0
 
+        own_valid = 1.0
         if self.agent_id == "Agent_SpO2":
-            return 1.0 if 70 <= int(value or 0) <= 100 else 0.0
-        if self.agent_id == "Agent_HR":
-            return 1.0 if 40 <= int(value or 0) <= 190 else 0.0
-        if self.agent_id == "Agent_Respiration":
-            return 1.0 if 8 <= int(value or 0) <= 35 else 0.0
-        if self.agent_id == "Agent_EtCO2":
-            return 1.0 if 15 <= int(value or 0) <= 60 else 0.0
-        if self.agent_id == "Agent_Temperature":
-            return 1.0 if 20 <= float(value or 0) <= 50 else 0.0
-        if self.agent_id in {"Agent_IBP", "Agent_NIBP"}:
+            own_valid = 1.0 if 70 <= int(value or 0) <= 100 else 0.0
+        elif self.agent_id == "Agent_HR":
+            own_valid = 1.0 if 40 <= int(value or 0) <= 190 else 0.0
+        elif self.agent_id == "Agent_Respiration":
+            own_valid = 1.0 if 8 <= int(value or 0) <= 35 else 0.0
+        elif self.agent_id == "Agent_EtCO2":
+            own_valid = 1.0 if 15 <= int(value or 0) <= 75 else 0.0
+        elif self.agent_id == "Agent_Temperature":
+            own_valid = 1.0 if 20 <= float(value or 0) <= 50 else 0.0
+        elif self.agent_id in {"Agent_IBP", "Agent_NIBP"}:
             reading = reading if isinstance(reading, dict) else {}
             try:
                 systolic = float(reading["systolic"])
@@ -88,8 +87,11 @@ class AgentTrustTracker:
                 return 0.0
             valid_pressure = 40 <= diastolic < systolic <= 250
             valid_mean = diastolic <= mean <= systolic
-            return 1.0 if valid_pressure and valid_mean else 0.0
-        return 1.0
+            own_valid = 1.0 if valid_pressure and valid_mean else 0.0
+
+        if own_valid == 0.0:
+            return 0.0
+        return 0.10 if cross_sensor_conflict else own_valid
 
     def update(
         self,

@@ -66,6 +66,14 @@ def numeric(value, default):
 def emergency_reasons(bed):
     if not bed["online"]:
         return []
+    agents = bed.get("agents") or {}
+
+    def trusted_agent(agent_id):
+        info = agents.get(agent_id)
+        if not isinstance(info, dict):
+            return True
+        return not info.get("removed") and info.get("status") != "ISOLATED"
+
     edge = bed["edge"]
     vitals = edge.get("latest_vitals") or {}
     if not isinstance(vitals, dict):
@@ -77,19 +85,21 @@ def emergency_reasons(bed):
     sys_bp = numeric(pressure.get("sys"), 120) if isinstance(pressure, dict) else 120
     probability = numeric(edge.get("arrhythmia_prob"), 0)
     reasons = []
-    if edge.get("local_bed_alarm") or probability >= 0.70:
+    if trusted_agent("Agent_ECG") and (edge.get("local_bed_alarm") or probability >= 0.70):
         reasons.append(f"Ventricular Arrhythmia ({probability * 100:.1f}% risk)")
-    if spo2 <= 85:
+    if trusted_agent("Agent_SpO2") and spo2 <= 85:
         reasons.append(f"Critical Hypoxia (SpO₂ {spo2}%)")
-    if hr >= 160:
-        reasons.append(f"Extreme Tachycardia (HR {hr} bpm)")
-    elif hr <= 40:
-        reasons.append(f"Severe Bradycardia (HR {hr} bpm)")
-    if sys_bp <= 75:
-        reasons.append(f"Hypotensive Shock (Sys {sys_bp} mmHg)")
-    elif sys_bp >= 200:
-        reasons.append(f"Hypertensive Crisis (Sys {sys_bp} mmHg)")
-    if co2 >= 60:
+    if trusted_agent("Agent_HR"):
+        if hr >= 160:
+            reasons.append(f"Extreme Tachycardia (HR {hr} bpm)")
+        elif hr <= 40:
+            reasons.append(f"Severe Bradycardia (HR {hr} bpm)")
+    if trusted_agent("Agent_IBP"):
+        if sys_bp <= 75:
+            reasons.append(f"Hypotensive Shock (Sys {sys_bp} mmHg)")
+        elif sys_bp >= 200:
+            reasons.append(f"Hypertensive Crisis (Sys {sys_bp} mmHg)")
+    if trusted_agent("Agent_CO2") and co2 >= 60:
         reasons.append(f"Severe Hypercapnia (EtCO₂ {co2} mmHg)")
     return reasons
 
